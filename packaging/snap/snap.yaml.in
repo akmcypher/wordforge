@@ -16,5 +16,4 @@ architectures: [@ARCH@]
 apps:
   wordforge:
     command: bin/wordforge-launch
-    desktop: usr/share/applications/wordforge.desktop
     plugs: [desktop, desktop-legacy, x11, wayland, home, removable-media, opengl, cups]

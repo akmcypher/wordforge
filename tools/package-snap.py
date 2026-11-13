@@ -49,7 +49,8 @@ if ("AArch64" if arch == "arm64" else "X86-64") not in machine:
 copy(binary, "usr/bin/wordforge")
 copy(assets / "wordforge-launch", "bin/wordforge-launch")
 (stage / "bin/wordforge-launch").chmod(0o755)
-copy(assets / "wordforge.desktop", "usr/share/applications/wordforge.desktop")
+# In a packed snap the launcher lives in meta/gui/<app>.desktop; `desktop:` is snapcraft.yaml-only.
+copy(assets / "wordforge.desktop", "meta/gui/wordforge.desktop")
 copy(assets / "wordforge.svg", "meta/gui/wordforge.svg")
 triplet = run("dpkg-architecture", "-qDEB_HOST_MULTIARCH")
 plugins = Path("/usr/lib") / triplet / "qt6/plugins"
