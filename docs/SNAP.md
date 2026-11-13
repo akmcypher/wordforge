@@ -26,7 +26,7 @@ directory. Each run uses a new stage; the same version's output file is replaced
 Run it from a clean checkout after building that checkout for release evidence.
 
 The metadata is in `packaging/snap/snap.yaml.in`: core24, strict confinement,
-devel grade, no network access. It declares desktop/X11/Wayland/home/cups and
+stable grade (since 0.6.1; the version still says preview), no network access. It declares desktop/X11/Wayland/home/cups and
 optional removable-media access. The latter may require an explicit connection.
 The desktop interface provides the host fonts at /usr/share/fonts; bundled
 fallback fonts and the en_US dictionary are read from $SNAP.
@@ -114,7 +114,13 @@ packaging build both snaps and never upload. Promotion to `stable` stays manual.
 After the checks above pass, authenticate to the intended publisher account,
 register an available name, synchronize that name in metadata, rebuild and
 submit only to the edge channel. Obtain the user's approval of the concrete
-artifact and listing before public release. No stable promotion is planned.
+artifact and listing before public release.
+
+2026-11-14: the user chose to publish 0.6.1 on `latest/stable` so Wordforge appears
+in Snap Store search (only stable releases are listed), accepting that strict
+confinement has not yet been tested on a real Ubuntu desktop. Stable revisions are
+promoted by hand from edge with `snapcraft release wordforge <revision> stable`
+after the edge build is installed and launched.
 
 Canonical references: [snap pack](https://snapcraft.io/docs/reference/commands/pack/),
 [register a snap](https://ubuntu.com/docs/snapcraft/latest/how-to/publishing/register-a-snap/),

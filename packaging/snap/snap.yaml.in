@@ -19,7 +19,7 @@ description: |
   are still to come. Built with C++20, Qt 6 and Skia; open source under
   Apache-2.0. Also available for Windows.
 base: core24
-grade: devel
+grade: stable
 confinement: strict
 license: Apache-2.0
 links:
