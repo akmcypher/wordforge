@@ -1,1 +1,5 @@
-tools/*.sh text eol=lf
+# LF in every checkout, including Windows (Git for Windows defaults to CRLF).
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.docx binary

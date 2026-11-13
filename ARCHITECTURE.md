@@ -1,7 +1,7 @@
 # Wordforge architecture
 
-Wordforge is an independent C++20 desktop application in the Meridian checkout.
-It has no dependency on Meridian's JavaScript runtime or document representation.
+Wordforge is an independent C++20 desktop application. It began inside the
+private Meridian repository but never depended on Meridian's code or runtime.
 
 * `core/document`: UTF-16 paragraphs, styled runs, stable paragraph IDs, revisions,
   selection and atomic editing transactions. No Qt or Skia types.

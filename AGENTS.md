@@ -2,12 +2,16 @@
 
 Read in order: `AGENT_HANDOFF.md`, `CURRENT_STATUS.md`, `ENGINEERING_ROADMAP.md`,
 `COMPATIBILITY_MATRIX.md`, then `docs/ENGINEERING_DIRECTIVE.md` for the full scope.
-This directory is a native C++ application inside the Meridian repository;
-Meridian's web/data platform is unrelated. Limit changes to `wordforge/` and
-`.github/workflows/wordforge-native.yml` unless the task explicitly requires more.
+This is the public repository (https://github.com/akmcypher/wordforge, Apache-2.0).
+It was exported from the private Meridian repository on 2026-11-13; that copy is
+frozen. Development happens here only.
 
-- Work on `codex/wordforge-native`. Never rewrite published history or add
-  `Co-authored-by` trailers. Preserve uncommitted work; inspect status/diffs first.
+- Work on a branch and open a pull request into `main`; CI runs on every PR.
+  Never rewrite published history or add `Co-authored-by` trailers. Preserve
+  uncommitted work; inspect status/diffs first.
+- This repository is public: commit only with the GitHub no-reply address, never
+  personal emails, machine-specific secrets or private paths beyond build notes.
+  Never attach a self-hosted runner (pull requests from forks would run on it).
 - Keep C++20, Qt6 Widgets, Skia m143, HarfBuzz, FreeType and ICU. Core model and
   formats must not depend on widgets; layout must not depend on the UI.
 - The phase ledger distinguishes implemented, partial, planned and unverified.

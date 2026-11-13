@@ -9,7 +9,7 @@ Initial Windows ARM64 environment: `C:/dev/wordforge-deps/msys64`, CLANGARM64.
 Launch its shell with `MSYSTEM=CLANGARM64`, then:
 
 ```sh
-cd /c/dev/meridian/wordforge
+cd /c/dev/wordforge-public   # your clone
 cmake --preset release
 cmake --build --preset release
 ctest --preset release

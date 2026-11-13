@@ -1,6 +1,5 @@
 name: Wordforge native
 
-# Standalone-repository copy of meridian's .github/workflows/wordforge-native.yml.
 # GitHub-hosted runners are free for public repositories.
 on:
   pull_request:

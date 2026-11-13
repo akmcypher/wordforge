@@ -56,9 +56,10 @@ Read anchors.cpp, bookmarks_dialog.* and the 1B anchor plan. WFG3 is conditional
 on bookmarks; WFG1/2 remain readable. DOCX bookmark export refuses loss; import
 warns. Typed tree/resources are still next; 52/58-case counts below are historical.
 
-Updated 2026-11-12 (Asia/Calcutta). Repository:
-https://github.com/akmcypher/meridian ; branch `codex/wordforge-native`.
-Project `wordforge/` is independent from Meridian's web/data application.
+Repository: https://github.com/akmcypher/wordforge (public, `main` via pull
+requests). Until 2026-11-13 this project lived in the private Meridian repository's
+`wordforge/` folder on branch `codex/wordforge-native`; older notes below refer to
+those paths.
 
 ## User intent and authorization
 
@@ -116,7 +117,8 @@ round trip, fuzz/sanitizer campaign or production accessibility proof exists.
 
 ## Machine-specific build and runtime context
 
-Windows workspace: `C:\dev\meridian`; dependency binaries:
+Windows workspace: `C:\dev\wordforge-public` (earlier `C:\dev\meridian\wordforge`);
+dependency binaries:
 `C:\dev\wordforge-deps\msys64\clangarm64\bin`. Native Windows ARM64 output.
 
 ```powershell
@@ -134,7 +136,8 @@ and `out/` are ignored, not portable artifacts. Rebuild on another machine.
 Dedicated WSL2 distro: **WordforgeUbuntu**, Ubuntu 24.04.5 ARM64 with systemd.
 Other/default/Docker distros were not changed. Native source-built Skia m143 lives
 at `/opt/wordforge-deps/skia`, pkg-config file `/opt/wordforge-deps/pkgconfig`.
-Linux app/test build: `/root/wordforge-build`.
+Linux app/test build: `tools/local-ci-ubuntu.sh` picks a build folder per checkout.
+The quickest full check is `tools/local-ci.ps1` (see TESTING.md).
 
 ```powershell
 wsl -d WordforgeUbuntu -- bash -lc 'export PKG_CONFIG_PATH=/opt/wordforge-deps/pkgconfig; cmake -S /mnt/c/dev/meridian/wordforge -B /root/wordforge-build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build /root/wordforge-build --parallel 6 && XDG_RUNTIME_DIR=/tmp/wordforge-runtime ctest --test-dir /root/wordforge-build --output-on-failure'

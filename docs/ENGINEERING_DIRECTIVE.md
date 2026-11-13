@@ -12,9 +12,10 @@ Do not stop after producing an assessment, architecture document, roadmap, proto
 
 Your responsibility is to build the product.
 
-**Primary repository:** `https://github.com/akmcypher/meridian`
+**Primary repository:** `https://github.com/akmcypher/wordforge` (formerly the
+`wordforge/` folder of the private `akmcypher/meridian`)
 
-**Working branch:** `codex/wordforge-native`
+**Working branch:** feature branches merged into `main` by pull request
 
 **Project directory:** `wordforge/`
 

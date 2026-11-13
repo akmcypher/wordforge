@@ -1,5 +1,10 @@
 # Current status
 
+2026-11-13 — public repository. Development moved here from the private Meridian
+repository (exported at 2dd5b05 as one commit). The first hosted CI run passed both
+jobs (Ubuntu x64 build, tests and amd64 Snap artifact; Windows ARM64 tests), the
+first amd64 build of the project. The amd64 Snap has not been installed yet.
+
 2026-11-13 — appearance and Linux UI fixes (user-reported from the WSL window):
 
 * View → Theme: Match system / Light / Dark, saved in the app config folder.

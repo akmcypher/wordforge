@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Ubuntu half of tools/local-ci.ps1 (also usable on its own on any Ubuntu 24.04 machine).
 # Usage: local-ci-ubuntu.sh <log directory> [--snap]
-# Environment: WORDFORGE_BUILD_DIR (default ~/wordforge-build), WORDFORGE_DEPS_DIR,
+# Environment: WORDFORGE_BUILD_DIR (default ~/wordforge-build-<checkout hash>), WORDFORGE_DEPS_DIR,
 # PKG_CONFIG_PATH (defaults to the deps folder's pkgconfig when that exists).
 set -uo pipefail
 log_dir=${1:?log directory required}
 snap=${2:-}
 source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-build_dir=${WORDFORGE_BUILD_DIR:-"$HOME/wordforge-build"}
+# One build folder per checkout: CMake rejects a cache made from another source folder.
+build_dir=${WORDFORGE_BUILD_DIR:-"$HOME/wordforge-build-$(printf %s "$source_dir" | sha256sum | cut -c1-8)"}
 deps_dir=${WORDFORGE_DEPS_DIR:-}
 if [[ -z "$deps_dir" ]]; then
   for candidate in /opt/wordforge-deps "$HOME/.local/share/wordforge-deps"; do
