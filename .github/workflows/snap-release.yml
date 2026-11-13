@@ -64,6 +64,31 @@ jobs:
             out/packages/*.snap
             out/packages/*.sha256
           if-no-files-found: error
+      # GitHub's Ubuntu runners are full VMs with AppArmor, so this is real strict confinement
+      # (unlike WSL). Nothing is uploaded unless the installed snap passes its self-test with
+      # no AppArmor denials.
+      - name: Test the installed snap under strict confinement
+        run: |
+          confinement=$(snap debug confinement)
+          echo "snapd confinement: $confinement"
+          [ "$confinement" = strict ] || { echo "::error::runner cannot enforce strict confinement"; exit 1; }
+          sudo apt-get install -y xvfb
+          sudo snap install --dangerous out/packages/wordforge_*_${{ matrix.arch }}.snap
+          snap connections wordforge
+          since=$(date '+%Y-%m-%d %H:%M:%S')
+          report="$HOME/wordforge-self-test.txt"
+          status=0
+          timeout 180 xvfb-run -a -s "-screen 0 1280x1024x24" \
+            wordforge --self-test "$report" || status=$?
+          cat "$report" 2>/dev/null || echo "no self-test report was written"
+          denials=$(sudo journalctl -k --since "$since" --no-pager | grep 'apparmor="DENIED"' | grep wordforge || true)
+          if [ -n "$denials" ]; then
+            echo "$denials"
+            echo "::error::AppArmor denied the snap (see above)"
+            exit 1
+          fi
+          [ "$status" -eq 0 ] || { echo "::error::self-test failed with exit code $status"; exit 1; }
+          echo "strict confinement test passed"
       - name: Release to the edge channel
         if: github.event_name != 'pull_request'
         env:
