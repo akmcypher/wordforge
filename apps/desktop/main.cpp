@@ -1,4 +1,5 @@
 #include "apps/desktop/main_window.hpp"
+#include "apps/desktop/self_test.hpp"
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QMessageBox>
@@ -33,7 +34,7 @@ int main(int argc, char **argv) {
     QApplication application(argc, argv);
     QApplication::setApplicationName("Wordforge");
     QApplication::setOrganizationName("Wordforge");
-    QApplication::setApplicationVersion("0.6.0");
+    QApplication::setApplicationVersion(WORDFORGE_VERSION);
     QApplication::setStyle("Fusion");
 #ifdef _WIN32
     QApplication::setFont(QFont("Segoe UI", 10));
@@ -45,8 +46,11 @@ int main(int argc, char **argv) {
     parser.addPositionalArgument("document", "Wordforge, DOCX or UTF-8 text document to open");
     parser.addOption({"sample", "Open the editable sample document"});
     parser.addOption({"snapshot", "Capture the native window and exit", "png"});
+    parser.addOption({"self-test", "Check this installation, write a report and exit", "report"});
     parser.process(application);
     try {
+        if (parser.isSet("self-test"))
+            return wf::runSelfTest(parser.value("self-test"));
         wf::MainWindow window;
         if (!parser.positionalArguments().isEmpty())
             window.openFile(parser.positionalArguments().first());

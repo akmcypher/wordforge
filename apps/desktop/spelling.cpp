@@ -85,6 +85,8 @@ bool SpellChecker::load(const QString &requested, const QStringList &paths) {
         const auto aff = path + "/" + chosen + ".aff", dic = path + "/" + chosen + ".dic";
         if (!QFileInfo::exists(aff) || !QFileInfo::exists(dic))
             continue;
+        // Hunspell opens files through narrow paths. On Windows that is the process code page,
+        // which packaging/windows/wordforge.manifest sets to UTF-8 so any folder name works.
         auto engine = std::make_unique<Hunspell>(QFile::encodeName(aff).constData(),
                                                  QFile::encodeName(dic).constData());
         const auto encoding = QString::fromStdString(engine->get_dict_encoding());

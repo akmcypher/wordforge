@@ -1,0 +1,115 @@
+name: Windows release
+
+# Builds the portable Windows packages (x64 and ARM64), runs the test suite, then checks each
+# package with tools/test-windows-package.ps1: unzipped into a Unicode folder with no MSYS2 or
+# other development folders on PATH. A pushed v* tag publishes both ZIPs and their checksums
+# as a versioned GitHub release; pull requests touching Windows packaging only build and test.
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - '.github/workflows/windows-release.yml'
+      - 'packaging/windows/**'
+      - 'tools/package-windows.py'
+      - 'tools/test-windows-package.ps1'
+      - 'apps/desktop/self_test.*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-2025
+            msystem: CLANG64
+            pkg: mingw-w64-clang-x86_64
+          - arch: arm64
+            runner: windows-11-arm
+            msystem: CLANGARM64
+            pkg: mingw-w64-clang-aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            ${{ matrix.pkg }}-clang
+            ${{ matrix.pkg }}-llvm-tools
+            ${{ matrix.pkg }}-cmake
+            ${{ matrix.pkg }}-ninja
+            ${{ matrix.pkg }}-pkgconf
+            ${{ matrix.pkg }}-python
+            ${{ matrix.pkg }}-qt6-base
+            ${{ matrix.pkg }}-skia
+            ${{ matrix.pkg }}-harfbuzz
+            ${{ matrix.pkg }}-freetype
+            ${{ matrix.pkg }}-icu
+            ${{ matrix.pkg }}-gtest
+            ${{ matrix.pkg }}-pugixml
+            ${{ matrix.pkg }}-libzip
+            ${{ matrix.pkg }}-hunspell
+            ${{ matrix.pkg }}-hunspell-en
+      - name: Build
+        shell: msys2 {0}
+        run: |
+          cmake -S . -B build/package -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=clang++ -DWORDFORGE_BUILD_ID="${GITHUB_SHA::12}"
+          cmake --build build/package
+      - name: Test
+        shell: msys2 {0}
+        run: ctest --test-dir build/package --output-on-failure
+      - name: Package
+        shell: msys2 {0}
+        run: |
+          python tools/package-windows.py --build-dir build/package \
+            --prefix "$(cygpath -m "$MINGW_PREFIX")" --output-dir out --arch ${{ matrix.arch }} \
+            --build-id "${GITHUB_SHA::12}"
+      - name: Test the package outside the build environment
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem out\Wordforge-*-windows-${{ matrix.arch }}.zip | Select-Object -First 1
+          & tools\test-windows-package.ps1 -Package $zip.FullName
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: wordforge-windows-${{ matrix.arch }}
+          path: |
+            out/*.zip
+            out/*.sha256
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          notes="docs/releases/${TAG}.md"
+          [ -f "$notes" ] || { echo "missing $notes"; exit 1; }
+          cat dist/*.sha256 > dist/SHA256SUMS.txt
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "Wordforge ${TAG#v} developer preview" --notes-file "$notes" \
+            dist/*.zip dist/SHA256SUMS.txt

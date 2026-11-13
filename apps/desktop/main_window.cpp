@@ -533,7 +533,7 @@ void MainWindow::buildUi() {
             "Developer preview: paragraph styles, lists, tables, pictures, bookmarks, spell "
             "check, printing, find/replace, native files and PDF export, with partial DOCX "
             "import/export. Headers and footers, comments, tracked changes and advanced "
-            "layout are not implemented yet.");
+            "layout are not implemented yet.\n\nBuild " WORDFORGE_BUILD_ID);
     });
     for (auto *menu : {file, edit, insert, format, tools, viewMenu, help})
         menuBar()->addMenu(menu);

@@ -1,6 +1,6 @@
 # Wordforge
 
-A fast, native word processor for Linux, written in C++20 with Qt6, Skia,
+A fast, native word processor for Linux and Windows, written in C++20 with Qt6, Skia,
 HarfBuzz, FreeType and ICU. No browser engine, no HTML editor, no LibreOffice
 underneath: the document model, page layout and rendering are its own.
 
@@ -60,7 +60,16 @@ sudo snap install wordforge --edge
 
 [snapcraft.io/wordforge](https://snapcraft.io/wordforge). Edge builds can change
 often and may have rough edges; please [report problems](https://github.com/akmcypher/wordforge/issues).
-To build from source, see [BUILD.md](BUILD.md) and [docs/UBUNTU.md](docs/UBUNTU.md).
+
+On Windows 10 (version 1903 or later) and Windows 11, download the portable ZIP for
+your PC from the **[latest release](https://github.com/akmcypher/wordforge/releases/latest)**:
+`windows-x64` for most PCs, `windows-arm64` for Arm laptops such as Snapdragon. Unzip
+it anywhere and run `Wordforge.exe`; nothing else needs installing. The builds are
+not code-signed yet, so Windows SmartScreen may ask you to confirm the first launch
+(More info → Run anyway). `SHA256SUMS.txt` in the release lists the checksums.
+
+To build from source, see [BUILD.md](BUILD.md), [docs/UBUNTU.md](docs/UBUNTU.md) and
+[docs/WINDOWS.md](docs/WINDOWS.md).
 
 ## Contributing
 

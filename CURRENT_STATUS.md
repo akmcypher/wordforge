@@ -1,5 +1,18 @@
 # Current status
 
+2026-11-13 — Windows portable packages (docs/WINDOWS.md). `tools/package-windows.py`
+builds `Wordforge-<version>-windows-<x64|arm64>.zip` with Qt plugins, every
+MSYS2 DLL found by walking PE imports (packaging fails on any unresolved import),
+English dictionaries, licences and build info. `Wordforge.exe --self-test` (also the
+CTest `self_test`) checks plugins, fonts, spelling, WFG/DOCX round trips through a
+Unicode folder, PDF export and printing. The package test found that spell check
+failed from a non-ANSI folder; the exe's manifest now sets the UTF-8 code page
+(regression test `spellCheckLoadsDictionaryFromUnicodeFolder`). ARM64 package
+passes the package test on the developer's Windows 11 ARM64 machine with MSYS2 off
+`PATH`; not yet tried on a fresh Windows install. Tagging `v*` publishes both ZIPs
+as a GitHub release (`.github/workflows/windows-release.yml`). Merges to main now
+also release snaps to edge (`.github/workflows/snap-release.yml`).
+
 2026-11-13 — on the Snap Store edge channel: `sudo snap install wordforge --edge`
 (amd64 revision 3, arm64 revision 2). See docs/SNAP.md → Publication record.
 A real-desktop strict-confinement test (live USB) is still pending.

@@ -892,6 +892,19 @@ class DesktopTest : public QObject {
         // Leave the shared checker as other tests expect: no personal file in a temp dir.
         checker.setPersonalDictionary({});
     }
+    void spellCheckLoadsDictionaryFromUnicodeFolder() {
+        // Users unpack the portable build anywhere; Hunspell must open it from such a folder.
+        const auto fixtures = QFileInfo(QStringLiteral(__FILE__)).absolutePath() + "/../fixtures/spelling";
+        QTemporaryDir directory;
+        const auto folder = directory.filePath(QString::fromUtf8("словари ✓ 辞書"));
+        QVERIFY(QDir().mkpath(folder));
+        for (const auto *extension : {".aff", ".dic"})
+            QVERIFY(QFile::copy(fixtures + "/en_TEST" + extension, folder + "/en_TEST" + extension));
+        wf::SpellChecker checker;
+        QVERIFY(checker.load("en_TEST", {folder}));
+        QVERIFY(checker.isCorrect("quick"));
+        QVERIFY(!checker.isCorrect("quikc"));
+    }
     void themeChoiceIsAppliedRememberedAndDisabledControlsLookDisabled() {
         // Test mode keeps the settings file out of the user's real config folder.
         {
