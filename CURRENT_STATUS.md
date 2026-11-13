@@ -51,8 +51,6 @@ first amd64 build of the project. The amd64 Snap has not been installed yet.
   Evidence: docs/evidence/2026-11-13-*-release-features-tests.txt. The arm64 Snap
   repacked with Hunspell, en_US dictionary and the print plugin, installs and runs
   on WSL (partial confinement).
-* Commit trailers: three earlier commits today (6ba45f8, b3b7f1f, 7891f94) carry a
-  Co-Authored-By trailer contrary to AGENTS.md; pushed history is not rewritten.
 
 2026-11-13 — all installed fonts:
 
