@@ -104,6 +104,42 @@ if unresolved:
         print(f"unresolved import {dll} (needed by {', '.join(sorted(users))})", file=sys.stderr)
     sys.exit("package is incomplete")
 
+
+def unguarded_vector_code(binary: Path) -> tuple[int, list[str]]:
+    """Functions using AVX2 (ymm) or AVX-512 (zmm, mask) registers outside Skia's CPU-checked
+    namespaces, and the number of named functions seen (0 means the binary has no symbols)."""
+    process = subprocess.Popen([objdump, "-d", "-C", "--no-show-raw-insn", str(binary)],
+                               stdout=subprocess.PIPE, text=True, errors="replace")
+    label = re.compile(r"^[0-9a-f]+ <(.*)>:$")
+    vector = re.compile(r"%(ymm|zmm)\d+|%k[1-7]\b")
+    allowed = re.compile(r"(^|[^A-Za-z_])(avx|hsw|skx)::")
+    functions, current, offenders = 0, "", set()
+    for line in process.stdout:
+        match = label.match(line)
+        if match:
+            current, functions = match.group(1), functions + 1
+        elif current not in offenders and vector.search(line) and not allowed.search(current):
+            offenders.add(current)
+    process.wait()
+    return functions, sorted(offenders)
+
+
+# Skia's per-CPU files once leaked AVX-512 into shared code (tools/build-skia-msys2.sh): an
+# x64 package must run on every x86-64 CPU, so check the rebuilt DLL, which keeps symbols.
+if args.arch == "x64":
+    skia = stage / "libskia.dll"
+    functions, offenders = unguarded_vector_code(skia)
+    if functions < 1000:
+        sys.exit(f"{skia.name} has no symbols; install the rebuilt Skia from tools/build-skia-msys2.sh")
+    if offenders:
+        print("\n".join(f"unguarded AVX2/AVX-512 code: {name}" for name in offenders[:40]), file=sys.stderr)
+        sys.exit(f"{skia.name} would crash on CPUs without AVX2/AVX-512 ({len(offenders)} functions)")
+    strip = shutil.which("llvm-strip", path=str(bin_dir)) or shutil.which("strip", path=str(bin_dir))
+    if strip is None:
+        sys.exit("llvm-strip not found in the MSYS2 prefix")
+    subprocess.run([strip, "--strip-unneeded", str(skia)], check=True)
+    print(f"{skia.name}: {functions} functions, no unguarded AVX2/AVX-512 code")
+
 # Plugins windeployqt copied also come from the prefix; record them for licence lookup.
 plugin_root = prefix / "share/qt6/plugins"
 for plugin in stage.rglob("*.dll"):
@@ -178,7 +214,8 @@ with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as bun
         if file.is_file():
             bundle.write(file, Path(name) / file.relative_to(stage))
 digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-(archive.parent / f"{archive.name}.sha256").write_text(f"{digest}  {archive.name}\n")
+# LF endings so `sha256sum -c` also works on Linux and macOS.
+(archive.parent / f"{archive.name}.sha256").write_text(f"{digest}  {archive.name}\n", newline="\n")
 size = sum(f.stat().st_size for f in stage.rglob("*") if f.is_file())
 print(f"built: {archive}\nSHA256: {digest}\nfiles: {sum(1 for f in stage.rglob('*') if f.is_file())}, "
       f"unpacked {size / 1e6:.1f} MB, zip {archive.stat().st_size / 1e6:.1f} MB")

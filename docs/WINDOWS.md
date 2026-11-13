@@ -5,6 +5,29 @@ Clang toolchain (`CLANG64` for x64, `CLANGARM64` for ARM64) against the same Qt 
 Skia m143, HarfBuzz, FreeType, ICU, pugixml, libzip and Hunspell versions that
 MSYS2 ships.
 
+## x64 Skia is rebuilt
+
+MSYS2's x64 `libskia.dll` (143.r77119.da51f0d6-5) runs AVX-512 instructions in
+ordinary code, so it crashes with `0xC000001D` (illegal instruction) on CPUs
+without AVX-512: most consumer Intel CPUs since 12th generation, AMD before Zen 4,
+and x64 emulation on Windows on Arm. Skia compiles `SkOpts_hsw.cpp` and
+`SkOpts_skx.cpp` with `-march=haswell` / `-march=skylake-avx512`; inline functions
+from the headers they include (for example `SkIRect` intersection) were emitted
+with AVX-512 there, and the linker kept those copies for every caller. GitHub's
+x64 runners have AVX-512, so the first v0.6.0 x64 ZIP passed CI and then crashed
+under emulation on Windows 11 ARM64. It was withdrawn from the release.
+
+`tools/build-skia-msys2.sh` rebuilds MSYS2's own recipe (pinned commit, same Skia
+commit) with those two files compiled for baseline x86-64, as package
+`143.r77119.da51f0d6-5.1`. Skia still checks the CPU at run time and then installs
+ordinary SSE code, so raster drawing loses the AVX2 fast paths on newer CPUs. The
+rebuild keeps symbols: `tools/package-windows.py` disassembles `libskia.dll` and
+refuses an x64 package if any function outside Skia's CPU-checked `avx::`,
+`hsw::` and `skx::` namespaces uses AVX2 or AVX-512 registers, then strips it.
+The release workflow caches the rebuilt package. The Linux snap builds Skia
+itself, and its amd64 binary has AVX code only in `avx::` functions. ARM64 is not
+affected.
+
 ## Building a package
 
 From an MSYS2 shell of the matching environment, with the packages listed in
@@ -43,7 +66,7 @@ code page needs Windows 10 version 1903 or later.
 ## Checking a package
 
 ```powershell
-tools\test-windows-package.ps1 -Package out\Wordforge-0.6.0-windows-x64.zip
+tools\test-windows-package.ps1 -Package out\Wordforge-0.6.1-windows-x64.zip
 ```
 
 It verifies the checksum, unpacks into a temporary folder with a Cyrillic name,

@@ -1,5 +1,12 @@
 # Current status
 
+2026-11-13 — v0.6.0 released (ARM64 ZIP verified from the release on Windows 11
+ARM64). Its x64 ZIP crashed with 0xC000001D on CPUs without AVX-512 (found under
+x64 emulation): MSYS2's libskia.dll leaks AVX-512 from Skia's per-CPU files into
+shared inline code. The ZIP was withdrawn; 0.6.1 ships Skia rebuilt by
+`tools/build-skia-msys2.sh`, and packaging rejects unguarded AVX2/AVX-512 in it
+(docs/WINDOWS.md → x64 Skia is rebuilt).
+
 2026-11-13 — Windows portable packages (docs/WINDOWS.md). `tools/package-windows.py`
 builds `Wordforge-<version>-windows-<x64|arm64>.zip` with Qt plugins, every
 MSYS2 DLL found by walking PE imports (packaging fails on any unresolved import),

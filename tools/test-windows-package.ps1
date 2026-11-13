@@ -1,7 +1,7 @@
 # Checks a portable Windows package the way a user's machine would see it: unzips it into a
 # folder whose name needs Unicode file APIs, removes every development folder from PATH and
 # every Qt override from the environment, then runs Wordforge.exe --self-test.
-# Usage: tools\test-windows-package.ps1 -Package out\Wordforge-0.6.0-windows-x64.zip
+# Usage: tools\test-windows-package.ps1 -Package out\Wordforge-0.6.1-windows-x64.zip
 param([Parameter(Mandatory)][string]$Package)
 $ErrorActionPreference = 'Stop'
 $zip = (Resolve-Path -LiteralPath $Package).Path
