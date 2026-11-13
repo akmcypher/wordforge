@@ -90,6 +90,15 @@ The unsigned local package is useful for further installation testing. It is
 not proof of Store acceptance or production readiness. Full DOCX/ODT interoperability,
 tables/images, broader desktop testing and recovery across upgrades remain open.
 
+## Publication record
+
+* 2026-11-13: name `wordforge` registered. First upload (revision 1) was rejected
+  by the Store: `desktop` is not allowed in a packed snap's `meta/snap.yaml`; the
+  launcher now ships as `meta/gui/wordforge.desktop` (d344e7e). Released to
+  `latest/edge`: arm64 revision 2 (local build of d344e7e) and amd64 revision 3
+  (CI artifact of PR #1's merge ref). Strict confinement on a real Ubuntu desktop
+  is still untested.
+
 ## Publication gate
 
 After the checks above pass, authenticate to the intended publisher account,

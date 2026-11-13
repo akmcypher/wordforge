@@ -51,9 +51,16 @@ than lose them.
 
 ## Install
 
-Wordforge is not on the Snap Store yet. To try it, build from source
-([BUILD.md](BUILD.md), and [docs/UBUNTU.md](docs/UBUNTU.md) for Ubuntu 24.04)
-or build an unsigned local snap with [docs/SNAP.md](docs/SNAP.md).
+On Ubuntu (amd64 or arm64), install the developer preview from the Snap Store's
+edge channel:
+
+```sh
+sudo snap install wordforge --edge
+```
+
+[snapcraft.io/wordforge](https://snapcraft.io/wordforge). Edge builds can change
+often and may have rough edges; please [report problems](https://github.com/akmcypher/wordforge/issues).
+To build from source, see [BUILD.md](BUILD.md) and [docs/UBUNTU.md](docs/UBUNTU.md).
 
 ## Contributing
 

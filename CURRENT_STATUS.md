@@ -1,5 +1,9 @@
 # Current status
 
+2026-11-13 — on the Snap Store edge channel: `sudo snap install wordforge --edge`
+(amd64 revision 3, arm64 revision 2). See docs/SNAP.md → Publication record.
+A real-desktop strict-confinement test (live USB) is still pending.
+
 2026-11-13 — public repository. Development moved here from the private Meridian
 repository (exported at 2dd5b05 as one commit). The first hosted CI run passed both
 jobs (Ubuntu x64 build, tests and amd64 Snap artifact; Windows ARM64 tests), the
