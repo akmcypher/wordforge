@@ -1,17 +1,36 @@
 name: wordforge
+title: Wordforge - Word Processor
 version: '0.6.1-preview'
-summary: Native page-based writing for Linux
+summary: Word processor for fast, private writing - DOCX, PDF and spell check
 description: |
-  Wordforge is a native C++ and Qt word processor with a minimal menu,
-  toolbar and format panel, command palette,
-  multilingual text shaping, paragraph styles, lists, PDF export and recovery
-  snapshots. This developer preview opens Wordforge (.wfg) and UTF-8 text
-  documents and imports supported text/formatting from DOCX into editable copies.
-  DOCX export is supported; complex Word features are not preserved.
+  Wordforge is a fast, native word processor and document editor for Linux. It
+  runs fully offline: no account, no cloud, no browser engine inside.
+
+  Write with real page layout, paragraph styles (Normal, Title, Headings),
+  bullets and numbering, tables, pictures, bookmarks, find and replace, and
+  spell check as you type. Copy and paste keeps formatting from web pages,
+  Microsoft Word and LibreOffice. Print, export PDF, and open or save DOCX files
+  (complex Word features are not preserved yet). Text shaping covers Hindi and
+  other Indic scripts, Arabic, Hebrew, Chinese, Japanese, Korean and emoji.
+  Unsaved work is recovered after a crash. Light and dark themes, a Ctrl+K
+  command palette and a distraction-free focus mode keep the page in front.
+
+  This is a developer preview: headers and footers, comments and track changes
+  are still to come. Built with C++20, Qt 6 and Skia; open source under
+  Apache-2.0. Also available for Windows.
 base: core24
 grade: devel
 confinement: strict
 license: Apache-2.0
+links:
+  website:
+    - https://github.com/akmcypher/wordforge
+  source-code:
+    - https://github.com/akmcypher/wordforge
+  issues:
+    - https://github.com/akmcypher/wordforge/issues
+  contact:
+    - https://github.com/akmcypher/wordforge/issues
 architectures: [@ARCH@]
 apps:
   wordforge:
