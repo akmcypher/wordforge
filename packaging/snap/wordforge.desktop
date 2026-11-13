@@ -1,7 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=Wordforge Preview
-Comment=Native page-based word processor
+Name=Wordforge
+GenericName=Word Processor
+Comment=Write and edit documents: DOCX, PDF export, spell check
+Keywords=word;processor;document;editor;writer;docx;office;text;pdf;
 Exec=wordforge %f
 Icon=${SNAP}/meta/gui/wordforge.svg
 Terminal=false

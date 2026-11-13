@@ -52,6 +52,8 @@ copy(assets / "wordforge-launch", "bin/wordforge-launch")
 # In a packed snap the launcher lives in meta/gui/<app>.desktop; `desktop:` is snapcraft.yaml-only.
 copy(assets / "wordforge.desktop", "meta/gui/wordforge.desktop")
 copy(assets / "wordforge.svg", "meta/gui/wordforge.svg")
+# The Snap Store takes the listing icon from meta/gui/icon.svg on upload.
+copy(assets / "wordforge.svg", "meta/gui/icon.svg")
 triplet = run("dpkg-architecture", "-qDEB_HOST_MULTIARCH")
 plugins = Path("/usr/lib") / triplet / "qt6/plugins"
 for required in ("libqxcb.so", "libqwayland-generic.so"):
