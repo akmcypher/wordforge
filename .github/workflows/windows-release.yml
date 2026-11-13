@@ -14,6 +14,7 @@ on:
       - 'tools/package-windows.py'
       - 'tools/test-windows-package.ps1'
       - 'apps/desktop/self_test.*'
+      - 'tools/build-skia-msys2.sh'
   workflow_dispatch:
 
 permissions:
@@ -34,7 +35,7 @@ jobs:
             msystem: CLANGARM64
             pkg: mingw-w64-clang-aarch64
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 40
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -60,6 +61,26 @@ jobs:
             ${{ matrix.pkg }}-libzip
             ${{ matrix.pkg }}-hunspell
             ${{ matrix.pkg }}-hunspell-en
+      # x64 only: MSYS2's libskia.dll runs AVX-512 code on every CPU (tools/build-skia-msys2.sh).
+      - name: Restore baseline x64 Skia
+        if: matrix.arch == 'x64'
+        id: skia-cache
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
+        with:
+          path: skia-package
+          key: skia-msys2-x64-${{ hashFiles('tools/build-skia-msys2.sh') }}
+      - name: Build baseline x64 Skia
+        if: matrix.arch == 'x64' && steps.skia-cache.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: |
+          pacman -S --needed --noconfirm base-devel git
+          bash tools/build-skia-msys2.sh skia-package
+      - name: Install baseline x64 Skia
+        if: matrix.arch == 'x64'
+        shell: msys2 {0}
+        run: |
+          pacman -U --noconfirm skia-package/*.pkg.tar.zst
+          pacman -Q ${{ matrix.pkg }}-skia | grep -q -- '-5\.1$'
       - name: Build
         shell: msys2 {0}
         run: |

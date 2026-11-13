@@ -5,6 +5,31 @@ Clang toolchain (`CLANG64` for x64, `CLANGARM64` for ARM64) against the same Qt 
 Skia m143, HarfBuzz, FreeType, ICU, pugixml, libzip and Hunspell versions that
 MSYS2 ships.
 
+## x64 Skia is rebuilt
+
+MSYS2's x64 `libskia.dll` (143.r77119.da51f0d6-5) runs AVX-512 instructions in
+ordinary code, so it crashes with `0xC000001D` (illegal instruction) on CPUs
+without AVX-512: most consumer Intel CPUs since 12th generation, AMD before Zen 4,
+and x64 emulation on Windows on Arm. MSYS2's MinGW toolchain patch compiles all of
+Skia with `-mavx2 -mavx512f -mf16c -mfma` (the crash was a `vpcmpgtq zmm` in
+`SkIRect` code). GitHub's x64 runners have AVX-512, so the first v0.6.0 x64 ZIP
+passed CI and then crashed under emulation on Windows 11 ARM64. It was withdrawn
+from the release. A first rebuild that only changed Skia's per-CPU files still
+contained AVX2 in 3,032 functions; the package check below caught it.
+
+`tools/build-skia-msys2.sh` rebuilds MSYS2's own recipe (pinned commit, same Skia
+commit) as package `143.r77119.da51f0d6-5.1` with the global flags removed, Skia's
+`SkOpts_hsw.cpp`/`SkOpts_skx.cpp` compiled for baseline x86-64 (Skia still checks
+the CPU at run time, then installs ordinary SSE code), and skcms's AVX2/AVX-512
+transforms disabled as Skia does on other CPUs. Raster drawing and colour
+conversion lose their AVX2 fast paths on newer CPUs. The
+rebuild keeps symbols: `tools/package-windows.py` disassembles `libskia.dll` and
+refuses an x64 package if any function outside Skia's CPU-checked `avx::`,
+`hsw::` and `skx::` namespaces uses AVX2 or AVX-512 registers, then strips it.
+The release workflow caches the rebuilt package. The Linux snap builds Skia
+itself, and its amd64 binary has AVX code only in `avx::` functions. ARM64 is not
+affected.
+
 ## Building a package
 
 From an MSYS2 shell of the matching environment, with the packages listed in
@@ -43,7 +68,7 @@ code page needs Windows 10 version 1903 or later.
 ## Checking a package
 
 ```powershell
-tools\test-windows-package.ps1 -Package out\Wordforge-0.6.0-windows-x64.zip
+tools\test-windows-package.ps1 -Package out\Wordforge-0.6.1-windows-x64.zip
 ```
 
 It verifies the checksum, unpacks into a temporary folder with a Cyrillic name,
