@@ -2,8 +2,7 @@
 
 2026-11-13 — v0.6.0 released (ARM64 ZIP verified from the release on Windows 11
 ARM64). Its x64 ZIP crashed with 0xC000001D on CPUs without AVX-512 (found under
-x64 emulation): MSYS2's libskia.dll leaks AVX-512 from Skia's per-CPU files into
-shared inline code. The ZIP was withdrawn; 0.6.1 ships Skia rebuilt by
+x64 emulation): MSYS2 compiles all of Skia with -mavx2 -mavx512f. The ZIP was withdrawn; 0.6.1 ships Skia rebuilt by
 `tools/build-skia-msys2.sh`, and packaging rejects unguarded AVX2/AVX-512 in it
 (docs/WINDOWS.md → x64 Skia is rebuilt).
 
