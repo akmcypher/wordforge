@@ -1,5 +1,12 @@
 # Current status
 
+2026-11-13 — Phase 1C slice 1: semantic paragraph styles (ENGINEERING_ROADMAP.md
+→ 1C). Built-in styles with based-on inheritance replace presets; direct
+formatting is tracked per property, so updating a style restyles inheriting text
+and keeps direct overrides. WFG6 saves styles (only when customized); older files
+and DOCX migrate. Windows ARM64: all 6 suites pass (9 new style cases, one new
+desktop case); Ubuntu by CI.
+
 2026-11-13 — Windows portable packages (docs/WINDOWS.md). `tools/package-windows.py`
 builds `Wordforge-<version>-windows-<x64|arm64>.zip` with Qt plugins, every
 MSYS2 DLL found by walking PE imports (packaging fails on any unresolved import),

@@ -134,6 +134,22 @@ IDs resolve after serialization; missing/corrupt resources fail transactionally.
 
 ### 1C — Semantic styles and efficient document versions
 
+**Slice 1 delivered (2026-11-13): semantic paragraph styles.** `core/document/styles.*`
+holds named paragraph styles with based-on chains, next style, cycle/dangling
+detection and the built-ins replacing the four presets. Paragraphs and runs record
+directly set properties as masks; resolved values stay on the nodes so layout,
+rendering and export are unchanged, and `validateDocument` rejects any inherited
+value that disagrees with its style (one authority). Editor: `applyStyle`,
+`updateStyleFromSelection` (Format → Styles → Update style to match selection),
+style-aware Clear formatting and Enter's next style. WFG6 persists styles and
+masks; WFG1–5 and DOCX migrate through `adoptStyles` (docs/WFG_SCHEMA.md). Tests:
+`tests/unit/style_test.cpp` (9) plus a desktop end-to-end test. Measured on Windows
+ARM64 versus main: single edit on 34,000 paragraphs 5.1 → 6.3 ms, grouped break
+23.5 → 26.3 ms, peak +4 MiB; layout, save and first paint unchanged within noise.
+Remaining 1C: named character and table styles, theme fonts/colours, creating,
+renaming and deleting styles in the UI, DOCX style export, numbering definitions,
+and delta-based undo storage.
+
 Proposed files: `core/document/styles.*`, `numbering.*`, transaction storage.
 Retain defaults, named paragraph/character/table styles, based-on links, theme
 references and explicit property overrides. Resolve into a cached immutable

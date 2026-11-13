@@ -62,6 +62,7 @@ int main(int argc, char **argv) {
             }
             document.nextId = document.paragraphs.size() + 1;
             wf::Editor editor;
+            wf::adoptStyles(document); // generated formatting is direct formatting
             editor.reset(std::move(document));
             wf::LayoutEngine engine(shaper);
             wf::PageRenderer renderer;

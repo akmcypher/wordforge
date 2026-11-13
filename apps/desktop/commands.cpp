@@ -112,7 +112,7 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
             view->format([&](auto &s) { s.color = color.rgba(); });
     });
     create("clearFormatting", "Clear formatting", "Format",
-           [view] { view->format([](auto &s) { s = CharacterStyle{}; }); });
+           [view] { view->clearCharacterFormatting(); });
     for (auto [action, text, flag] :
          {std::tuple{bold, "B", &QFont::setBold}, std::tuple{italic, "I", &QFont::setItalic},
           std::tuple{underline, "U", &QFont::setUnderline},
@@ -155,6 +155,8 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
     for (int index = 0; index < 4; ++index)
         create("style" + QString(styles[index]).remove(' '), styles[index] + " style", "Styles",
                [view, index] { view->applyPreset(static_cast<ParagraphPreset>(index)); });
+    create("updateStyle", "Update style to match selection", "Styles",
+           [view] { view->updateStyleFromSelection(); });
 
     // Insert.
     create("pageBreak", "Page break", "Insert", [view] { view->insertPageBreak(); }, "Ctrl+Enter");
@@ -262,7 +264,7 @@ void Commands::sync() {
         get(alignments[n])->setChecked(static_cast<int>(p.alignment) == n);
     const QStringList styles{"styleNormal", "styleTitle", "styleHeading1", "styleHeading2"};
     for (int n = 0; n < 4; ++n)
-        get(styles[n])->setChecked(static_cast<int>(p.preset) == n);
+        get(styles[n])->setChecked(p.style == presetStyleId(static_cast<ParagraphPreset>(n)));
     for (double value : {1.0, 1.15, 1.5, 2.0})
         get("lineSpacing" + QString::number(value).remove('.'))
             ->setChecked(std::abs(p.lineSpacing - value) < 0.001);

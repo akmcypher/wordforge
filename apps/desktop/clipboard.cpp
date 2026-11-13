@@ -52,8 +52,8 @@ QString fragmentToHtml(const std::vector<Paragraph> &fragment) {
             openList = list;
         }
         const QString tag = !list.isEmpty()                             ? "li"
-                            : p.preset == ParagraphPreset::Heading1 ? "h1"
-                            : p.preset == ParagraphPreset::Heading2 ? "h2"
+                            : p.style == "Heading1"                       ? "h1"
+                            : p.style == "Heading2"                       ? "h2"
                                                                      : "p";
         const char *align[] = {"left", "center", "right"};
         html += QString("<%1 style=\"text-align:%2;margin-top:%3pt;margin-bottom:%4pt;"
@@ -100,9 +100,9 @@ std::vector<Paragraph> fragmentFromHtml(const QString &html, const CharacterStyl
                          : ListKind::Bullet;
         }
         if (format.headingLevel() == 1)
-            p.preset = ParagraphPreset::Heading1;
+            p.style = "Heading1";
         else if (format.headingLevel() >= 2)
-            p.preset = ParagraphPreset::Heading2;
+            p.style = "Heading2";
         // Qt reports CSS margins in pixels at 96 dpi; Wordforge uses points.
         p.spaceBefore = clamp(format.topMargin() * 0.75, 0, 200);
         p.spaceAfter = clamp(format.bottomMargin() * 0.75, 0, 200);

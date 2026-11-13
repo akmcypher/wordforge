@@ -75,7 +75,8 @@ class DesktopTest : public QObject {
             "italic", "underline", "strike", "highlight", "fontColor", "clearFormatting",
             "bullets", "numbering", "decreaseIndent", "increaseIndent", "alignLeft", "alignCenter",
             "alignRight", "lineSpacing1", "lineSpacing115", "lineSpacing15", "lineSpacing2",
-            "styleNormal", "styleTitle", "styleHeading1", "styleHeading2", "pageBreak", "date",
+            "styleNormal", "styleTitle", "styleHeading1", "styleHeading2", "updateStyle",
+            "pageBreak", "date",
             "symbol0", "symbol6", "picture", "pictureSize", "table", "tableRowAbove", "tableRowBelow",
             "tableColumnLeft", "tableColumnRight", "tableDeleteRow", "tableDeleteColumn",
             "tableDelete", "bookmarks", "marginsDefault", "marginsNormal",
@@ -112,7 +113,7 @@ class DesktopTest : public QObject {
         auto *styles = window.findChild<QComboBox *>("styleCombo");
         styles->setCurrentIndex(2);
         emit styles->activated(2);
-        QCOMPARE(view->document().paragraphs[0].preset, wf::ParagraphPreset::Heading1);
+        QCOMPARE(QString::fromStdString(view->document().paragraphs[0].style), QString("Heading1"));
         QCOMPARE(styles->currentIndex(), 2);
         auto *indent = window.findChild<QDoubleSpinBox *>("panelIndent");
         indent->setValue(36);
@@ -468,7 +469,7 @@ class DesktopTest : public QObject {
         QCOMPARE(view->layout().pageCount, std::size_t(1));
         auto *styles = window.findChild<QComboBox *>("styleCombo");
         emit styles->activated(2);
-        QCOMPARE(view->document().paragraphs.back().preset, wf::ParagraphPreset::Heading1);
+        QCOMPARE(QString::fromStdString(view->document().paragraphs.back().style), QString("Heading1"));
     }
     void findBarUsesTheEditingCommandsAndEscReturnsToWriting() {
         wf::MainWindow window;
@@ -636,6 +637,7 @@ class DesktopTest : public QObject {
         invalid.page = {72, 72, 18};
         invalid.paragraphs[0].runs = {{u"oversize", {}}};
         invalid.paragraphs[0].runs[0].style.size = 200;
+        invalid.paragraphs[0].runs[0].direct = wf::SizeField; // valid model, impossible layout
         QVERIFY_THROWS_EXCEPTION(std::runtime_error, view.setDocument(invalid));
         QCOMPARE(view.document().text(), std::u16string(u"keep me"));
         view.undo();
@@ -819,7 +821,7 @@ class DesktopTest : public QObject {
         const auto &doc = view->document();
         QCOMPARE(doc.paragraphs.size(), std::size_t(3));
         QCOMPARE(doc.paragraphs[0].text(), std::u16string(u"Title"));
-        QCOMPARE(doc.paragraphs[0].preset, wf::ParagraphPreset::Heading1);
+        QCOMPARE(QString::fromStdString(doc.paragraphs[0].style), QString("Heading1"));
         QCOMPARE(doc.paragraphs[1].alignment, wf::Alignment::Center);
         QVERIFY(doc.styleAt({1, 9}).bold);
         const auto red = doc.styleAt({1, 13});
@@ -843,7 +845,7 @@ class DesktopTest : public QObject {
         other.pageView()->paste();
         const auto &copy = other.pageView()->document();
         QCOMPARE(copy.text(), view->document().text());
-        QCOMPARE(copy.paragraphs[0].preset, wf::ParagraphPreset::Heading1);
+        QCOMPARE(QString::fromStdString(copy.paragraphs[0].style), QString("Heading1"));
         QCOMPARE(copy.paragraphs[2].list, wf::ListKind::Bullet);
         QVERIFY(copy.styleAt({1, 9}).bold);
         QCOMPARE(copy.styleAt({1, 13}).color, std::uint32_t(0xffcc0000));
@@ -891,6 +893,35 @@ class DesktopTest : public QObject {
         toggle->trigger();
         // Leave the shared checker as other tests expect: no personal file in a temp dir.
         checker.setPersonalDictionary({});
+    }
+    void updateStyleFromSelectionRestylesTheDocumentAndPersists() {
+        QTemporaryDir directory;
+        const auto path = directory.filePath("styled.wfg");
+        {
+            wf::MainWindow window;
+            auto *view = window.pageView();
+            view->insertText("One\nTwo\nbody");
+            QTest::keyClick(view, Qt::Key_Home, Qt::ControlModifier);
+            window.findChild<QAction *>("styleHeading1Action")->trigger();
+            QTest::keyClick(view, Qt::Key_Down);
+            window.findChild<QAction *>("styleHeading1Action")->trigger();
+            QTest::keyClick(view, Qt::Key_Home, Qt::ControlModifier);
+            QTest::keyClick(view, Qt::Key_End, Qt::ShiftModifier);
+            view->format([](auto &s) { s.family = "Georgia"; });
+            QTest::keyClick(view, Qt::Key_Home);
+            QTest::keyClick(view, Qt::Key_Right);
+            QCOMPARE(view->selection().focus.paragraph, std::size_t(0));
+            window.findChild<QAction *>("updateStyleAction")->trigger();
+            QCOMPARE(view->document().paragraphs[1].runs[0].style.family, std::string("Georgia"));
+            QCOMPARE(view->document().paragraphs[2].runs[0].style.family, std::string("Arial"));
+            window.saveFile(path);
+        }
+        wf::MainWindow reopened;
+        reopened.openFile(path);
+        const auto &document = reopened.pageView()->document();
+        QCOMPARE(wf::resolveStyle(document.styles, "Heading1").character.family,
+                 std::string("Georgia"));
+        QCOMPARE(document.paragraphs[1].runs[0].direct, std::uint16_t(0));
     }
     void spellCheckLoadsDictionaryFromUnicodeFolder() {
         // Users unpack the portable build anywhere; Hunspell must open it from such a folder.

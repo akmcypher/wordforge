@@ -13,6 +13,9 @@ important documents and report anything that loses data.
 * **Writing and formatting** — fonts, sizes, bold/italic/underline/strikethrough,
   highlight and text colour, Normal/Title/Heading styles, alignment, bullets and
   numbering, indentation, line and paragraph spacing.
+* **Styles** — Normal, Title and Heading 1–2 with based-on inheritance. Format →
+  Styles → Update style to match selection redefines a style from your text, and
+  every paragraph using it follows, keeping formatting you set directly.
 * **Pages** — real page layout with margins, A4/Letter, portrait/landscape and
   undoable page breaks (Ctrl+Enter). Zoom to 100% or page width.
 * **Multilingual text** — HarfBuzz shaping and font fallback for scripts such as

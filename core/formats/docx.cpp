@@ -414,7 +414,7 @@ DocxImport parseDocx(const std::string &bytes) {
         applyStyle(styleId, paragraph, base, seen);
         for (int index = 0; index < 4; ++index)
             if (styleId == presetNames[index])
-                paragraph.preset = static_cast<ParagraphPreset>(index);
+                paragraph.style = presetNames[index];
         paragraphProperties(properties, paragraph, warnings);
         // Resolve numbering through the same base -> derived -> direct cascade as styles.
         std::vector<pugi::xml_node> propertyChain{properties};
@@ -524,6 +524,7 @@ DocxImport parseDocx(const std::string &bytes) {
     }
     if (document.paragraphs.empty())
         document.paragraphs.emplace_back(document.allocateId());
+    adoptStyles(document); // DOCX values arrive resolved; mark those differing from styles direct
     validateDocument(document);
     return result;
 }
@@ -614,7 +615,13 @@ std::string serializeDocx(const Document &document) {
         previousCell = paragraph.cell;
         auto p = element(parent, "p");
         auto ppr = element(p, "pPr");
-        property(ppr, "pStyle", std::string(presetNames[static_cast<int>(paragraph.preset)]));
+        // Custom styles export as their nearest built-in ancestor; runs carry resolved formatting.
+        auto exported = paragraph.style;
+        while (!isBuiltinStyle(exported))
+            exported = document.styles.find(exported)->basedOn.empty()
+                           ? std::string("Normal")
+                           : document.styles.find(exported)->basedOn;
+        property(ppr, "pStyle", exported);
         if (paragraph.pageBreakBefore)
             element(ppr, "pageBreakBefore");
         if (paragraph.list != ListKind::None) {

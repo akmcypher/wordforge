@@ -312,6 +312,12 @@ void PageView::formatParagraph(const std::function<void(ParagraphFormat &)> &com
 void PageView::applyPreset(ParagraphPreset preset) {
     change([&](Editor &candidate) { candidate.applyPreset(preset); });
 }
+void PageView::updateStyleFromSelection() {
+    change([](Editor &candidate) { candidate.updateStyleFromSelection(); });
+}
+void PageView::clearCharacterFormatting() {
+    change([](Editor &candidate) { candidate.clearCharacterFormatting(); });
+}
 void PageView::insertPageBreak() {
     change([](Editor &candidate) { candidate.insertPageBreak(); });
 }

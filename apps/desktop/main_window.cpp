@@ -78,6 +78,7 @@ Document sampleDocument() {
     add(u"Save your work as a Wordforge document to retain formatting, or export a PDF to share "
         u"the page. Plain-text export contains the words alone.",
         body);
+    adoptStyles(document); // the sample's formatting is direct on top of Normal
     return document;
 }
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), view_(new PageView(this)) {
@@ -434,7 +435,8 @@ void MainWindow::buildUi() {
                   "increaseIndent", "", "alignLeft", "alignCenter", "alignRight"});
     fill(format->addMenu("Line spacing"),
          {"lineSpacing1", "lineSpacing115", "lineSpacing15", "lineSpacing2"});
-    fill(format->addMenu("Styles"), {"styleNormal", "styleTitle", "styleHeading1", "styleHeading2"});
+    fill(format->addMenu("Styles"),
+         {"styleNormal", "styleTitle", "styleHeading1", "styleHeading2", "", "updateStyle"});
     format->addSeparator();
     format->addAction(commands->get("pictureSize"));
     fill(format->addMenu("Table"), {"tableRowAbove", "tableRowBelow", "tableColumnLeft",

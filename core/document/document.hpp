@@ -1,4 +1,5 @@
 #pragma once
+#include "core/document/styles.hpp"
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -26,7 +27,6 @@ enum class ParagraphPreset { Normal, Title, Heading1, Heading2 };
 struct ParagraphFormat {
     Alignment alignment = Alignment::Left;
     ListKind list = ListKind::None;
-    ParagraphPreset preset = ParagraphPreset::Normal;
     double indentLeft = 0, spaceBefore = 0, spaceAfter = 8, lineSpacing = 1.15;
     bool pageBreakBefore = false;
     bool operator==(const ParagraphFormat &) const = default;
@@ -52,6 +52,7 @@ class Run {
   public:
     Run(std::u16string text = {}, CharacterStyle style = {});
     CharacterStyle style;
+    CharacterMask direct = 0; // fields of `style` set directly, not inherited from the paragraph style
     const std::u16string &text() const;
     const InlineImage *image() const;
     static Run fromImage(InlineImage, CharacterStyle = {});
@@ -77,6 +78,8 @@ struct Table {
 struct Paragraph : ParagraphFormat {
     Paragraph(std::uint64_t identifier = 0) : id(identifier) {}
     std::uint64_t id = 0, revision = 0;
+    std::string style = "Normal";
+    ParagraphMask direct = 0; // ParagraphFormat fields set directly, not inherited from `style`
     std::vector<Run> runs{{u"", {}}};
     std::optional<TableCell> cell;
     std::u16string text() const;
@@ -111,6 +114,7 @@ struct Document {
     std::vector<Bookmark> bookmarks;
     ImageResources images;
     std::vector<Table> tables;
+    StyleSheet styles = builtinStyles();
     PageStyle page;
     std::uint64_t revision = 0, nextId = 2;
     std::u16string text() const;
@@ -122,6 +126,21 @@ struct Document {
     void pruneUnusedImages();
 };
 void validateDocument(const Document &);
+// Effective formatting of a paragraph style after following its based-on chain.
+struct ResolvedStyle {
+    ParagraphFormat paragraph;
+    CharacterStyle character;
+};
+ResolvedStyle resolveStyle(const StyleSheet &, const std::string &id);
+void validateStyles(const StyleSheet &);
+// For content whose formatting was stored fully resolved (older files, DOCX, generated
+// documents): unknown styles become Normal and every value that differs from the style is
+// marked as set directly. Values equal to the style's become inherited.
+void adoptStyles(Document &);
+// A new empty paragraph carrying the resolved formatting of `style`, with nothing direct.
+Paragraph styledParagraph(const Document &, std::uint64_t id, const std::string &style = "Normal");
+std::string presetStyleId(ParagraphPreset);
+std::optional<ParagraphPreset> presetFor(const std::string &styleId);
 void validateTables(const Document &);
 struct Selection {
     Position anchor, focus;
@@ -163,6 +182,14 @@ class Editor {
     void align(Alignment);
     void formatParagraph(const std::function<void(ParagraphFormat &)> &);
     void applyPreset(ParagraphPreset);
+    // Gives the selected paragraphs `style`, clearing their direct formatting.
+    void applyStyle(const std::string &style);
+    // Redefines the caret paragraph's style from its current formatting (paragraph and the
+    // character formatting at the caret); every paragraph using or inheriting from the
+    // style follows, except for properties they set directly.
+    void updateStyleFromSelection();
+    // Removes direct character formatting from the selection (or the typing style).
+    void clearCharacterFormatting();
     void insertParagraphBreak();
     void insertPageBreak();
     void setPage(PageStyle);
@@ -206,6 +233,7 @@ class Editor {
     void remapBookmarks(const std::vector<Position> &, Position start, Position end,
                         Position insertedEnd);
     State state() const;
+    void restyle();
     void restore(State, bool preserveAllocator = true);
 };
 } // namespace wf

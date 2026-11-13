@@ -81,10 +81,15 @@ Grid grid(Document &document, std::uint64_t id) {
     return result;
 }
 Paragraph emptyCell(Document &document, TableCell cell, const CharacterStyle &style) {
-    Paragraph paragraph(document.allocateId());
+    auto paragraph = styledParagraph(document, document.allocateId());
     paragraph.cell = cell;
-    paragraph.spaceAfter = 0;
-    paragraph.runs = {{u"", style}};
+    if (paragraph.spaceAfter != 0) {
+        paragraph.spaceAfter = 0; // cells are tight regardless of the Normal style
+        paragraph.direct |= SpaceAfterField;
+    }
+    const auto inherited = paragraph.runs.front().style;
+    paragraph.runs.front().style = style;
+    paragraph.runs.front().direct = differingFields(style, inherited);
     return paragraph;
 }
 void reshape(Editor &editor, bool row, bool insert, bool before) {

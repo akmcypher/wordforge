@@ -127,7 +127,7 @@ CompactToolbar::CompactToolbar(PageView *view, Commands &commands, QMenu *insert
         family->setToolTip(index < 0 ? name + " is not installed; a similar font is used"
                                      : QString("Font family"));
         size->setValue(static_cast<int>(s.size));
-        styles->setCurrentIndex(static_cast<int>(p.preset));
+        styles->setCurrentIndex(static_cast<int>(presetFor(p.style).value_or(ParagraphPreset::Normal)));
     };
     connect(view, &PageView::selectionChanged, this, sync);
     connect(view, &PageView::contentChanged, this, sync);

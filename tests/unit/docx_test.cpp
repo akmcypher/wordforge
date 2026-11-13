@@ -28,6 +28,7 @@ TEST(Docx, ExportsRealRectangularTablesWithMultipleParagraphsAndImages) {
     document.images.emplace(11, std::make_shared<const ImageResource>(ImageResource{4, 2, png}));
     document.paragraphs[2].runs.push_back(Run::fromImage({11, 72, 36, "cell picture"}));
     document.nextId = 12;
+    adoptStyles(document); // hand-built formatting is direct formatting
     const auto parts = opc::read(serializeDocx(document));
     pugi::xml_document xml;
     ASSERT_TRUE(xml.load_string(parts.at("word/document.xml").c_str()));

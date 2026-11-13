@@ -57,7 +57,9 @@ Run Run::slice(std::size_t start, std::size_t end) const {
             throw std::invalid_argument("Cannot split an image atom");
         return *this;
     }
-    return {text().substr(start, end - start), style};
+    Run part(text().substr(start, end - start), style);
+    part.direct = direct;
+    return part;
 }
 void Run::appendText(const std::u16string &text) {
     auto *value = std::get_if<TextContent>(&content_);
@@ -159,7 +161,9 @@ void Editor::resizeImage(double width, double height) {
             return;
         image.width = width;
         image.height = height;
+        const auto direct = run.direct;
         run = Run::fromImage(std::move(image), run.style);
+        run.direct = direct;
         paragraph.revision = editor.document.revision = ++editor.serial_;
     };
     if (inTransaction_)

@@ -1,5 +1,28 @@
 # Native WFG schema and migration
 
+**WFG6 (semantic paragraph styles)** is written only when the style sheet differs
+from the built-in one, so documents using built-in styles stay readable by 0.6.0.
+WFG6 uses XML, or ZIP when pictures or tables exist, and may contain every WFG2–5
+element. Root-level `style` elements declare `id`, `name`, optional `basedOn` and
+`next`, and only the properties the style sets (`align`, `list`, `indent`, `before`,
+`after`, `line`, `family`, `size`, `bold`, `italic`, `underline`, `strike`, `color`,
+`highlight`). Paragraphs carry `style` (absent = Normal) instead of `preset`, and
+paragraphs, runs and images may carry `direct`, a bit mask of the properties set
+directly (core/document/styles.hpp: paragraph bits alignment, list, indent, before,
+after, line; character bits family, size, bold, italic, underline, strike, color,
+highlight). Stored values are still complete, but every value not marked direct
+must equal what the style resolves to; otherwise the file is rejected, as are
+unknown, duplicate or missing built-in styles (Normal, Title, Heading1, Heading2),
+a based-on Normal, dangling bases or next styles, cycles, over 1024 styles and
+masks with unknown bits. Resolution follows `basedOn` from the root, applying each
+style's properties over the defaults.
+
+WFG1–5 readers map `preset` 0–3 to the built-in styles and then mark every value
+that differs from its style as direct (`adoptStyles`); values equal to the style
+become inherited, which preserves appearance exactly. DOCX import does the same.
+DOCX export writes the nearest built-in ancestor as `pStyle` with fully resolved run
+properties, so custom style definitions are not yet exported (Phase 4).
+
 Table foundation adds **WFG5 ZIP whenever Document.tables is nonempty**; readers
 accept WFG1–5. Root `table` declares exact id/rows/columns; paragraph attributes
 `table`, `row`, `column` declare membership. Complete rectangular row-major cells

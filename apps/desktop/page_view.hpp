@@ -28,6 +28,8 @@ class PageView : public QAbstractScrollArea {
     void align(Alignment);
     void formatParagraph(const std::function<void(ParagraphFormat &)> &);
     void applyPreset(ParagraphPreset);
+    void updateStyleFromSelection();
+    void clearCharacterFormatting();
     void insertPageBreak();
     void setPage(PageStyle);
     void undo();

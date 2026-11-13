@@ -106,6 +106,7 @@ TEST(NativeFormat, PreservesParagraphFeaturesAndTextDecorations) {
     Editor e;
     e.replace(u"marked\nnext");
     e.selection = {{0, 0}, {0, 6}};
+    e.applyPreset(ParagraphPreset::Heading2);
     e.format([](auto &s) {
         s.strike = true;
         s.highlight = 0xffffff00;
@@ -116,7 +117,6 @@ TEST(NativeFormat, PreservesParagraphFeaturesAndTextDecorations) {
         p.spaceBefore = 12;
         p.lineSpacing = 2;
         p.pageBreakBefore = true;
-        p.preset = ParagraphPreset::Heading2;
     });
     auto restored = parseNative(serializeNative(e.document));
     const auto &p = restored.paragraphs[0];
@@ -125,7 +125,7 @@ TEST(NativeFormat, PreservesParagraphFeaturesAndTextDecorations) {
     EXPECT_EQ(p.spaceBefore, 12);
     EXPECT_EQ(p.lineSpacing, 2);
     EXPECT_TRUE(p.pageBreakBefore);
-    EXPECT_EQ(p.preset, ParagraphPreset::Heading2);
+    EXPECT_EQ(p.style, "Heading2");
     EXPECT_TRUE(p.runs[0].style.strike);
     EXPECT_EQ(p.runs[0].style.highlight, 0xffffff00);
 }
@@ -216,6 +216,7 @@ TEST(NativeFormat, RoundTripsTypedImagesWithStylesAndBookmarks) {
         {u"before", {}}, Run::fromImage({2, 72, 36, "red & blue"}, style), {u"after", {}}};
     document.bookmarks.push_back({3, "picture", {1, 6, Affinity::Before}});
     document.nextId = 4;
+    adoptStyles(document); // hand-built formatting is direct formatting
     const auto bytes = serializeNative(document);
     ASSERT_EQ(bytes.substr(0, 2), "PK");
     const auto parts = opc::read(bytes);

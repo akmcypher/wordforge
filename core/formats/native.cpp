@@ -69,6 +69,98 @@ bool indentation(pugi::xml_node node) {
     return node.type() == pugi::node_pcdata &&
            std::string_view(node.value()).find_first_not_of(" \t\r\n") == std::string_view::npos;
 }
+void writeStyle(pugi::xml_node root, const ParagraphStyle &style) {
+    auto node = root.append_child("style");
+    node.append_attribute("id") = style.id.c_str();
+    node.append_attribute("name") = style.name.c_str();
+    if (!style.basedOn.empty())
+        node.append_attribute("basedOn") = style.basedOn.c_str();
+    if (!style.next.empty())
+        node.append_attribute("next") = style.next.c_str();
+    const auto &p = style.paragraph;
+    if (p.alignment)
+        node.append_attribute("align") = static_cast<int>(*p.alignment);
+    if (p.list)
+        node.append_attribute("list") = static_cast<int>(*p.list);
+    if (p.indentLeft)
+        node.append_attribute("indent") = *p.indentLeft;
+    if (p.spaceBefore)
+        node.append_attribute("before") = *p.spaceBefore;
+    if (p.spaceAfter)
+        node.append_attribute("after") = *p.spaceAfter;
+    if (p.lineSpacing)
+        node.append_attribute("line") = *p.lineSpacing;
+    const auto &c = style.character;
+    if (c.family)
+        node.append_attribute("family") = c.family->c_str();
+    if (c.size)
+        node.append_attribute("size") = *c.size;
+    if (c.bold)
+        node.append_attribute("bold") = *c.bold;
+    if (c.italic)
+        node.append_attribute("italic") = *c.italic;
+    if (c.underline)
+        node.append_attribute("underline") = *c.underline;
+    if (c.strike)
+        node.append_attribute("strike") = *c.strike;
+    if (c.color)
+        node.append_attribute("color") = static_cast<unsigned long long>(*c.color);
+    if (c.highlight)
+        node.append_attribute("highlight") = static_cast<unsigned long long>(*c.highlight);
+}
+template <typename T> std::optional<T> whole(pugi::xml_node node, const char *key, double high) {
+    if (!node.attribute(key))
+        return std::nullopt;
+    const auto value = number(node, key, 0, 0, high);
+    if (std::floor(value) != value)
+        throw std::runtime_error(std::string("Invalid style value: ") + key);
+    return static_cast<T>(static_cast<long long>(value));
+}
+std::optional<double> real(pugi::xml_node node, const char *key, double low, double high) {
+    if (!node.attribute(key))
+        return std::nullopt;
+    return number(node, key, 0, low, high);
+}
+std::optional<bool> flag(pugi::xml_node node, const char *key) {
+    if (!node.attribute(key))
+        return std::nullopt;
+    return boolean(node, key);
+}
+ParagraphStyle readStyle(pugi::xml_node node) {
+    attributes(node, {"id", "name", "basedOn", "next", "align", "list", "indent", "before", "after",
+                      "line", "family", "size", "bold", "italic", "underline", "strike", "color",
+                      "highlight"});
+    for (auto child : node.children())
+        if (!indentation(child))
+            throw std::runtime_error("Unexpected style content");
+    ParagraphStyle style;
+    style.id = node.attribute("id").value();
+    style.name = node.attribute("name").value();
+    style.basedOn = node.attribute("basedOn").value();
+    style.next = node.attribute("next").value();
+    style.paragraph.alignment = whole<Alignment>(node, "align", 2);
+    style.paragraph.list = whole<ListKind>(node, "list", 2);
+    style.paragraph.indentLeft = real(node, "indent", 0, 360);
+    style.paragraph.spaceBefore = real(node, "before", 0, 200);
+    style.paragraph.spaceAfter = real(node, "after", 0, 200);
+    style.paragraph.lineSpacing = real(node, "line", 1, 3);
+    if (node.attribute("family"))
+        style.character.family = node.attribute("family").value();
+    style.character.size = real(node, "size", 1, 200);
+    style.character.bold = flag(node, "bold");
+    style.character.italic = flag(node, "italic");
+    style.character.underline = flag(node, "underline");
+    style.character.strike = flag(node, "strike");
+    style.character.color = whole<std::uint32_t>(node, "color", 4294967295.0);
+    style.character.highlight = whole<std::uint32_t>(node, "highlight", 4294967295.0);
+    return style;
+}
+std::uint16_t mask(pugi::xml_node node, std::uint16_t all) {
+    const auto value = identifier(node, "direct", true);
+    if (value & ~static_cast<std::uint64_t>(all))
+        throw std::runtime_error("Invalid direct-formatting mask");
+    return static_cast<std::uint16_t>(value);
+}
 } // namespace
 std::string serializeNative(const Document &document) {
     validateDocument(document);
@@ -82,7 +174,10 @@ std::string serializeNative(const Document &document) {
                 imageIds.insert(image->resourceId);
     const bool tables = !document.tables.empty();
     const bool packaged = tables || !imageIds.empty();
-    root.append_attribute("version") = tables                       ? "5"
+    // WFG6 only when styles were customized; built-in styles keep files readable by 0.6.0.
+    const bool styled = document.styles != builtinStyles();
+    root.append_attribute("version") = styled                       ? "6"
+                                       : tables                     ? "5"
                                        : packaged                   ? "4"
                                        : document.bookmarks.empty() ? "2"
                                                                     : "3";
@@ -101,6 +196,9 @@ std::string serializeNative(const Document &document) {
     root.append_attribute("width") = document.page.width;
     root.append_attribute("height") = document.page.height;
     root.append_attribute("margin") = document.page.margin;
+    if (styled)
+        for (const auto &style : document.styles.paragraphStyles)
+            writeStyle(root, style);
     for (const auto &table : document.tables) {
         auto node = root.append_child("table");
         node.append_attribute("id") = static_cast<unsigned long long>(table.id);
@@ -119,8 +217,13 @@ std::string serializeNative(const Document &document) {
         paragraph.append_attribute("after") = p.spaceAfter;
         if (p.list != ListKind::None)
             paragraph.append_attribute("list") = static_cast<int>(p.list);
-        if (p.preset != ParagraphPreset::Normal)
-            paragraph.append_attribute("preset") = static_cast<int>(p.preset);
+        if (styled) {
+            if (p.style != "Normal")
+                paragraph.append_attribute("style") = p.style.c_str();
+            if (p.direct)
+                paragraph.append_attribute("direct") = p.direct;
+        } else if (const auto preset = presetFor(p.style); preset && *preset != ParagraphPreset::Normal)
+            paragraph.append_attribute("preset") = static_cast<int>(*preset);
         if (p.indentLeft)
             paragraph.append_attribute("indent") = p.indentLeft;
         if (p.spaceBefore)
@@ -150,6 +253,8 @@ std::string serializeNative(const Document &document) {
             if (r.style.highlight)
                 run.append_attribute("highlight") =
                     static_cast<unsigned long long>(r.style.highlight);
+            if (styled && r.direct)
+                run.append_attribute("direct") = r.direct;
             if (!image)
                 run.append_child(pugi::node_pcdata).set_value(utf8(r.text()).c_str());
         }
@@ -201,9 +306,11 @@ Document parseNative(const std::string &input) {
             throw std::runtime_error("Expected exactly one document root");
     const std::string_view version = root.attribute("version").value();
     if (std::string_view(root.name()) != "wordforge" ||
-        (version != "1" && version != "2" && version != "3" && version != "4" && version != "5"))
+        (version != "1" && version != "2" && version != "3" && version != "4" && version != "5" &&
+         version != "6"))
         throw std::runtime_error("Unsupported native document version");
-    if (packaged != (version == "4" || version == "5"))
+    const bool v6 = version == "6";
+    if (!v6 && packaged != (version == "4" || version == "5"))
         throw std::runtime_error("WFG4/5 require ZIP transport; legacy versions require XML");
     if (version == "1")
         attributes(root, {"version", "width", "height", "margin"});
@@ -212,6 +319,8 @@ Document parseNative(const std::string &input) {
     Document document;
     document.paragraphs.clear();
     document.nextId = 1;
+    if (v6)
+        document.styles.paragraphStyles.clear();
     document.page = {number(root, "width", 595.28, 72, 2880),
                      number(root, "height", 841.89, 72, 2880),
                      number(root, "margin", 56.7, 0, 1400)};
@@ -219,7 +328,11 @@ Document parseNative(const std::string &input) {
     for (auto p : root.children()) {
         if (indentation(p))
             continue;
-        if (version == "5" && std::string_view(p.name()) == "table") {
+        if (v6 && std::string_view(p.name()) == "style") {
+            document.styles.paragraphStyles.push_back(readStyle(p));
+            continue;
+        }
+        if ((version == "5" || v6) && std::string_view(p.name()) == "table") {
             attributes(p, {"id", "rows", "columns"});
             for (auto nested : p.children())
                 if (!indentation(nested))
@@ -227,7 +340,8 @@ Document parseNative(const std::string &input) {
             document.tables.push_back({identifier(p, "id"), index(p, "rows"), index(p, "columns")});
             continue;
         }
-        if ((version == "4" || version == "5") && std::string_view(p.name()) == "imageResource") {
+        if ((version == "4" || version == "5" || v6) &&
+            std::string_view(p.name()) == "imageResource") {
             attributes(p, {"id", "path", "pixelWidth", "pixelHeight"});
             for (auto nested : p.children())
                 if (!indentation(nested))
@@ -248,7 +362,7 @@ Document parseNative(const std::string &input) {
             document.images.emplace(id, std::move(resource));
             continue;
         }
-        if ((version == "3" || version == "4" || version == "5") &&
+        if ((version == "3" || version == "4" || version == "5" || v6) &&
             std::string_view(p.name()) == "bookmark") {
             attributes(p, {"id", "name", "paragraph", "offset", "affinity"});
             for (auto nested : p.children())
@@ -272,6 +386,9 @@ Document parseNative(const std::string &input) {
         if (version == "1")
             attributes(p,
                        {"align", "after", "list", "preset", "indent", "before", "line", "break"});
+        else if (v6)
+            attributes(p, {"align", "after", "list", "style", "direct", "indent", "before", "line",
+                           "break", "id", "table", "row", "column"});
         else if (version == "5")
             attributes(p, {"align", "after", "list", "preset", "indent", "before", "line", "break",
                            "id", "table", "row", "column"});
@@ -292,7 +409,13 @@ Document parseNative(const std::string &input) {
         if (std::floor(list) != list || std::floor(preset) != preset)
             throw std::runtime_error("Invalid paragraph enum");
         paragraph.list = static_cast<ListKind>(static_cast<int>(list));
-        paragraph.preset = static_cast<ParagraphPreset>(static_cast<int>(preset));
+        if (v6) {
+            if (p.attribute("style"))
+                paragraph.style = p.attribute("style").value();
+            if (p.attribute("direct"))
+                paragraph.direct = mask(p, AllParagraphFields);
+        } else
+            paragraph.style = presetStyleId(static_cast<ParagraphPreset>(static_cast<int>(preset)));
         paragraph.indentLeft = number(p, "indent", 0, 0, 360);
         paragraph.spaceBefore = number(p, "before", 0, 0, 200);
         paragraph.lineSpacing = number(p, "line", 1.15, 1, 3);
@@ -301,16 +424,17 @@ Document parseNative(const std::string &input) {
         for (auto r : p.children()) {
             if (indentation(r))
                 continue;
-            const bool image =
-                (version == "4" || version == "5") && std::string_view(r.name()) == "image";
+            const bool image = (version == "4" || version == "5" || v6) &&
+                               std::string_view(r.name()) == "image";
             if (std::string_view(r.name()) != "r" && !image)
                 throw std::runtime_error("Unknown inline content; refusing lossy import");
             if (image)
                 attributes(r, {"resource", "width", "height", "description", "family", "size",
-                               "bold", "italic", "underline", "color", "strike", "highlight"});
+                               "bold", "italic", "underline", "color", "strike", "highlight",
+                               v6 ? "direct" : "resource"});
             else
                 attributes(r, {"family", "size", "bold", "italic", "underline", "color", "strike",
-                               "highlight"});
+                               "highlight", v6 ? "direct" : "family"});
             for (auto child : r.children())
                 if (image ? !indentation(child)
                           : child.type() != pugi::node_pcdata && child.type() != pugi::node_cdata)
@@ -339,6 +463,8 @@ Document parseNative(const std::string &input) {
                                       number(r, "height", 0, 0, 2880),
                                       r.attribute("description").value()},
                                      run.style);
+            if (v6 && r.attribute("direct"))
+                run.direct = mask(r, AllCharacterFields);
             paragraph.runs.push_back(std::move(run));
         }
         if (paragraph.runs.empty())
@@ -349,6 +475,13 @@ Document parseNative(const std::string &input) {
         throw std::runtime_error("Native document has no paragraphs");
     if (version == "5" && document.tables.empty())
         throw std::runtime_error("WFG5 requires table metadata");
+    try {
+        // Older versions stored resolved values only; WFG6 must already agree with its styles.
+        if (!v6)
+            adoptStyles(document);
+    } catch (const std::invalid_argument &error) {
+        throw std::runtime_error(error.what());
+    }
     if (version != "1")
         document.nextId = identifier(root, "nextId");
     if (packaged && consumed.size() != parts.size())

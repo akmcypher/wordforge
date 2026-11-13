@@ -272,11 +272,11 @@ TEST(Editing, PresetsApplyAndReturnToBodyTextAfterHeading) {
     Editor e;
     e.replace(u"Heading");
     e.applyPreset(ParagraphPreset::Heading1);
-    EXPECT_EQ(e.document.paragraphs[0].preset, ParagraphPreset::Heading1);
+    EXPECT_EQ(e.document.paragraphs[0].style, "Heading1");
     EXPECT_TRUE(e.document.paragraphs[0].runs[0].style.bold);
     e.insertParagraphBreak();
     ASSERT_EQ(e.document.paragraphs.size(), 2u);
-    EXPECT_EQ(e.document.paragraphs[1].preset, ParagraphPreset::Normal);
+    EXPECT_EQ(e.document.paragraphs[1].style, "Normal");
     EXPECT_FALSE(e.typingStyle.bold);
 }
 TEST(Editing, SplitJoinAndUndoAreAtomic) {
@@ -395,8 +395,8 @@ TEST(Clipboard, FragmentRoundTripKeepsFormattingInOneUndoStep) {
     EXPECT_EQ(target.document.paragraphs[0].text(), u"<plain bold");
     EXPECT_EQ(target.document.paragraphs[1].text(), u"Heading>");
     // The first paragraph keeps the target's format; later ones bring their own.
-    EXPECT_EQ(target.document.paragraphs[0].preset, ParagraphPreset::Normal);
-    EXPECT_EQ(target.document.paragraphs[1].preset, ParagraphPreset::Heading1);
+    EXPECT_EQ(target.document.paragraphs[0].style, "Normal");
+    EXPECT_EQ(target.document.paragraphs[1].style, "Heading1");
     EXPECT_TRUE(target.document.styleAt({0, 9}).bold);
     EXPECT_FALSE(target.document.styleAt({0, 3}).bold);
     EXPECT_TRUE(target.undo());
