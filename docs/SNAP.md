@@ -99,6 +99,16 @@ tables/images, broader desktop testing and recovery across upgrades remain open.
   (CI artifact of PR #1's merge ref). Strict confinement on a real Ubuntu desktop
   is still untested.
 
+## Automatic edge releases
+
+`.github/workflows/snap-release.yml` builds the amd64 and arm64 snaps on every
+push to `main` that changes more than docs, runs the tests, and uploads both to
+`latest/edge` with `snapcraft upload --release=edge`. Installed copies pick the
+new revision up on snapd's next refresh. The Store login is the repository
+secret `SNAPCRAFT_STORE_CREDENTIALS` (from `snapcraft export-login`); without it
+the workflow builds but skips the upload. Pull requests that touch the snap
+packaging build both snaps and never upload. Promotion to `stable` stays manual.
+
 ## Publication gate
 
 After the checks above pass, authenticate to the intended publisher account,

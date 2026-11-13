@@ -1,0 +1,77 @@
+name: Snap release (edge)
+
+# Every merge to main builds the amd64 and arm64 snaps, runs the tests, and releases both to the
+# Snap Store edge channel. Pull requests that change this file build both snaps but never upload.
+# Stable releases stay manual. The Store login lives only in the SNAPCRAFT_STORE_CREDENTIALS
+# secret, which pull requests from forks cannot read.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  pull_request:
+    paths:
+      - '.github/workflows/snap-release.yml'
+      - 'packaging/snap/**'
+      - 'tools/package-snap.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: snap-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  snap:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Install native Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang cmake ninja-build generate-ninja \
+            pkg-config ca-certificates curl python3 qt6-base-dev qt6-base-dev-tools \
+            libicu-dev libharfbuzz-dev libfreetype6-dev libpugixml-dev libzip-dev libhunspell-dev hunspell-en-us libfontconfig1-dev \
+            libgtest-dev libjpeg-dev libpng-dev libwebp-dev zlib1g-dev libexpat1-dev \
+            libegl1-mesa-dev libgl1-mesa-dev libvulkan-dev libxkbcommon-dev \
+            fonts-dejavu-core fonts-noto-core fonts-noto-color-emoji qt6-wayland \
+            snapd squashfs-tools xkb-data libx11-data
+      - name: Build pinned Skia, application and tests
+        run: bash tools/build-linux.sh
+      - name: Package snap
+        run: |
+          python3 tools/package-snap.py --build-dir "$HOME/wordforge-build" \
+            --skia-dir "$HOME/.local/share/wordforge-deps/skia" --output-dir out/packages
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: wordforge-snap-${{ matrix.arch }}
+          path: |
+            out/packages/*.snap
+            out/packages/*.sha256
+          if-no-files-found: error
+      - name: Release to the edge channel
+        if: github.event_name != 'pull_request'
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        run: |
+          if [ -z "$SNAPCRAFT_STORE_CREDENTIALS" ]; then
+            echo "::warning::SNAPCRAFT_STORE_CREDENTIALS is not set; built the snap but did not upload it."
+            exit 0
+          fi
+          sudo snap install snapcraft --classic
+          snapcraft upload --release=edge out/packages/wordforge_*_${{ matrix.arch }}.snap
