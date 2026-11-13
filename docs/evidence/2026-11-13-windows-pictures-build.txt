@@ -1,0 +1,45 @@
+[1/45] Building CXX object CMakeFiles/wordforge_core.dir/core/document/images.cpp.obj
+[2/45] Building CXX object CMakeFiles/wordforge_core.dir/core/document/anchors.cpp.obj
+[3/45] Building CXX object CMakeFiles/wordforge_formats.dir/core/formats/native.cpp.obj
+[4/45] Building CXX object CMakeFiles/wordforge_layout.dir/core/layout/layout.cpp.obj
+[5/45] Building CXX object CMakeFiles/wordforge_layout.dir/core/typography/shaper.cpp.obj
+[6/45] Building CXX object CMakeFiles/wordforge_formats.dir/core/formats/zip_package.cpp.obj
+[7/45] Building CXX object CMakeFiles/wordforge_core.dir/core/document/document.cpp.obj
+[8/45] Linking CXX static library libwordforge_core.a
+[9/45] Building CXX object CMakeFiles/wordforge_rendering.dir/core/rendering/page_renderer.cpp.obj
+[10/45] Building CXX object CMakeFiles/wordforge_transaction_benchmark.dir/benchmarks/transaction_benchmark.cpp.obj
+[11/45] Linking CXX static library libwordforge_layout.a
+[12/45] Building CXX object CMakeFiles/wordforge_benchmark.dir/benchmarks/document_benchmark.cpp.obj
+[13/45] Linking CXX static library libwordforge_rendering.a
+[14/45] Building CXX object CMakeFiles/wordforge_formats.dir/core/formats/docx.cpp.obj
+[15/45] Linking CXX static library libwordforge_formats.a
+[16/45] Building CXX object CMakeFiles/core_tests.dir/tests/unit/document_test.cpp.obj
+[17/45] Building CXX object CMakeFiles/layout_tests.dir/tests/unit/layout_test.cpp.obj
+[18/45] Linking CXX executable wordforge_transaction_benchmark.exe
+[19/45] Linking CXX executable core_tests.exe
+[20/45] Linking CXX executable wordforge_benchmark.exe
+[21/45] Building CXX object CMakeFiles/render_tests.dir/tests/integration/render_test.cpp.obj
+[22/45] Linking CXX executable layout_tests.exe
+[23/45] Building CXX object CMakeFiles/format_tests.dir/tests/unit/format_test.cpp.obj
+[24/45] Linking CXX executable render_tests.exe
+[25/45] Building CXX object CMakeFiles/format_tests.dir/tests/unit/docx_test.cpp.obj
+[26/45] Linking CXX executable format_tests.exe
+[27/45] Automatic MOC for target wordforge_desktop
+[28/45] Building CXX object CMakeFiles/wordforge_desktop.dir/apps/desktop/appearance.cpp.obj
+[29/45] Building CXX object CMakeFiles/wordforge_desktop.dir/wordforge_desktop_autogen/mocs_compilation.cpp.obj
+[30/45] Building CXX object CMakeFiles/wordforge_desktop.dir/apps/desktop/search_bar.cpp.obj
+[31/45] Building CXX object CMakeFiles/wordforge_desktop.dir/apps/desktop/recovery_file.cpp.obj
+[32/45] Building CXX object CMakeFiles/wordforge_desktop.dir/apps/desktop/main_window.cpp.obj
+[33/45] Building CXX object CMakeFiles/wordforge_desktop.dir/apps/desktop/ribbon.cpp.obj
+[34/45] Building CXX object CMakeFiles/wordforge_desktop.dir/apps/desktop/page_view.cpp.obj
+[35/45] Building CXX object CMakeFiles/wordforge_desktop.dir/apps/desktop/pictures.cpp.obj
+[36/45] Building CXX object CMakeFiles/wordforge_desktop.dir/apps/desktop/bookmarks_dialog.cpp.obj
+[37/45] Linking CXX static library libwordforge_desktop.a
+[38/45] Building CXX object CMakeFiles/wordforge.dir/apps/desktop/main.cpp.obj
+[39/45] Building CXX object CMakeFiles/wordforge_desktop_benchmark.dir/benchmarks/desktop_benchmark.cpp.obj
+[40/45] Linking CXX executable wordforge_desktop_benchmark.exe
+[41/45] Linking CXX executable wordforge.exe
+[42/45] Automatic MOC for target desktop_tests
+[43/45] Building CXX object CMakeFiles/desktop_tests.dir/desktop_tests_autogen/mocs_compilation.cpp.obj
+[44/45] Building CXX object CMakeFiles/desktop_tests.dir/tests/integration/desktop_test.cpp.obj
+[45/45] Linking CXX executable desktop_tests.exe

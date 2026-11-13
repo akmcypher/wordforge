@@ -1,0 +1,7 @@
+Ubuntu ARM64; 4x2 fixture, one inline picture; model/format only
+insert_ms=11.7981
+native_and_docx_export_ms=1.14525
+native_bytes=568
+docx_bytes=2506
+python-docx 1.1.0: PASS; 1 inline shape, 144x72 pt, exact PNG media bytes
+Structural interoperability only; Microsoft Word/LibreOffice visual round trip unexecuted.

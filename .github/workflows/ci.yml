@@ -1,0 +1,82 @@
+name: Wordforge native
+
+# Standalone-repository copy of meridian's .github/workflows/wordforge-native.yml.
+# GitHub-hosted runners are free for public repositories.
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ubuntu-x64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Install native Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang cmake ninja-build generate-ninja \
+            pkg-config ca-certificates curl python3 qt6-base-dev qt6-base-dev-tools \
+            libicu-dev libharfbuzz-dev libfreetype6-dev libpugixml-dev libzip-dev libhunspell-dev hunspell-en-us libfontconfig1-dev \
+            libgtest-dev libjpeg-dev libpng-dev libwebp-dev zlib1g-dev libexpat1-dev \
+            libegl1-mesa-dev libgl1-mesa-dev libvulkan-dev libxkbcommon-dev \
+            fonts-dejavu-core fonts-noto-core fonts-noto-color-emoji qt6-wayland \
+            snapd squashfs-tools xkb-data libx11-data
+      - name: Build pinned Skia, application and tests
+        run: bash tools/build-linux.sh
+      - name: Package unsigned Snap preview
+        run: |
+          python3 tools/package-snap.py --build-dir "$HOME/wordforge-build" \
+            --skia-dir "$HOME/.local/share/wordforge-deps/skia" --output-dir out/packages
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: wordforge-snap-amd64-preview
+          path: |
+            out/packages/*.snap
+            out/packages/*.sha256
+          if-no-files-found: error
+  windows-arm64:
+    runs-on: windows-11-arm
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e
+        with:
+          msystem: CLANGARM64
+          update: true
+          install: >-
+            mingw-w64-clang-aarch64-clang
+            mingw-w64-clang-aarch64-cmake
+            mingw-w64-clang-aarch64-ninja
+            mingw-w64-clang-aarch64-pkgconf
+            mingw-w64-clang-aarch64-qt6-base
+            mingw-w64-clang-aarch64-skia
+            mingw-w64-clang-aarch64-harfbuzz
+            mingw-w64-clang-aarch64-freetype
+            mingw-w64-clang-aarch64-icu
+            mingw-w64-clang-aarch64-gtest
+            mingw-w64-clang-aarch64-pugixml
+            mingw-w64-clang-aarch64-libzip
+            mingw-w64-clang-aarch64-hunspell
+            mingw-w64-clang-aarch64-hunspell-en
+      - name: Configure and build
+        run: |
+          cmake --preset release -DCMAKE_CXX_COMPILER=clang++
+          cmake --build --preset release
+      - name: Test real document and desktop paths
+        run: ctest --preset release
+      - name: Record installed dependencies
+        run: pacman -Q

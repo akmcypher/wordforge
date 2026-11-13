@@ -1,0 +1,12 @@
+[1/13] Building CXX object CMakeFiles/wordforge_formats.dir/core/formats/native.cpp.o
+[2/13] Building CXX object CMakeFiles/wordforge_formats.dir/core/formats/docx.cpp.o
+[3/13] Building CXX object CMakeFiles/format_tests.dir/tests/unit/docx_test.cpp.o
+[4/13] Linking CXX static library libwordforge_formats.a
+[5/13] Building CXX object CMakeFiles/format_tests.dir/tests/unit/format_test.cpp.o
+[6/13] Linking CXX executable format_tests
+[7/13] Linking CXX executable wordforge_benchmark
+[8/13] Linking CXX executable wordforge_desktop_benchmark
+[9/13] Linking CXX executable wordforge
+[10/13] Automatic MOC for target desktop_tests
+[11/12] Building CXX object CMakeFiles/desktop_tests.dir/tests/integration/desktop_test.cpp.o
+[12/12] Linking CXX executable desktop_tests

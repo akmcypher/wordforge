@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<wordforge version="1" width="612" height="792" margin="36">
+  <p align="1" before="12" after="6" line="1.5" preset="2" break="true">
+    <r family="DejaVu Serif" size="18" bold="true" color="4286609979" highlight="4294967040">old नमस्ते</r>
+  </p>
+  <p list="2" indent="18"><r>two</r></p>
+</wordforge>

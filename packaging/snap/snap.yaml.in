@@ -1,0 +1,20 @@
+name: wordforge
+version: '0.6.0-preview'
+summary: Native page-based writing for Linux
+description: |
+  Wordforge is a native C++ and Qt word processor with a minimal menu,
+  toolbar and format panel, command palette,
+  multilingual text shaping, paragraph styles, lists, PDF export and recovery
+  snapshots. This developer preview opens Wordforge (.wfg) and UTF-8 text
+  documents and imports supported text/formatting from DOCX into editable copies.
+  DOCX export is supported; complex Word features are not preserved.
+base: core24
+grade: devel
+confinement: strict
+license: Apache-2.0
+architectures: [@ARCH@]
+apps:
+  wordforge:
+    command: bin/wordforge-launch
+    desktop: usr/share/applications/wordforge.desktop
+    plugs: [desktop, desktop-legacy, x11, wayland, home, removable-media, opengl, cups]

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Wordforge Preview
+Comment=Native page-based word processor
+Exec=wordforge %f
+Icon=${SNAP}/meta/gui/wordforge.svg
+Terminal=false
+Categories=Office;WordProcessor;
+MimeType=application/x-wordforge;text/plain;
+StartupWMClass=Wordforge

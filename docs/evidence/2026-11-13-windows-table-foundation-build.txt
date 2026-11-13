@@ -1,0 +1,9 @@
+[1/9] Building CXX object CMakeFiles/wordforge_layout.dir/core/layout/layout.cpp.obj
+[2/9] Linking CXX static library libwordforge_layout.a
+[3/9] Building CXX object CMakeFiles/layout_tests.dir/tests/unit/layout_test.cpp.obj
+[4/9] Linking CXX executable wordforge_benchmark.exe
+[5/9] Linking CXX executable wordforge_desktop_benchmark.exe
+[6/9] Linking CXX executable wordforge.exe
+[7/9] Linking CXX executable layout_tests.exe
+[8/9] Linking CXX executable render_tests.exe
+[9/9] Linking CXX executable desktop_tests.exe

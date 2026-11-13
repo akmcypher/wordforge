@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+export LD_LIBRARY_PATH="$SNAP/usr/lib:${LD_LIBRARY_PATH:-}"
+export QT_PLUGIN_PATH="$SNAP/usr/plugins"
+export FONTCONFIG_FILE="$SNAP/etc/fonts/fonts.conf"
+export XKB_CONFIG_ROOT="$SNAP/usr/share/X11/xkb"
+export XLOCALEDIR="$SNAP/usr/share/X11/locale"
+export XDG_DATA_DIRS="$SNAP/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+exec "$SNAP/usr/bin/wordforge" "$@"

@@ -1,0 +1,15 @@
+Test project C:/dev/meridian/wordforge/build/polish-preview
+    Start 1: document
+1/5 Test #1: document .........................   Passed    0.05 sec
+    Start 2: layout
+2/5 Test #2: layout ...........................   Passed    1.12 sec
+    Start 3: formats
+3/5 Test #3: formats ..........................   Passed    0.08 sec
+    Start 4: rendering
+4/5 Test #4: rendering ........................   Passed    0.19 sec
+    Start 5: desktop
+5/5 Test #5: desktop ..........................   Passed    1.38 sec
+
+100% tests passed out of 5
+
+Total Test time (real) =   2.90 sec
