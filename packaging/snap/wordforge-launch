@@ -6,4 +6,7 @@ export FONTCONFIG_FILE="$SNAP/etc/fonts/fonts.conf"
 export XKB_CONFIG_ROOT="$SNAP/usr/share/X11/xkb"
 export XLOCALEDIR="$SNAP/usr/share/X11/locale"
 export XDG_DATA_DIRS="$SNAP/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+# Printing goes through the cups interface's local socket. Without this, libcups falls back
+# to TCP localhost:631 when no CUPS socket exists, which the sandbox (no network plug) denies.
+export CUPS_SERVER="${CUPS_SERVER:-/run/cups/cups.sock}"
 exec "$SNAP/usr/bin/wordforge" "$@"
