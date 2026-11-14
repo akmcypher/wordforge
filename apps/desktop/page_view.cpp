@@ -315,6 +315,18 @@ void PageView::applyPreset(ParagraphPreset preset) {
 void PageView::updateStyleFromSelection() {
     change([](Editor &candidate) { candidate.updateStyleFromSelection(); });
 }
+void PageView::applyStyle(const std::string &id) {
+    change([&](Editor &candidate) { candidate.applyStyle(id); });
+}
+bool PageView::createStyleFromSelection(const QString &name) {
+    return change([&](Editor &candidate) { candidate.createStyleFromSelection(name.toStdString()); });
+}
+bool PageView::renameStyle(const std::string &id, const QString &name) {
+    return change([&](Editor &candidate) { candidate.renameStyle(id, name.toStdString()); });
+}
+bool PageView::deleteStyle(const std::string &id) {
+    return change([&](Editor &candidate) { candidate.deleteStyle(id); });
+}
 void PageView::clearCharacterFormatting() {
     change([](Editor &candidate) { candidate.clearCharacterFormatting(); });
 }

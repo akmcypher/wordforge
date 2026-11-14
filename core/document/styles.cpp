@@ -1,6 +1,7 @@
 #include "core/document/styles.hpp"
 #include "core/document/document.hpp"
 #include <algorithm>
+#include <cctype>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -80,6 +81,47 @@ StyleSheet builtinStyles() {
     ParagraphStyle heading2{"Heading2", "Heading 2", "Heading1", "Normal", {}, {}};
     heading2.character.size = 16;
     return {{normal, title, heading1, heading2}};
+}
+
+void fillUnset(CharacterProperties &target, const CharacterProperties &fallback) {
+    auto fill = [](auto &value, const auto &other) {
+        if (!value)
+            value = other;
+    };
+    fill(target.family, fallback.family);
+    fill(target.size, fallback.size);
+    fill(target.bold, fallback.bold);
+    fill(target.italic, fallback.italic);
+    fill(target.underline, fallback.underline);
+    fill(target.strike, fallback.strike);
+    fill(target.color, fallback.color);
+    fill(target.highlight, fallback.highlight);
+}
+
+void fillUnset(ParagraphProperties &target, const ParagraphProperties &fallback) {
+    auto fill = [](auto &value, const auto &other) {
+        if (!value)
+            value = other;
+    };
+    fill(target.alignment, fallback.alignment);
+    fill(target.list, fallback.list);
+    fill(target.indentLeft, fallback.indentLeft);
+    fill(target.spaceBefore, fallback.spaceBefore);
+    fill(target.spaceAfter, fallback.spaceAfter);
+    fill(target.lineSpacing, fallback.lineSpacing);
+}
+
+std::string uniqueStyleId(const StyleSheet &sheet, const std::string &name) {
+    std::string base;
+    for (unsigned char ch : name)
+        if (ch < 128 && std::isalnum(ch) && base.size() < 64)
+            base += static_cast<char>(ch);
+    if (base.empty() || std::isdigit(static_cast<unsigned char>(base.front())))
+        base = "Style" + base;
+    auto id = base;
+    for (std::size_t n = 2; sheet.find(id) || isBuiltinStyle(id); ++n)
+        id = base + std::to_string(n);
+    return id;
 }
 
 bool isBuiltinStyle(const std::string &id) {

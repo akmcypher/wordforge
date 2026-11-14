@@ -29,6 +29,11 @@ class PageView : public QAbstractScrollArea {
     void formatParagraph(const std::function<void(ParagraphFormat &)> &);
     void applyPreset(ParagraphPreset);
     void updateStyleFromSelection();
+    void applyStyle(const std::string &id);
+    // Style management; each reports a refused change through errorOccurred and returns false.
+    bool createStyleFromSelection(const QString &name);
+    bool renameStyle(const std::string &id, const QString &name);
+    bool deleteStyle(const std::string &id);
     void clearCharacterFormatting();
     void insertPageBreak();
     void setPage(PageStyle);

@@ -22,7 +22,6 @@
 #include <cmath>
 namespace wf {
 namespace {
-const QStringList styleIds{"styleNormal", "styleTitle", "styleHeading1", "styleHeading2"};
 const QList<double> spacings{1.0, 1.15, 1.5, 2.0};
 QString spacingId(double value) {
     return "lineSpacing" + QString::number(value).remove('.');
@@ -56,11 +55,12 @@ CompactToolbar::CompactToolbar(PageView *view, Commands &commands, QMenu *insert
     styles->setObjectName("styleCombo");
     styles->setAccessibleName("Paragraph style");
     styles->setFocusPolicy(Qt::ClickFocus);
-    for (const auto &id : styleIds)
-        styles->addItem(Commands::label(commands.get(id)).remove(" style"));
+    styles->setSizeAdjustPolicy(QComboBox::AdjustToContents);
     addWidget(styles);
-    connect(styles, &QComboBox::activated, this,
-            [&commands](int index) { commands.get(styleIds[index])->trigger(); });
+    connect(styles, &QComboBox::activated, this, [view, styles](int index) {
+        view->applyStyle(styles->itemData(index).toString().toStdString());
+        view->setFocus();
+    });
     auto *family = new QComboBox;
     family->setObjectName("fontFamilyCombo");
     family->setAccessibleName("Font family");
@@ -127,7 +127,28 @@ CompactToolbar::CompactToolbar(PageView *view, Commands &commands, QMenu *insert
         family->setToolTip(index < 0 ? name + " is not installed; a similar font is used"
                                      : QString("Font family"));
         size->setValue(static_cast<int>(s.size));
-        styles->setCurrentIndex(static_cast<int>(presetFor(p.style).value_or(ParagraphPreset::Normal)));
+        // Built-in styles first in their fixed order, then the document's own by name.
+        std::vector<const ParagraphStyle *> list;
+        for (const auto *id : {"Normal", "Title", "Heading1", "Heading2"})
+            list.push_back(view->document().styles.find(id));
+        std::vector<const ParagraphStyle *> custom;
+        for (const auto &style : view->document().styles.paragraphStyles)
+            if (!isBuiltinStyle(style.id))
+                custom.push_back(&style);
+        std::sort(custom.begin(), custom.end(), [](const auto *a, const auto *b) {
+            return QString::fromStdString(a->name).localeAwareCompare(QString::fromStdString(b->name)) < 0;
+        });
+        list.insert(list.end(), custom.begin(), custom.end());
+        bool same = styles->count() == static_cast<int>(list.size());
+        for (int i = 0; same && i < styles->count(); ++i)
+            same = styles->itemData(i).toString().toStdString() == list[i]->id &&
+                   styles->itemText(i).toStdString() == list[i]->name;
+        if (!same) {
+            styles->clear();
+            for (const auto *style : list)
+                styles->addItem(QString::fromStdString(style->name), QString::fromStdString(style->id));
+        }
+        styles->setCurrentIndex(styles->findData(QString::fromStdString(p.style)));
     };
     connect(view, &PageView::selectionChanged, this, sync);
     connect(view, &PageView::contentChanged, this, sync);

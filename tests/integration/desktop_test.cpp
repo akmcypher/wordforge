@@ -76,6 +76,7 @@ class DesktopTest : public QObject {
             "bullets", "numbering", "decreaseIndent", "increaseIndent", "alignLeft", "alignCenter",
             "alignRight", "lineSpacing1", "lineSpacing115", "lineSpacing15", "lineSpacing2",
             "styleNormal", "styleTitle", "styleHeading1", "styleHeading2", "updateStyle",
+            "newStyle", "renameStyle", "deleteStyle",
             "pageBreak", "date",
             "symbol0", "symbol6", "picture", "pictureSize", "table", "tableRowAbove", "tableRowBelow",
             "tableColumnLeft", "tableColumnRight", "tableDeleteRow", "tableDeleteColumn",
@@ -922,6 +923,44 @@ class DesktopTest : public QObject {
         QCOMPARE(wf::resolveStyle(document.styles, "Heading1").character.family,
                  std::string("Georgia"));
         QCOMPARE(document.paragraphs[1].runs[0].direct, std::uint16_t(0));
+    }
+    void customStylesAppearInTheStyleBoxAndPersist() {
+        QTemporaryDir directory;
+        const auto path = directory.filePath("custom.wfg");
+        {
+            wf::MainWindow window;
+            auto *view = window.pageView();
+            auto *styles = window.findChild<QComboBox *>("styleCombo");
+            view->insertText("quote\nbody");
+            QTest::keyClick(view, Qt::Key_Home, Qt::ControlModifier);
+            QTest::keyClick(view, Qt::Key_End, Qt::ShiftModifier);
+            view->format([](auto &s) { s.italic = true; });
+            QVERIFY(!window.findChild<QAction *>("renameStyleAction")->isEnabled());
+            QVERIFY(view->createStyleFromSelection("Pull quote"));
+            QCOMPARE(styles->count(), 5);
+            QCOMPARE(styles->currentText(), QString("Pull quote"));
+            QVERIFY(window.findChild<QAction *>("renameStyleAction")->isEnabled());
+            QVERIFY(window.findChild<QAction *>("deleteStyleAction")->isEnabled());
+            // Apply it to the second paragraph from the style box.
+            QTest::keyClick(view, Qt::Key_End, Qt::ControlModifier);
+            emit styles->activated(styles->findText("Pull quote"));
+            QVERIFY(view->document().paragraphs[1].runs[0].style.italic);
+            QVERIFY(view->renameStyle("Pullquote", "Quote"));
+            QCOMPARE(styles->itemText(4), QString("Quote"));
+            window.saveFile(path);
+            QVERIFY(view->deleteStyle("Pullquote"));
+            QCOMPARE(styles->count(), 4);
+            QVERIFY(!view->document().paragraphs[1].runs[0].style.italic);
+            view->undo();
+            QCOMPARE(styles->count(), 5);
+        }
+        wf::MainWindow reopened;
+        reopened.openFile(path);
+        auto *styles = reopened.findChild<QComboBox *>("styleCombo");
+        QCOMPARE(styles->count(), 5);
+        QCOMPARE(styles->itemText(4), QString("Quote"));
+        QCOMPARE(QString::fromStdString(reopened.pageView()->document().paragraphs[0].style),
+                 QString("Pullquote"));
     }
     void spellCheckLoadsDictionaryFromUnicodeFolder() {
         // Users unpack the portable build anywhere; Hunspell must open it from such a folder.

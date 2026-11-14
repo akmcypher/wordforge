@@ -8,12 +8,37 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFormLayout>
+#include <QInputDialog>
+#include <QLineEdit>
+#include <QMessageBox>
 #include <QSpinBox>
 #include <QLocale>
 #include <QWidget>
 #include <algorithm>
 namespace wf {
 namespace {
+// The style of the paragraph holding the caret.
+std::string caretStyle(PageView *view) {
+    return view->document().paragraphs[view->selection().focus.paragraph].style;
+}
+// Asks for a style name; empty when cancelled or the name belongs to another style.
+QString askStyleName(QWidget *window, PageView *view, const QString &title, const QString &current,
+                     const std::string &except = {}) {
+    for (auto name = current;;) {
+        bool ok = false;
+        name = QInputDialog::getText(window, title, "Style name:", QLineEdit::Normal, name, &ok)
+                   .trimmed();
+        if (!ok || name.isEmpty())
+            return {};
+        const auto &styles = view->document().styles.paragraphStyles;
+        const bool taken = std::any_of(styles.begin(), styles.end(), [&](const auto &style) {
+            return style.id != except && QString::fromStdString(style.name) == name;
+        });
+        if (!taken)
+            return name;
+        QMessageBox::information(window, title, "A style named \"" + name + "\" already exists.");
+    }
+}
 bool selectedList(PageView *view, ListKind kind) {
     const auto [first, last] = selectedParagraphs(view->selection());
     for (auto i = first; i <= last; ++i)
@@ -157,6 +182,25 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
                [view, index] { view->applyPreset(static_cast<ParagraphPreset>(index)); });
     create("updateStyle", "Update style to match selection", "Styles",
            [view] { view->updateStyleFromSelection(); });
+    create("newStyle", "New style from selection…", "Styles", [this, view] {
+        if (const auto name = askStyleName(window_, view, "New style", {}); !name.isEmpty())
+            view->createStyleFromSelection(name);
+    });
+    create("renameStyle", "Rename style…", "Styles", [this, view] {
+        const auto id = caretStyle(view);
+        const auto current = QString::fromStdString(view->document().styles.find(id)->name);
+        if (const auto name = askStyleName(window_, view, "Rename style", current, id); !name.isEmpty())
+            view->renameStyle(id, name);
+    });
+    create("deleteStyle", "Delete style", "Styles", [this, view] {
+        const auto id = caretStyle(view);
+        const auto name = QString::fromStdString(view->document().styles.find(id)->name);
+        if (QMessageBox::question(window_, "Delete style",
+                                  "Delete the style \"" + name +
+                                      "\"? Paragraphs using it take the style it is based on.") ==
+            QMessageBox::Yes)
+            view->deleteStyle(id);
+    });
 
     // Insert.
     create("pageBreak", "Page break", "Insert", [view] { view->insertPageBreak(); }, "Ctrl+Enter");
@@ -265,6 +309,8 @@ void Commands::sync() {
     const QStringList styles{"styleNormal", "styleTitle", "styleHeading1", "styleHeading2"};
     for (int n = 0; n < 4; ++n)
         get(styles[n])->setChecked(p.style == presetStyleId(static_cast<ParagraphPreset>(n)));
+    get("renameStyle")->setEnabled(!isBuiltinStyle(p.style));
+    get("deleteStyle")->setEnabled(!isBuiltinStyle(p.style));
     for (double value : {1.0, 1.15, 1.5, 2.0})
         get("lineSpacing" + QString::number(value).remove('.'))
             ->setChecked(std::abs(p.lineSpacing - value) < 0.001);

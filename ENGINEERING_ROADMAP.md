@@ -146,9 +146,15 @@ masks; WFG1–5 and DOCX migrate through `adoptStyles` (docs/WFG_SCHEMA.md). Tes
 `tests/unit/style_test.cpp` (9) plus a desktop end-to-end test. Measured on Windows
 ARM64 versus main: single edit on 34,000 paragraphs 5.1 → 6.3 ms, grouped break
 23.5 → 26.3 ms, peak +4 MiB; layout, save and first paint unchanged within noise.
-Remaining 1C: named character and table styles, theme fonts/colours, creating,
-renaming and deleting styles in the UI, DOCX style export, numbering definitions,
-and delta-based undo storage.
+**Slice 2 delivered (2026-11-14): custom paragraph styles.** `Editor::
+createStyleFromSelection` (based on the caret paragraph's style, appearance kept,
+only differences stay direct), `renameStyle` (custom only; identifiers never change)
+and `deleteStyle` (paragraphs fall back to the base style keeping direct formatting;
+derived styles absorb the deleted style's properties so they look the same; `next`
+references are redirected). Format → Styles → New/Rename/Delete; the toolbar style
+box lists built-ins then the document's styles. Undoable; persisted by WFG6.
+Remaining 1C: named character and table styles, theme fonts/colours, DOCX style
+export, numbering definitions, and delta-based undo storage.
 
 Proposed files: `core/document/styles.*`, `numbering.*`, transaction storage.
 Retain defaults, named paragraph/character/table styles, based-on links, theme

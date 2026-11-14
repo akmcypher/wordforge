@@ -623,6 +623,77 @@ void Editor::updateStyleFromSelection() {
     typingStyle = document.styleAt(selection.focus);
     document.revision = ++serial_;
 }
+std::string Editor::createStyleFromSelection(const std::string &name) {
+    validate(selection);
+    const auto &source = document.paragraphs[selection.focus.paragraph];
+    auto styles = document.styles;
+    const auto base = resolveStyle(styles, source.style);
+    ParagraphStyle style{uniqueStyleId(styles, name), name, source.style, "", {}, {}};
+    style.paragraph = propertiesFor(base.paragraph, source);
+    style.character = propertiesFor(base.character, document.styleAt(selection.focus));
+    styles.paragraphStyles.push_back(style);
+    validateStyles(styles);
+    checkpoint();
+    document.styles = std::move(styles);
+    const auto resolved = resolveStyle(document.styles, style.id);
+    const auto [first, last] = selectedParagraphs(selection);
+    for (auto i = first; i <= last; ++i) {
+        // Same appearance; only what differs from the new style stays direct.
+        auto &paragraph = document.paragraphs[i];
+        paragraph.style = style.id;
+        paragraph.direct =
+            differingFields(static_cast<const ParagraphFormat &>(paragraph), resolved.paragraph);
+        for (auto &run : paragraph.runs)
+            run.direct = differingFields(run.style, resolved.character);
+        paragraph.revision = serial_ + 1;
+    }
+    document.revision = ++serial_;
+    return style.id;
+}
+void Editor::renameStyle(const std::string &id, const std::string &name) {
+    if (isBuiltinStyle(id))
+        throw std::invalid_argument("Built-in styles cannot be renamed");
+    auto styles = document.styles;
+    auto *style = styles.find(id);
+    if (!style)
+        throw std::invalid_argument("Unknown paragraph style: " + id);
+    if (style->name == name)
+        return;
+    style->name = name;
+    validateStyles(styles);
+    checkpoint();
+    document.styles = std::move(styles);
+    document.revision = ++serial_;
+}
+void Editor::deleteStyle(const std::string &id) {
+    if (isBuiltinStyle(id))
+        throw std::invalid_argument("Built-in styles cannot be deleted");
+    const auto *found = document.styles.find(id);
+    if (!found)
+        throw std::invalid_argument("Unknown paragraph style: " + id);
+    const auto removed = *found;
+    const auto replacement = removed.basedOn.empty() ? std::string("Normal") : removed.basedOn;
+    auto styles = document.styles;
+    std::erase_if(styles.paragraphStyles, [&](const auto &style) { return style.id == id; });
+    for (auto &style : styles.paragraphStyles) {
+        if (style.basedOn == id) {
+            fillUnset(style.paragraph, removed.paragraph);
+            fillUnset(style.character, removed.character);
+            style.basedOn = removed.basedOn;
+        }
+        if (style.next == id)
+            style.next = replacement == style.id ? "" : replacement;
+    }
+    validateStyles(styles);
+    checkpoint();
+    document.styles = std::move(styles);
+    for (auto &paragraph : document.paragraphs)
+        if (paragraph.style == id)
+            paragraph.style = replacement;
+    restyle();
+    typingStyle = document.styleAt(selection.focus);
+    document.revision = ++serial_;
+}
 void Editor::insertParagraphBreak() {
     validate(selection);
     const auto &current = document.paragraphs[selection.focus.paragraph];

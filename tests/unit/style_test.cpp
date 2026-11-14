@@ -204,3 +204,100 @@ TEST(Styles, TypingClearingAndJoiningKeepTheInvariant) {
         if (paragraph.cell)
             EXPECT_EQ(paragraph.runs.front().style.family, "Georgia");
 }
+
+TEST(Styles, NewStyleFromSelectionKeepsAppearanceAndRestylesFollowers) {
+    auto e = headingsAndBody();
+    e.selection = {{2, 0}, {2, 4}};
+    e.format([](auto &s) {
+        s.family = "Georgia";
+        s.color = 0xff336699;
+    });
+    e.selection = {{2, 0}, {2, 0}};
+    e.formatParagraph([](auto &p) { p.spaceBefore = 18; });
+    const auto before = e.document.paragraphs[2];
+    e.selection = {{2, 1}, {2, 1}};
+    const auto id = e.createStyleFromSelection("Quote");
+    EXPECT_EQ(id, "Quote");
+    EXPECT_NO_THROW(validateDocument(e.document));
+    const auto &after = e.document.paragraphs[2];
+    EXPECT_EQ(after.style, "Quote");
+    EXPECT_EQ(static_cast<const ParagraphFormat &>(after), static_cast<const ParagraphFormat &>(before));
+    EXPECT_EQ(after.runs.front().style, before.runs.front().style);
+    EXPECT_EQ(after.direct, 0);
+    EXPECT_EQ(after.runs.front().direct, 0);
+    const auto *quote = e.document.styles.find("Quote");
+    ASSERT_NE(quote, nullptr);
+    EXPECT_EQ(quote->basedOn, "Normal");
+    EXPECT_EQ(quote->character.family, "Georgia");
+    EXPECT_EQ(quote->paragraph.spaceBefore, 18);
+    // A second style with a name that maps to the same identifier gets a fresh one.
+    EXPECT_EQ(e.createStyleFromSelection("Quote!"), "Quote2");
+    EXPECT_THROW(e.createStyleFromSelection("Quote"), std::invalid_argument); // duplicate name
+    EXPECT_THROW(e.createStyleFromSelection(""), std::invalid_argument);
+    EXPECT_EQ(uniqueStyleId(e.document.styles, "Heading 1"), "Heading12");
+    EXPECT_EQ(uniqueStyleId(e.document.styles, "Цитата"), "Style");
+    // Undo removes the second style and gives the paragraph back to Quote.
+    ASSERT_TRUE(e.undo());
+    EXPECT_EQ(e.document.styles.find("Quote2"), nullptr);
+    EXPECT_EQ(e.document.paragraphs[2].style, "Quote");
+}
+
+TEST(Styles, RenamingKeepsIdentifierAndPersists) {
+    auto e = headingsAndBody();
+    e.selection = {{2, 0}, {2, 0}};
+    const auto id = e.createStyleFromSelection("Body text");
+    e.renameStyle(id, "Body copy");
+    EXPECT_EQ(e.document.styles.find(id)->name, "Body copy");
+    EXPECT_EQ(e.document.paragraphs[2].style, id);
+    EXPECT_THROW(e.renameStyle("Heading1", "Chapter"), std::invalid_argument);
+    EXPECT_THROW(e.renameStyle(id, "Title"), std::invalid_argument); // name in use
+    EXPECT_THROW(e.renameStyle("Missing", "X"), std::invalid_argument);
+    const auto reopened = parseNative(serializeNative(e.document));
+    EXPECT_EQ(reopened.styles, e.document.styles);
+    EXPECT_EQ(reopened.paragraphs[2].style, id);
+    ASSERT_TRUE(e.undo());
+    EXPECT_EQ(e.document.styles.find(id)->name, "Body text");
+}
+
+TEST(Styles, DeletingAStyleFallsBackToItsBaseAndKeepsDerivedStylesLooking) {
+    auto e = headingsAndBody();
+    // Callout (based on Normal): bold, 14 pt. Warning (based on Callout): red.
+    e.selection = {{2, 0}, {2, 4}};
+    e.format([](auto &s) {
+        s.bold = true;
+        s.size = 14;
+    });
+    e.selection = {{2, 0}, {2, 0}};
+    const auto callout = e.createStyleFromSelection("Callout");
+    e.replace(u"Warn\n");
+    e.selection = {{2, 0}, {2, 4}};
+    e.format([](auto &s) { s.color = 0xffcc0000; });
+    e.selection = {{2, 1}, {2, 1}};
+    const auto warning = e.createStyleFromSelection("Warning");
+    ASSERT_EQ(e.document.paragraphs[3].style, callout);
+    // Enter after a Warning paragraph continues as Callout.
+    e.document.styles.find(warning)->next = callout;
+    const auto warningLook = e.document.paragraphs[2].runs.front().style;
+    // Direct italic on the Callout paragraph survives deletion.
+    e.selection = {{3, 0}, {3, 4}};
+    e.format([](auto &s) { s.italic = true; });
+
+    e.deleteStyle(callout);
+    EXPECT_NO_THROW(validateDocument(e.document));
+    EXPECT_EQ(e.document.styles.find(callout), nullptr);
+    const auto *derived = e.document.styles.find(warning);
+    EXPECT_EQ(derived->basedOn, "Normal");
+    EXPECT_EQ(derived->next, "Normal");
+    EXPECT_EQ(e.document.paragraphs[2].runs.front().style, warningLook);
+    const auto &body = e.document.paragraphs[3];
+    EXPECT_EQ(body.style, "Normal");
+    EXPECT_FALSE(body.runs.front().style.bold);  // came from Callout
+    EXPECT_EQ(body.runs.front().style.size, 12); // Normal's size
+    EXPECT_TRUE(body.runs.front().style.italic); // direct
+    EXPECT_THROW(e.deleteStyle("Normal"), std::invalid_argument);
+    EXPECT_THROW(e.deleteStyle(callout), std::invalid_argument);
+    ASSERT_TRUE(e.undo());
+    EXPECT_NE(e.document.styles.find(callout), nullptr);
+    EXPECT_EQ(e.document.paragraphs[3].style, callout);
+    EXPECT_TRUE(e.document.paragraphs[3].runs.front().style.bold);
+}
