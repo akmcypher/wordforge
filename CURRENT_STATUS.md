@@ -1,5 +1,11 @@
 # Current status
 
+2026-11-14 — Windows installer (docs/WINDOWS.md → Installer). Inno Setup script builds
+`Wordforge-<version>-windows-<arch>-setup.exe` from the packaged folder: per-user install,
+Start menu entry, uninstaller, `.wfg` association, "Open with" for `.docx`/`.txt`. CI
+installs it silently, runs `--self-test` from the install and uninstalls; tag releases
+publish it beside the ZIPs. Not code-signed yet (needs a publisher account).
+
 2026-11-13 — Phase 1C slice 1: semantic paragraph styles (ENGINEERING_ROADMAP.md
 → 1C). Built-in styles with based-on inheritance replace presets; direct
 formatting is tracked per property, so updating a style restyles inheriting text
