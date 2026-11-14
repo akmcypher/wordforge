@@ -188,6 +188,16 @@ class Editor {
     // character formatting at the caret); every paragraph using or inheriting from the
     // style follows, except for properties they set directly.
     void updateStyleFromSelection();
+    // Defines a new paragraph style named `name` from the caret paragraph (based on its
+    // current style) and gives it to the selected paragraphs without changing how they
+    // look. Returns the new style's identifier.
+    std::string createStyleFromSelection(const std::string &name);
+    // Renames a custom style; built-in styles keep their names.
+    void renameStyle(const std::string &id, const std::string &name);
+    // Removes a custom style. Its paragraphs take the style it was based on (keeping
+    // their direct formatting); styles based on it absorb its properties so they look
+    // the same.
+    void deleteStyle(const std::string &id);
     // Removes direct character formatting from the selection (or the typing style).
     void clearCharacterFormatting();
     void insertParagraphBreak();

@@ -1,5 +1,12 @@
 # Current status
 
+2026-11-14 — Phase 1C slice 2: custom paragraph styles (ENGINEERING_ROADMAP.md → 1C).
+Format → Styles → New style from selection / Rename style / Delete style; the toolbar
+style box lists the built-ins then the document's own styles. New styles keep the
+text's appearance; deleting one falls back to its base style and keeps derived styles
+looking the same. Undoable, saved in WFG6. Windows ARM64: all 6 suites pass (3 new
+style cases, one new desktop case); Ubuntu by CI.
+
 2026-11-14 — Windows installer (docs/WINDOWS.md → Installer). Inno Setup script builds
 `Wordforge-<version>-windows-<arch>-setup.exe` from the packaged folder: per-user install,
 Start menu entry, uninstaller, `.wfg` association, "Open with" for `.docx`/`.txt`. CI

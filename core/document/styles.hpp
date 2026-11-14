@@ -41,6 +41,12 @@ struct StyleSheet {
     bool operator==(const StyleSheet &) const = default;
 };
 
+// Sets each property `target` leaves unset to `fallback`'s value.
+void fillUnset(CharacterProperties &target, const CharacterProperties &fallback);
+void fillUnset(ParagraphProperties &target, const ParagraphProperties &fallback);
+// A style identifier derived from `name` (ASCII letters and digits) that `sheet` does not use.
+std::string uniqueStyleId(const StyleSheet &sheet, const std::string &name);
+
 // Normal, Title, Heading1 and Heading2; every document has them and they cannot be removed.
 StyleSheet builtinStyles();
 bool isBuiltinStyle(const std::string &id);

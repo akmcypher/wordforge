@@ -436,7 +436,8 @@ void MainWindow::buildUi() {
     fill(format->addMenu("Line spacing"),
          {"lineSpacing1", "lineSpacing115", "lineSpacing15", "lineSpacing2"});
     fill(format->addMenu("Styles"),
-         {"styleNormal", "styleTitle", "styleHeading1", "styleHeading2", "", "updateStyle"});
+         {"styleNormal", "styleTitle", "styleHeading1", "styleHeading2", "", "updateStyle",
+          "newStyle", "renameStyle", "deleteStyle"});
     format->addSeparator();
     format->addAction(commands->get("pictureSize"));
     fill(format->addMenu("Table"), {"tableRowAbove", "tableRowBelow", "tableColumnLeft",
