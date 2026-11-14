@@ -1,9 +1,10 @@
 name: Windows release
 
-# Builds the portable Windows packages (x64 and ARM64), runs the test suite, then checks each
-# package with tools/test-windows-package.ps1: unzipped into a Unicode folder with no MSYS2 or
-# other development folders on PATH. A pushed v* tag publishes both ZIPs and their checksums
-# as a versioned GitHub release; pull requests touching Windows packaging only build and test.
+# Builds the portable Windows packages and installers (x64 and ARM64), runs the test suite,
+# then checks each with tools/test-windows-package.ps1: unzipped, or silently installed and then
+# uninstalled, in a Unicode folder with no MSYS2 or other development folders on PATH. A pushed
+# v* tag publishes the ZIPs, installers and checksums as a versioned GitHub release; pull
+# requests touching Windows packaging only build and test.
 on:
   push:
     tags: ['v*']
@@ -101,11 +102,34 @@ jobs:
         run: |
           $zip = Get-ChildItem out\Wordforge-*-windows-${{ matrix.arch }}.zip | Select-Object -First 1
           & tools\test-windows-package.ps1 -Package $zip.FullName
+      # The installer packs the same staged folder as the ZIP (packaging/windows/wordforge.iss).
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup --version=6.4.3 -y --no-progress }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup not found at $iscc" }
+          $zip = Get-ChildItem out\Wordforge-*-windows-${{ matrix.arch }}.zip | Select-Object -First 1
+          $stage = Join-Path $zip.DirectoryName $zip.BaseName
+          $version = ($zip.BaseName -split '-')[1]
+          & $iscc /Qp "/DAppVersion=$version" "/DArch=${{ matrix.arch }}" "/DSourceDir=$stage" `
+            "/O$($zip.DirectoryName)" packaging\windows\wordforge.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+          $setup = Get-Item "out\$($zip.BaseName)-setup.exe"
+          $digest = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText("$($setup.FullName).sha256", "$digest  $($setup.Name)`n")
+          "built $($setup.Name): $([math]::Round($setup.Length / 1MB, 1)) MB"
+      - name: Test the installer (install, self-test, uninstall)
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem out\Wordforge-*-windows-${{ matrix.arch }}-setup.exe | Select-Object -First 1
+          & tools\test-windows-package.ps1 -Package $setup.FullName
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: wordforge-windows-${{ matrix.arch }}
           path: |
             out/*.zip
+            out/*-setup.exe
             out/*.sha256
           if-no-files-found: error
 
@@ -133,4 +157,4 @@ jobs:
           cat dist/*.sha256 > dist/SHA256SUMS.txt
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "Wordforge ${TAG#v} developer preview" --notes-file "$notes" \
-            dist/*.zip dist/SHA256SUMS.txt
+            dist/*.zip dist/*-setup.exe dist/SHA256SUMS.txt

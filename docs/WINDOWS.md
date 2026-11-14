@@ -65,13 +65,29 @@ whose name is not representable in the system's ANSI code page (found by the
 package test; covered by `spellCheckLoadsDictionaryFromUnicodeFolder`). The UTF-8
 code page needs Windows 10 version 1903 or later.
 
+## Installer
+
+`packaging/windows/wordforge.iss` (Inno Setup 6.3+) packs the same staged folder as
+the ZIP into `Wordforge-<version>-windows-<arch>-setup.exe`. It installs per user by
+default (no administrator prompt; an all-users install is offered), adds a Start menu
+shortcut and an optional desktop shortcut, registers an uninstaller, makes Wordforge
+the handler for `.wfg` and adds it to "Open with" for `.docx` and `.txt` without
+taking those types from their current program. CI compiles it after the ZIP test:
+
+```powershell
+ISCC /DAppVersion=0.6.1 /DArch=x64 /DSourceDir=<abs path>\out\Wordforge-0.6.1-windows-x64 /Oout packaging\windows\wordforge.iss
+```
+
 ## Checking a package
 
 ```powershell
 tools\test-windows-package.ps1 -Package out\Wordforge-0.6.1-windows-x64.zip
 ```
 
-It verifies the checksum, unpacks into a temporary folder with a Cyrillic name,
+Given a `-setup.exe` instead, it installs silently for the current user into the
+Unicode folder, checks the `.wfg` association, runs the self-test, then uninstalls
+and checks that the files and the association are gone. For a ZIP,
+it verifies the checksum, unpacks into a temporary folder with a Cyrillic name,
 reduces `PATH` to the Windows system folders, removes `QT_*` and `WORDFORGE_*`
 variables, and runs `Wordforge.exe --self-test <report>`. The self-test, also run by
 CTest as `self_test`, checks without opening a window:
@@ -97,4 +113,6 @@ CTest as `self_test`, checks without opening a window:
   reader, or with a physical printer. Interactive features (editing, tables,
   pictures, undo, themes, recovery, dialogs) are covered by the desktop test suite
   on Windows rather than by the package test.
-* The packages are not code-signed, and there is no installer yet.
+* The packages and installers are not code-signed, so SmartScreen warns on first run.
+  Signing (Microsoft Store/MSIX, SignPath or Azure Trusted Signing) needs an account
+  in the publisher's name and is not set up.

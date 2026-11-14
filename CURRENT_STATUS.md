@@ -1,5 +1,11 @@
 # Current status
 
+2026-11-14 — Windows installer (docs/WINDOWS.md → Installer). Inno Setup script builds
+`Wordforge-<version>-windows-<arch>-setup.exe` from the packaged folder: per-user install,
+Start menu entry, uninstaller, `.wfg` association, "Open with" for `.docx`/`.txt`. CI
+installs it silently, runs `--self-test` from the install and uninstalls; tag releases
+publish it beside the ZIPs. Not code-signed yet (needs a publisher account).
+
 2026-11-13 — Snap 0.6.1-preview on `latest/stable` (amd64 rev 5, arm64 rev 4),
 both passing the CI strict-confinement self-test with zero AppArmor denials after
 the `CUPS_SERVER` launcher fix. Listing: https://snapcraft.io/wordforge. An
