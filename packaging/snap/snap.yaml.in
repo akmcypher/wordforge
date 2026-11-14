@@ -1,6 +1,6 @@
 name: wordforge
 title: Wordforge - Word Processor
-version: '0.6.2-preview'
+version: '0.6.3-preview'
 summary: Word processor for fast, private writing - DOCX, PDF and spell check
 description: |
   Wordforge is a fast, native word processor and document editor for Linux. It
