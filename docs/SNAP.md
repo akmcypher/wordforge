@@ -1,8 +1,8 @@
 # Ubuntu Snap preview
 
-2026-11-12 local date. Wordforge is a developer preview, not a stable
-replacement for Microsoft Word. The candidate Snap name `wordforge` has not
-been registered or verified available. No Store upload has been performed.
+Wordforge is a developer preview, not a stable replacement for Microsoft Word.
+The snap `wordforge` is published on the Snap Store (`latest/stable` since
+2026-11-13; see Publication record): `sudo snap install wordforge`.
 
 ## Build
 
@@ -98,6 +98,20 @@ tables/images, broader desktop testing and recovery across upgrades remain open.
   `latest/edge`: arm64 revision 2 (local build of d344e7e) and amd64 revision 3
   (CI artifact of PR #1's merge ref). Strict confinement on a real Ubuntu desktop
   is still untested.
+* 2026-11-13: 0.6.1-preview promoted to `latest/stable`: amd64 revision 5 and
+  arm64 revision 4. Before release, both passed the CI strict-confinement test
+  (installed snap, `--self-test`, real Ubuntu runner kernel) with zero AppArmor
+  denials. That test first caught TCP denials from libcups falling back to
+  `localhost:631`; `packaging/snap/wordforge-launch` now sets `CUPS_SERVER` to the
+  cups interface socket `/run/cups/cups.sock` (unless already set), so the
+  network-free snap never tries TCP (df43f29).
+* Store listing live at <https://snapcraft.io/wordforge>: title "Wordforge - Word
+  Processor", summary, description, icon, two screenshots, categories Productivity
+  and Utilities. Snap Store search for "wordforge" ranks it #1 and "word processor"
+  #3 (checked 2026-11-13).
+* Still not done: an interactive strict-confinement session on a real Ubuntu
+  desktop (X11 and Wayland, dialogs, printing to a real printer). The CI test is
+  headless.
 
 ## Automatic edge releases
 

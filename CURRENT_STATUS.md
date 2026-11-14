@@ -1,5 +1,10 @@
 # Current status
 
+2026-11-13 — Snap 0.6.1-preview on `latest/stable` (amd64 rev 5, arm64 rev 4),
+both passing the CI strict-confinement self-test with zero AppArmor denials after
+the `CUPS_SERVER` launcher fix. Listing: https://snapcraft.io/wordforge. An
+interactive real-desktop test is still pending (docs/SNAP.md → Publication record).
+
 2026-11-13 — Phase 1C slice 1: semantic paragraph styles (ENGINEERING_ROADMAP.md
 → 1C). Built-in styles with based-on inheritance replace presets; direct
 formatting is tracked per property, so updating a style restyles inheriting text
