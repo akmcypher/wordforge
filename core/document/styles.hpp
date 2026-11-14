@@ -34,17 +34,36 @@ struct ParagraphStyle {
     bool operator==(const ParagraphStyle &) const = default;
 };
 
+// A named character style. Runs that use it inherit its properties on top of their
+// paragraph style's character formatting; `basedOn` names another character style.
+struct NamedCharacterStyle {
+    std::string id, name, basedOn;
+    CharacterProperties character;
+    bool operator==(const NamedCharacterStyle &) const = default;
+};
+
 struct StyleSheet {
     std::vector<ParagraphStyle> paragraphStyles;
+    std::vector<NamedCharacterStyle> characterStyles;
     const ParagraphStyle *find(const std::string &id) const;
     ParagraphStyle *find(const std::string &id);
+    const NamedCharacterStyle *findCharacter(const std::string &id) const;
+    NamedCharacterStyle *findCharacter(const std::string &id);
     bool operator==(const StyleSheet &) const = default;
 };
+
+// A character style's properties after following its based-on chain.
+CharacterProperties resolveCharacterStyle(const StyleSheet &, const std::string &id);
+// What a run inherits: its paragraph style's character formatting with its character
+// style (empty: none) applied on top.
+CharacterStyle inheritedCharacter(const StyleSheet &, CharacterStyle paragraphCharacter,
+                                  const std::string &characterStyle);
 
 // Sets each property `target` leaves unset to `fallback`'s value.
 void fillUnset(CharacterProperties &target, const CharacterProperties &fallback);
 void fillUnset(ParagraphProperties &target, const ParagraphProperties &fallback);
-// A style identifier derived from `name` (ASCII letters and digits) that `sheet` does not use.
+// A style identifier derived from `name` (ASCII letters and digits) that no paragraph or
+// character style in `sheet` uses.
 std::string uniqueStyleId(const StyleSheet &sheet, const std::string &name);
 
 // Normal, Title, Heading1 and Heading2; every document has them and they cannot be removed.

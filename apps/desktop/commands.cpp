@@ -18,8 +18,19 @@
 namespace wf {
 namespace {
 // The style of the paragraph holding the caret.
+// The style Rename/Delete act on: the character style of the text at the caret if it
+// has one, otherwise the caret paragraph's style.
 std::string caretStyle(PageView *view) {
-    return view->document().paragraphs[view->selection().focus.paragraph].style;
+    const auto &document = view->document();
+    const auto &characterStyle = document.runAt(view->selection().focus).characterStyle;
+    return characterStyle.empty() ? document.paragraphs[view->selection().focus.paragraph].style
+                                  : characterStyle;
+}
+QString styleName(PageView *view, const std::string &id) {
+    const auto &styles = view->document().styles;
+    if (const auto *style = styles.findCharacter(id))
+        return QString::fromStdString(style->name);
+    return QString::fromStdString(styles.find(id)->name);
 }
 // Asks for a style name; empty when cancelled or the name belongs to another style.
 QString askStyleName(QWidget *window, PageView *view, const QString &title, const QString &current,
@@ -30,10 +41,13 @@ QString askStyleName(QWidget *window, PageView *view, const QString &title, cons
                    .trimmed();
         if (!ok || name.isEmpty())
             return {};
-        const auto &styles = view->document().styles.paragraphStyles;
-        const bool taken = std::any_of(styles.begin(), styles.end(), [&](const auto &style) {
+        const auto &sheet = view->document().styles;
+        auto same = [&](const auto &style) {
             return style.id != except && QString::fromStdString(style.name) == name;
-        });
+        };
+        const bool taken =
+            std::any_of(sheet.paragraphStyles.begin(), sheet.paragraphStyles.end(), same) ||
+            std::any_of(sheet.characterStyles.begin(), sheet.characterStyles.end(), same);
         if (!taken)
             return name;
         QMessageBox::information(window, title, "A style named \"" + name + "\" already exists.");
@@ -186,18 +200,27 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
         if (const auto name = askStyleName(window_, view, "New style", {}); !name.isEmpty())
             view->createStyleFromSelection(name);
     });
+    create("newCharacterStyle", "New character style from selection…", "Styles", [this, view] {
+        if (const auto name = askStyleName(window_, view, "New character style", {}); !name.isEmpty())
+            view->createCharacterStyleFromSelection(name);
+    });
+    create("removeCharacterStyle", "Remove character style", "Styles",
+           [view] { view->applyCharacterStyle({}); });
     create("renameStyle", "Rename style…", "Styles", [this, view] {
         const auto id = caretStyle(view);
-        const auto current = QString::fromStdString(view->document().styles.find(id)->name);
+        const auto current = styleName(view, id);
         if (const auto name = askStyleName(window_, view, "Rename style", current, id); !name.isEmpty())
             view->renameStyle(id, name);
     });
     create("deleteStyle", "Delete style", "Styles", [this, view] {
         const auto id = caretStyle(view);
-        const auto name = QString::fromStdString(view->document().styles.find(id)->name);
+        const auto name = styleName(view, id);
+        const bool character = view->document().styles.findCharacter(id) != nullptr;
         if (QMessageBox::question(window_, "Delete style",
-                                  "Delete the style \"" + name +
-                                      "\"? Paragraphs using it take the style it is based on.") ==
+                                  "Delete the style \"" + name + "\"? " +
+                                      (character ? "Text using it loses that formatting."
+                                                 : "Paragraphs using it take the style it is "
+                                                   "based on.")) ==
             QMessageBox::Yes)
             view->deleteStyle(id);
     });
@@ -309,8 +332,20 @@ void Commands::sync() {
     const QStringList styles{"styleNormal", "styleTitle", "styleHeading1", "styleHeading2"};
     for (int n = 0; n < 4; ++n)
         get(styles[n])->setChecked(p.style == presetStyleId(static_cast<ParagraphPreset>(n)));
-    get("renameStyle")->setEnabled(!isBuiltinStyle(p.style));
-    get("deleteStyle")->setEnabled(!isBuiltinStyle(p.style));
+    // Rename/Delete name the style they act on.
+    const auto target = caretStyle(view_);
+    const bool custom = !isBuiltinStyle(target);
+    get("renameStyle")->setEnabled(custom);
+    get("deleteStyle")->setEnabled(custom);
+    get("renameStyle")->setText(custom ? "Rename style “" + styleName(view_, target) + "”…"
+                                       : QString("Rename style…"));
+    get("deleteStyle")->setText(custom ? "Delete style “" + styleName(view_, target) + "”"
+                                       : QString("Delete style"));
+    const auto selection = view_->selection();
+    get("newCharacterStyle")->setEnabled(selection.anchor != selection.focus);
+    get("removeCharacterStyle")->setEnabled(
+        !view_->document().runAt(selection.focus).characterStyle.empty() ||
+        selection.anchor != selection.focus);
     for (double value : {1.0, 1.15, 1.5, 2.0})
         get("lineSpacing" + QString::number(value).remove('.'))
             ->setChecked(std::abs(p.lineSpacing - value) < 0.001);

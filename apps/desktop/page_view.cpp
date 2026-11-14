@@ -321,6 +321,13 @@ void PageView::applyStyle(const std::string &id) {
 bool PageView::createStyleFromSelection(const QString &name) {
     return change([&](Editor &candidate) { candidate.createStyleFromSelection(name.toStdString()); });
 }
+bool PageView::createCharacterStyleFromSelection(const QString &name) {
+    return change(
+        [&](Editor &candidate) { candidate.createCharacterStyleFromSelection(name.toStdString()); });
+}
+void PageView::applyCharacterStyle(const std::string &id) {
+    change([&](Editor &candidate) { candidate.applyCharacterStyle(id); });
+}
 bool PageView::renameStyle(const std::string &id, const QString &name) {
     return change([&](Editor &candidate) { candidate.renameStyle(id, name.toStdString()); });
 }

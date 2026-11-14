@@ -69,6 +69,7 @@ bool indentation(pugi::xml_node node) {
     return node.type() == pugi::node_pcdata &&
            std::string_view(node.value()).find_first_not_of(" \t\r\n") == std::string_view::npos;
 }
+void writeCharacterProperties(pugi::xml_node node, const CharacterProperties &c);
 void writeStyle(pugi::xml_node root, const ParagraphStyle &style) {
     auto node = root.append_child("style");
     node.append_attribute("id") = style.id.c_str();
@@ -90,7 +91,9 @@ void writeStyle(pugi::xml_node root, const ParagraphStyle &style) {
         node.append_attribute("after") = *p.spaceAfter;
     if (p.lineSpacing)
         node.append_attribute("line") = *p.lineSpacing;
-    const auto &c = style.character;
+    writeCharacterProperties(node, style.character);
+}
+void writeCharacterProperties(pugi::xml_node node, const CharacterProperties &c) {
     if (c.family)
         node.append_attribute("family") = c.family->c_str();
     if (c.size)
@@ -126,6 +129,19 @@ std::optional<bool> flag(pugi::xml_node node, const char *key) {
         return std::nullopt;
     return boolean(node, key);
 }
+CharacterProperties readCharacterProperties(pugi::xml_node node) {
+    CharacterProperties character;
+    if (node.attribute("family"))
+        character.family = node.attribute("family").value();
+    character.size = real(node, "size", 1, 200);
+    character.bold = flag(node, "bold");
+    character.italic = flag(node, "italic");
+    character.underline = flag(node, "underline");
+    character.strike = flag(node, "strike");
+    character.color = whole<std::uint32_t>(node, "color", 4294967295.0);
+    character.highlight = whole<std::uint32_t>(node, "highlight", 4294967295.0);
+    return character;
+}
 ParagraphStyle readStyle(pugi::xml_node node) {
     attributes(node, {"id", "name", "basedOn", "next", "align", "list", "indent", "before", "after",
                       "line", "family", "size", "bold", "italic", "underline", "strike", "color",
@@ -144,15 +160,20 @@ ParagraphStyle readStyle(pugi::xml_node node) {
     style.paragraph.spaceBefore = real(node, "before", 0, 200);
     style.paragraph.spaceAfter = real(node, "after", 0, 200);
     style.paragraph.lineSpacing = real(node, "line", 1, 3);
-    if (node.attribute("family"))
-        style.character.family = node.attribute("family").value();
-    style.character.size = real(node, "size", 1, 200);
-    style.character.bold = flag(node, "bold");
-    style.character.italic = flag(node, "italic");
-    style.character.underline = flag(node, "underline");
-    style.character.strike = flag(node, "strike");
-    style.character.color = whole<std::uint32_t>(node, "color", 4294967295.0);
-    style.character.highlight = whole<std::uint32_t>(node, "highlight", 4294967295.0);
+    style.character = readCharacterProperties(node);
+    return style;
+}
+NamedCharacterStyle readCharacterStyle(pugi::xml_node node) {
+    attributes(node, {"id", "name", "basedOn", "family", "size", "bold", "italic", "underline",
+                      "strike", "color", "highlight"});
+    for (auto child : node.children())
+        if (!indentation(child))
+            throw std::runtime_error("Unexpected style content");
+    NamedCharacterStyle style;
+    style.id = node.attribute("id").value();
+    style.name = node.attribute("name").value();
+    style.basedOn = node.attribute("basedOn").value();
+    style.character = readCharacterProperties(node);
     return style;
 }
 std::uint16_t mask(pugi::xml_node node, std::uint16_t all) {
@@ -176,7 +197,10 @@ std::string serializeNative(const Document &document) {
     const bool packaged = tables || !imageIds.empty();
     // WFG6 only when styles were customized; built-in styles keep files readable by 0.6.0.
     const bool styled = document.styles != builtinStyles();
-    root.append_attribute("version") = styled                       ? "6"
+    // WFG7 only when character styles exist, so other styled files stay readable by 0.6.2.
+    const bool characterStyled = !document.styles.characterStyles.empty();
+    root.append_attribute("version") = characterStyled              ? "7"
+                                       : styled                     ? "6"
                                        : tables                     ? "5"
                                        : packaged                   ? "4"
                                        : document.bookmarks.empty() ? "2"
@@ -199,6 +223,14 @@ std::string serializeNative(const Document &document) {
     if (styled)
         for (const auto &style : document.styles.paragraphStyles)
             writeStyle(root, style);
+    for (const auto &style : document.styles.characterStyles) {
+        auto node = root.append_child("charStyle");
+        node.append_attribute("id") = style.id.c_str();
+        node.append_attribute("name") = style.name.c_str();
+        if (!style.basedOn.empty())
+            node.append_attribute("basedOn") = style.basedOn.c_str();
+        writeCharacterProperties(node, style.character);
+    }
     for (const auto &table : document.tables) {
         auto node = root.append_child("table");
         node.append_attribute("id") = static_cast<unsigned long long>(table.id);
@@ -255,6 +287,8 @@ std::string serializeNative(const Document &document) {
                     static_cast<unsigned long long>(r.style.highlight);
             if (styled && r.direct)
                 run.append_attribute("direct") = r.direct;
+            if (!r.characterStyle.empty())
+                run.append_attribute("cstyle") = r.characterStyle.c_str();
             if (!image)
                 run.append_child(pugi::node_pcdata).set_value(utf8(r.text()).c_str());
         }
@@ -307,9 +341,11 @@ Document parseNative(const std::string &input) {
     const std::string_view version = root.attribute("version").value();
     if (std::string_view(root.name()) != "wordforge" ||
         (version != "1" && version != "2" && version != "3" && version != "4" && version != "5" &&
-         version != "6"))
+         version != "6" && version != "7"))
         throw std::runtime_error("Unsupported native document version");
-    const bool v6 = version == "6";
+    // WFG7 is WFG6 plus character styles.
+    const bool v7 = version == "7";
+    const bool v6 = version == "6" || v7;
     if (!v6 && packaged != (version == "4" || version == "5"))
         throw std::runtime_error("WFG4/5 require ZIP transport; legacy versions require XML");
     if (version == "1")
@@ -330,6 +366,10 @@ Document parseNative(const std::string &input) {
             continue;
         if (v6 && std::string_view(p.name()) == "style") {
             document.styles.paragraphStyles.push_back(readStyle(p));
+            continue;
+        }
+        if (v7 && std::string_view(p.name()) == "charStyle") {
+            document.styles.characterStyles.push_back(readCharacterStyle(p));
             continue;
         }
         if ((version == "5" || v6) && std::string_view(p.name()) == "table") {
@@ -431,10 +471,10 @@ Document parseNative(const std::string &input) {
             if (image)
                 attributes(r, {"resource", "width", "height", "description", "family", "size",
                                "bold", "italic", "underline", "color", "strike", "highlight",
-                               v6 ? "direct" : "resource"});
+                               v6 ? "direct" : "resource", v7 ? "cstyle" : "resource"});
             else
                 attributes(r, {"family", "size", "bold", "italic", "underline", "color", "strike",
-                               "highlight", v6 ? "direct" : "family"});
+                               "highlight", v6 ? "direct" : "family", v7 ? "cstyle" : "family"});
             for (auto child : r.children())
                 if (image ? !indentation(child)
                           : child.type() != pugi::node_pcdata && child.type() != pugi::node_cdata)
@@ -465,6 +505,11 @@ Document parseNative(const std::string &input) {
                                      run.style);
             if (v6 && r.attribute("direct"))
                 run.direct = mask(r, AllCharacterFields);
+            if (v7 && r.attribute("cstyle")) {
+                run.characterStyle = r.attribute("cstyle").value();
+                if (run.characterStyle.empty())
+                    throw std::runtime_error("Empty character style reference");
+            }
             paragraph.runs.push_back(std::move(run));
         }
         if (paragraph.runs.empty())

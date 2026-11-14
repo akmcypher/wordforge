@@ -1,5 +1,12 @@
 # Current status
 
+2026-11-14 — Phase 1C slice 4: character styles. Format → Styles → New character style
+from selection / Remove character style; they appear after a separator in the style box
+and layer over the paragraph style. Rename/Delete act on the character style at the
+caret when there is one. Saved as WFG7 (only when present) and as DOCX `rStyle`.
+Windows ARM64: all 6 suites pass (4 new core/DOCX cases, one desktop case); Ubuntu by
+CI. No built-in character styles yet; not opened in Microsoft Word.
+
 2026-11-14 — Phase 1C slice 3: DOCX paragraph styles both ways. Export writes every
 style (name, base, next, differing properties) and the real `pStyle`; import keeps the
 custom paragraph styles a document uses, resolving exactly as in Word. Windows ARM64:

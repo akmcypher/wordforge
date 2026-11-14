@@ -32,6 +32,9 @@ class PageView : public QAbstractScrollArea {
     void applyStyle(const std::string &id);
     // Style management; each reports a refused change through errorOccurred and returns false.
     bool createStyleFromSelection(const QString &name);
+    bool createCharacterStyleFromSelection(const QString &name);
+    // Empty `id` removes the character style.
+    void applyCharacterStyle(const std::string &id);
     bool renameStyle(const std::string &id, const QString &name);
     bool deleteStyle(const std::string &id);
     void clearCharacterFormatting();

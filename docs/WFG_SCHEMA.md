@@ -1,5 +1,16 @@
 # Native WFG schema and migration
 
+**WFG7 (character styles)** is written only when the document has character styles, so
+other files keep WFG6 or older. It is WFG6 plus root-level `charStyle` elements (`id`,
+`name`, optional `basedOn` naming another character style, and only the character
+properties the style sets) and an optional run/image attribute `cstyle` naming the run's
+character style. A run inherits its paragraph style's character formatting with its
+character style on top; `direct` marks what differs from that. Identifiers and names are
+unique across paragraph and character styles. Unknown references, cycles and `cstyle` or
+`charStyle` in WFG6 are rejected. DOCX exports them as `w:type="character"` styles and
+`rStyle`; import keeps the character styles runs use, with the properties their own
+definition sets.
+
 **WFG6 (semantic paragraph styles)** is written only when the style sheet differs
 from the built-in one, so documents using built-in styles stay readable by 0.6.0.
 WFG6 uses XML, or ZIP when pictures or tables exist, and may contain every WFG2–5

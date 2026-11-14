@@ -451,6 +451,54 @@ DocxImport parseDocx(const std::string &bytes) {
     std::string previousNum;
     // Custom paragraph styles become Wordforge styles: each records what differs from the
     // style it is based on, so its paragraphs resolve to exactly what Word shows.
+    auto styleNameTaken = [&](const std::string &candidate) {
+        const auto &sheet = document.styles;
+        return std::any_of(sheet.paragraphStyles.begin(), sheet.paragraphStyles.end(),
+                           [&](const auto &other) { return other.name == candidate; }) ||
+               std::any_of(sheet.characterStyles.begin(), sheet.characterStyles.end(),
+                           [&](const auto &other) { return other.name == candidate; });
+    };
+    // Character styles keep only the properties their own definition sets.
+    std::map<std::string, std::string> importedCharacterStyles; // DOCX id -> Wordforge id
+    std::function<std::string(const std::string &, unsigned)> importCharacterStyle;
+    importCharacterStyle = [&](const std::string &id, unsigned depth) -> std::string {
+        if (id.empty())
+            return {};
+        if (auto done = importedCharacterStyles.find(id); done != importedCharacterStyles.end())
+            return done->second;
+        const auto found = styleNodes.find(id);
+        importedCharacterStyles[id] = {}; // until defined; also ends any base cycle
+        if (found == styleNodes.end() || attr(found->second, "type") != "character" || depth > 64 ||
+            document.styles.paragraphStyles.size() + document.styles.characterStyles.size() >= 1024)
+            return {};
+        const auto node = found->second;
+        NamedCharacterStyle style;
+        style.basedOn = importCharacterStyle(val(child(node, "basedOn")), depth + 1);
+        style.id = id;
+        if (id.size() > 128 || document.styles.find(id) || document.styles.findCharacter(id) ||
+            std::any_of(id.begin(), id.end(), [](char ch) { return static_cast<unsigned char>(ch) < 32; }))
+            style.id = uniqueStyleId(document.styles, id);
+        auto name = val(child(node, "name"));
+        if (name.empty() || name.size() > 200)
+            name = style.id;
+        style.name = name;
+        for (int n = 2; styleNameTaken(style.name); ++n)
+            style.name = name + " (" + std::to_string(n) + ")";
+        CharacterStyle own;
+        std::vector<std::string> ignored;
+        runProperties(child(node, "rPr"), own, ignored);
+        style.character = propertiesFor(CharacterStyle{}, own);
+        auto trial = document.styles;
+        trial.characterStyles.push_back(style);
+        try {
+            validateStyles(trial);
+        } catch (const std::exception &) {
+            warn(warnings, "A character style could not be kept; its formatting is applied directly.");
+            return {};
+        }
+        document.styles = std::move(trial);
+        return importedCharacterStyles[id] = style.id;
+    };
     std::map<std::string, std::string> importedStyles; // DOCX id -> Wordforge id
     std::vector<std::pair<std::string, pugi::xml_node>> createdStyles;
     std::function<std::string(const std::string &)> importStyle;
@@ -484,11 +532,7 @@ DocxImport parseDocx(const std::string &bytes) {
         auto name = val(child(node, "name"));
         if (name.empty() || name.size() > 200)
             name = style.id;
-        auto taken = [&](const std::string &candidate) {
-            return std::any_of(document.styles.paragraphStyles.begin(),
-                               document.styles.paragraphStyles.end(),
-                               [&](const auto &other) { return other.name == candidate; });
-        };
+        auto taken = [&](const std::string &candidate) { return styleNameTaken(candidate); };
         style.name = name;
         for (int n = 2; taken(style.name); ++n)
             style.name = name + " (" + std::to_string(n) + ")";
@@ -622,6 +666,8 @@ DocxImport parseDocx(const std::string &bytes) {
                                  "Unsupported inline content was omitted: " + local(item.name()));
                     }
                     paragraph.runs.push_back({std::move(text), std::move(style)});
+                    paragraph.runs.back().characterStyle =
+                        importCharacterStyle(val(child(child(run, "rPr"), "rStyle")), 0);
                 } else
                     warn(warnings,
                          "Unsupported paragraph content was omitted: " + local(run.name()));
@@ -637,6 +683,7 @@ DocxImport parseDocx(const std::string &bytes) {
                 split.runs.push_back(
                     {run.text().substr(start, end == std::u16string::npos ? end : end - start),
                      run.style});
+                split.runs.back().characterStyle = run.characterStyle;
                 if (end == std::u16string::npos)
                     break;
                 document.paragraphs.push_back(split);
@@ -782,6 +829,8 @@ std::string serializeDocx(const Document &document) {
         for (const auto &run : paragraph.runs) {
             auto r = element(p, "r");
             auto rpr = element(r, "rPr");
+            if (!run.characterStyle.empty())
+                property(rpr, "rStyle", run.characterStyle);
             auto fonts = element(rpr, "rFonts");
             for (auto script : {"ascii", "hAnsi", "cs", "eastAsia"})
                 set(fonts, script, run.style.family);
@@ -902,6 +951,49 @@ std::string serializeDocx(const Document &document) {
                               : resolveStyle(document.styles, definition.basedOn);
         writeParagraph(element(style, "pPr"), self.paragraph, &base.paragraph);
         writeCharacter(element(style, "rPr"), self.character, &base.character);
+    }
+    for (const auto &definition : document.styles.characterStyles) {
+        auto style = element(styleRoot, "style");
+        set(style, "type", std::string("character"));
+        set(style, "styleId", definition.id);
+        property(style, "name", definition.name);
+        if (!definition.basedOn.empty())
+            property(style, "basedOn", definition.basedOn);
+        element(style, "qFormat");
+        // Only the properties the style sets, with explicit values.
+        const auto &c = definition.character;
+        auto rpr = element(style, "rPr");
+        if (c.family) {
+            auto fonts = element(rpr, "rFonts");
+            for (auto script : {"ascii", "hAnsi", "cs", "eastAsia"})
+                set(fonts, script, *c.family);
+        }
+        if (c.bold)
+            property(rpr, "b", std::string(*c.bold ? "1" : "0"));
+        if (c.italic)
+            property(rpr, "i", std::string(*c.italic ? "1" : "0"));
+        if (c.strike)
+            property(rpr, "strike", std::string(*c.strike ? "1" : "0"));
+        if (c.color) {
+            if ((*c.color >> 24) != 255)
+                throw std::runtime_error(
+                    "DOCX export cannot preserve transparent text colors; save as .wfg");
+            property(rpr, "color", hex(*c.color));
+        }
+        if (c.size)
+            property(rpr, "sz", *c.size * 2);
+        if (c.highlight && !*c.highlight)
+            property(rpr, "highlight", std::string("none"));
+        if (c.underline)
+            property(rpr, "u", std::string(*c.underline ? "single" : "none"));
+        if (c.highlight && *c.highlight) {
+            if ((*c.highlight >> 24) != 255)
+                throw std::runtime_error(
+                    "DOCX export cannot preserve transparent text colors; save as .wfg");
+            auto shading = element(rpr, "shd");
+            set(shading, "val", std::string("clear"));
+            set(shading, "fill", hex(*c.highlight));
+        }
     }
     opc::Parts parts{
         {"[Content_Types].xml",

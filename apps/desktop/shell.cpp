@@ -57,8 +57,13 @@ CompactToolbar::CompactToolbar(PageView *view, Commands &commands, QMenu *insert
     styles->setFocusPolicy(Qt::ClickFocus);
     styles->setSizeAdjustPolicy(QComboBox::AdjustToContents);
     addWidget(styles);
+    // Items are paragraph styles, then character styles with "c:" before their identifier.
     connect(styles, &QComboBox::activated, this, [view, styles](int index) {
-        view->applyStyle(styles->itemData(index).toString().toStdString());
+        const auto data = styles->itemData(index).toString();
+        if (data.startsWith("c:"))
+            view->applyCharacterStyle(data.mid(2).toStdString());
+        else if (!data.isEmpty())
+            view->applyStyle(data.toStdString());
         view->setFocus();
     });
     auto *family = new QComboBox;
@@ -139,14 +144,31 @@ CompactToolbar::CompactToolbar(PageView *view, Commands &commands, QMenu *insert
             return QString::fromStdString(a->name).localeAwareCompare(QString::fromStdString(b->name)) < 0;
         });
         list.insert(list.end(), custom.begin(), custom.end());
-        bool same = styles->count() == static_cast<int>(list.size());
+        std::vector<std::pair<QString, QString>> items; // text, data; empty data is a separator
+        for (const auto *style : list)
+            items.emplace_back(QString::fromStdString(style->name), QString::fromStdString(style->id));
+        std::vector<const NamedCharacterStyle *> characters;
+        for (const auto &style : view->document().styles.characterStyles)
+            characters.push_back(&style);
+        std::sort(characters.begin(), characters.end(), [](const auto *a, const auto *b) {
+            return QString::fromStdString(a->name).localeAwareCompare(QString::fromStdString(b->name)) < 0;
+        });
+        if (!characters.empty())
+            items.emplace_back(QString(), QString());
+        for (const auto *style : characters)
+            items.emplace_back(QString::fromStdString(style->name) + " (character)",
+                               "c:" + QString::fromStdString(style->id));
+        bool same = styles->count() == static_cast<int>(items.size());
         for (int i = 0; same && i < styles->count(); ++i)
-            same = styles->itemData(i).toString().toStdString() == list[i]->id &&
-                   styles->itemText(i).toStdString() == list[i]->name;
+            same = styles->itemData(i).toString() == items[i].second &&
+                   (items[i].second.isEmpty() || styles->itemText(i) == items[i].first);
         if (!same) {
             styles->clear();
-            for (const auto *style : list)
-                styles->addItem(QString::fromStdString(style->name), QString::fromStdString(style->id));
+            for (const auto &[text, data] : items)
+                if (data.isEmpty())
+                    styles->insertSeparator(styles->count());
+                else
+                    styles->addItem(text, data);
         }
         styles->setCurrentIndex(styles->findData(QString::fromStdString(p.style)));
     };

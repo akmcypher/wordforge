@@ -56,13 +56,16 @@ std::vector<Position> Document::bookmarkPositions() const {
     return positions;
 }
 const CharacterStyle &Document::styleAt(Position position) const {
+    return runAt(position).style;
+}
+const Run &Document::runAt(Position position) const {
     const auto &runs = paragraphs.at(position.paragraph).runs;
     if (runs.empty())
         throw std::invalid_argument("Paragraph requires a text run");
     std::size_t offset = 0;
     for (const auto &run : runs) {
         if (position.offset >= offset && position.offset <= offset + run.text().size())
-            return run.style;
+            return run;
         offset += run.text().size();
     }
     throw std::out_of_range("Caret outside paragraph");

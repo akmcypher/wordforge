@@ -58,7 +58,10 @@ void validateDocument(const Document &document) {
             throw std::invalid_argument("Paragraph formatting disagrees with its style");
         for (const auto &run : paragraph.runs) {
             if ((run.direct & ~AllCharacterFields) ||
-                (differingFields(run.style, style->second.character) & ~run.direct))
+                (differingFields(run.style, inheritedCharacter(document.styles,
+                                                               style->second.character,
+                                                               run.characterStyle)) &
+                 ~run.direct))
                 throw std::invalid_argument("Character formatting disagrees with its style");
             if (const auto *image = run.image()) {
                 validateInlineImage(*image);
@@ -118,7 +121,7 @@ void append(std::vector<Run> &runs, Run run) {
     if (run.text().empty())
         return;
     if (!run.image() && !runs.empty() && !runs.back().image() && runs.back().style == run.style &&
-        runs.back().direct == run.direct)
+        runs.back().direct == run.direct && runs.back().characterStyle == run.characterStyle)
         runs.back().appendText(run.text());
     else
         runs.push_back(std::move(run));
@@ -138,15 +141,17 @@ std::pair<Position, Position> ordered(Selection selection) {
     return {std::min(selection.anchor, selection.focus),
             std::max(selection.anchor, selection.focus)};
 }
-// Gives a paragraph a style and drops all its direct formatting.
-void setStyle(Paragraph &paragraph, const std::string &id, const ResolvedStyle &style) {
+// Gives a paragraph a style and drops all its direct formatting; runs keep their
+// character styles.
+void setStyle(Paragraph &paragraph, const std::string &id, const ResolvedStyle &style,
+              const StyleSheet &sheet) {
     const bool pageBreak = paragraph.pageBreakBefore;
     static_cast<ParagraphFormat &>(paragraph) = style.paragraph;
     paragraph.pageBreakBefore = pageBreak;
     paragraph.style = id;
     paragraph.direct = 0;
     for (auto &run : paragraph.runs) {
-        run.style = style.character;
+        run.style = inheritedCharacter(sheet, style.character, run.characterStyle);
         run.direct = 0;
     }
 }
@@ -391,7 +396,13 @@ void Editor::replaceRange(const std::u16string &input, Selection range, const Ru
     // Text joining from another paragraph keeps its look under this paragraph's style.
     if (end.paragraph != start.paragraph)
         for (auto &run : suffix)
-            run.direct |= differingFields(run.style, inherited);
+            run.direct |= differingFields(
+                run.style, inheritedCharacter(document.styles, inherited, run.characterStyle));
+    // Typed text continues the character style of the run it is typed into.
+    const auto typedCharacterStyle = forcedCharacterStyle_
+                                         ? *forcedCharacterStyle_
+                                         : document.runAt(start).characterStyle;
+    const auto typedInherited = inheritedCharacter(document.styles, inherited, typedCharacterStyle);
     const auto newParagraphs =
         static_cast<std::uint64_t>(std::count(text.begin(), text.end(), u'\n'));
     const auto allocationStart = std::max(document.nextId, idHighWater_);
@@ -416,10 +427,15 @@ void Editor::replaceRange(const std::u16string &input, Selection range, const Ru
         p.runs = replacement.empty() ? std::move(prefix) : std::vector<Run>{};
         if (object) {
             auto inserted = *object;
-            inserted.direct |= differingFields(inserted.style, inherited);
+            inserted.direct |= differingFields(
+                inserted.style,
+                inheritedCharacter(document.styles, inherited, inserted.characterStyle));
             append(p.runs, std::move(inserted));
-        } else
-            append(p.runs, styledRun(text.substr(offset, split - offset), typingStyle, inherited));
+        } else {
+            auto typed = styledRun(text.substr(offset, split - offset), typingStyle, typedInherited);
+            typed.characterStyle = typedCharacterStyle;
+            append(p.runs, std::move(typed));
+        }
         const auto caretOffset = (replacement.empty() ? start.offset : 0) + split - offset;
         if (last)
             for (auto &run : suffix)
@@ -552,7 +568,7 @@ void Editor::applyStyle(const std::string &id) {
     checkpoint();
     document.revision = ++serial_;
     for (auto i = first; i <= last; ++i) {
-        setStyle(document.paragraphs[i], id, style);
+        setStyle(document.paragraphs[i], id, style, document.styles);
         document.paragraphs[i].revision = serial_;
     }
     typingStyle = style.character;
@@ -576,6 +592,7 @@ void Editor::clearCharacterFormatting() {
         for (auto &run : slice(p, a, b)) {
             run.style = inherited;
             run.direct = 0;
+            run.characterStyle.clear();
             append(runs, std::move(run));
         }
         for (auto &run : slice(p, b, p.text().size()))
@@ -597,7 +614,10 @@ void Editor::restyle() {
         const auto before = paragraph;
         inheritFields(paragraph, found->second.paragraph, paragraph.direct);
         for (auto &run : paragraph.runs)
-            inheritFields(run.style, found->second.character, run.direct);
+            inheritFields(run.style,
+                          inheritedCharacter(document.styles, found->second.character,
+                                             run.characterStyle),
+                          run.direct);
         if (paragraph != before)
             paragraph.revision = serial_ + 1;
     }
@@ -618,7 +638,8 @@ void Editor::updateStyleFromSelection() {
     // The source paragraph now matches its style; keep only what still differs from it.
     source.direct = differingFields(static_cast<const ParagraphFormat &>(source), now.paragraph);
     for (auto &run : source.runs)
-        run.direct = differingFields(run.style, now.character);
+        run.direct = differingFields(
+            run.style, inheritedCharacter(document.styles, now.character, run.characterStyle));
     restyle();
     typingStyle = document.styleAt(selection.focus);
     document.revision = ++serial_;
@@ -644,7 +665,9 @@ std::string Editor::createStyleFromSelection(const std::string &name) {
         paragraph.direct =
             differingFields(static_cast<const ParagraphFormat &>(paragraph), resolved.paragraph);
         for (auto &run : paragraph.runs)
-            run.direct = differingFields(run.style, resolved.character);
+            run.direct = differingFields(
+                run.style,
+                inheritedCharacter(document.styles, resolved.character, run.characterStyle));
         paragraph.revision = serial_ + 1;
     }
     document.revision = ++serial_;
@@ -654,12 +677,16 @@ void Editor::renameStyle(const std::string &id, const std::string &name) {
     if (isBuiltinStyle(id))
         throw std::invalid_argument("Built-in styles cannot be renamed");
     auto styles = document.styles;
-    auto *style = styles.find(id);
-    if (!style)
-        throw std::invalid_argument("Unknown paragraph style: " + id);
-    if (style->name == name)
+    std::string *current = nullptr;
+    if (auto *paragraph = styles.find(id))
+        current = &paragraph->name;
+    else if (auto *character = styles.findCharacter(id))
+        current = &character->name;
+    else
+        throw std::invalid_argument("Unknown style: " + id);
+    if (*current == name)
         return;
-    style->name = name;
+    *current = name;
     validateStyles(styles);
     checkpoint();
     document.styles = std::move(styles);
@@ -668,9 +695,32 @@ void Editor::renameStyle(const std::string &id, const std::string &name) {
 void Editor::deleteStyle(const std::string &id) {
     if (isBuiltinStyle(id))
         throw std::invalid_argument("Built-in styles cannot be deleted");
+    if (const auto *character = document.styles.findCharacter(id)) {
+        const auto removed = *character;
+        auto styles = document.styles;
+        std::erase_if(styles.characterStyles, [&](const auto &style) { return style.id == id; });
+        for (auto &style : styles.characterStyles)
+            if (style.basedOn == id) {
+                fillUnset(style.character, removed.character);
+                style.basedOn = removed.basedOn;
+            }
+        validateStyles(styles);
+        checkpoint();
+        document.styles = std::move(styles);
+        for (auto &paragraph : document.paragraphs)
+            for (auto &run : paragraph.runs)
+                if (run.characterStyle == id) {
+                    run.characterStyle = removed.basedOn;
+                    paragraph.revision = serial_ + 1;
+                }
+        restyle();
+        typingStyle = document.styleAt(selection.focus);
+        document.revision = ++serial_;
+        return;
+    }
     const auto *found = document.styles.find(id);
     if (!found)
-        throw std::invalid_argument("Unknown paragraph style: " + id);
+        throw std::invalid_argument("Unknown style: " + id);
     const auto removed = *found;
     const auto replacement = removed.basedOn.empty() ? std::string("Normal") : removed.basedOn;
     auto styles = document.styles;
@@ -694,6 +744,81 @@ void Editor::deleteStyle(const std::string &id) {
     typingStyle = document.styleAt(selection.focus);
     document.revision = ++serial_;
 }
+void Editor::applyCharacterStyle(const std::string &id) {
+    validate(selection);
+    if (!id.empty() && !document.styles.findCharacter(id))
+        throw std::invalid_argument("Unknown character style: " + id);
+    const auto [start, end] = ordered(selection);
+    const auto caret = resolveStyle(document.styles, document.paragraphs[selection.focus.paragraph].style);
+    if (start == end) {
+        typingStyle = inheritedCharacter(document.styles, caret.character, id);
+        return;
+    }
+    checkpoint();
+    for (auto i = start.paragraph; i <= end.paragraph; ++i) {
+        auto &p = document.paragraphs[i];
+        const auto paragraphCharacter = resolveStyle(document.styles, p.style).character;
+        const auto a = i == start.paragraph ? start.offset : 0,
+                   b = i == end.paragraph ? end.offset : p.text().size();
+        auto runs = slice(p, 0, a);
+        for (auto &run : slice(p, a, b)) {
+            run.characterStyle = id;
+            run.style = inheritedCharacter(document.styles, paragraphCharacter, id);
+            run.direct = 0;
+            append(runs, std::move(run));
+        }
+        for (auto &run : slice(p, b, p.text().size()))
+            append(runs, std::move(run));
+        if (runs.empty())
+            runs.push_back({u"", paragraphCharacter});
+        p.runs = std::move(runs);
+        p.revision = serial_ + 1;
+    }
+    typingStyle = document.styleAt(selection.focus);
+    document.revision = ++serial_;
+}
+std::string Editor::createCharacterStyleFromSelection(const std::string &name) {
+    validate(selection);
+    const auto [start, end] = ordered(selection);
+    if (start == end)
+        throw std::invalid_argument("Select the text whose formatting the character style should use");
+    // The look of the first selected text, relative to its paragraph style.
+    auto first = start;
+    while (first.offset == document.paragraphs[first.paragraph].text().size() && first < end)
+        first = {first.paragraph + 1, 0};
+    const auto &paragraph = document.paragraphs[first.paragraph];
+    const auto paragraphCharacter = resolveStyle(document.styles, paragraph.style).character;
+    const auto selected = slice(paragraph, first.offset, paragraph.text().size());
+    const auto &look = selected.empty() ? document.styleAt(first) : selected.front().style;
+    auto styles = document.styles;
+    NamedCharacterStyle style{uniqueStyleId(styles, name), name, "", {}};
+    style.character = propertiesFor(paragraphCharacter, look);
+    styles.characterStyles.push_back(style);
+    validateStyles(styles);
+    checkpoint();
+    document.styles = std::move(styles);
+    for (auto i = start.paragraph; i <= end.paragraph; ++i) {
+        auto &p = document.paragraphs[i];
+        const auto inherited =
+            inheritedCharacter(document.styles, resolveStyle(document.styles, p.style).character, style.id);
+        const auto a = i == start.paragraph ? start.offset : 0,
+                   b = i == end.paragraph ? end.offset : p.text().size();
+        auto runs = slice(p, 0, a);
+        for (auto &run : slice(p, a, b)) {
+            // Same appearance; only what differs from the new style stays direct.
+            run.characterStyle = style.id;
+            run.direct = differingFields(run.style, inherited);
+            append(runs, std::move(run));
+        }
+        for (auto &run : slice(p, b, p.text().size()))
+            append(runs, std::move(run));
+        if (!runs.empty())
+            p.runs = std::move(runs);
+        p.revision = serial_ + 1;
+    }
+    document.revision = ++serial_;
+    return style.id;
+}
 void Editor::insertParagraphBreak() {
     validate(selection);
     const auto &current = document.paragraphs[selection.focus.paragraph];
@@ -711,7 +836,7 @@ void Editor::insertParagraphBreak() {
     if (body) {
         const auto resolved = resolveStyle(document.styles, next);
         auto &created = document.paragraphs[selection.focus.paragraph];
-        setStyle(created, next, resolved);
+        setStyle(created, next, resolved, document.styles);
         created.revision = document.revision;
         typingStyle = resolved.character;
     }
@@ -806,7 +931,12 @@ void Editor::insertFragment(const std::vector<Paragraph> &fragment) {
                 if (run.image() || run.text().empty())
                     continue;
                 e.typingStyle = run.style;
+                const auto characterStyle = e.document.styles.findCharacter(run.characterStyle)
+                                                ? run.characterStyle
+                                                : std::string();
+                e.forcedCharacterStyle_ = &characterStyle;
                 e.replace(run.text());
+                e.forcedCharacterStyle_ = nullptr;
             }
         }
     });

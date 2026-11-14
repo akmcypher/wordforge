@@ -301,3 +301,109 @@ TEST(Styles, DeletingAStyleFallsBackToItsBaseAndKeepsDerivedStylesLooking) {
     EXPECT_EQ(e.document.paragraphs[3].style, callout);
     EXPECT_TRUE(e.document.paragraphs[3].runs.front().style.bold);
 }
+
+TEST(CharacterStyles, NewStyleKeepsLookAndLayersOverParagraphStyles) {
+    Editor e;
+    e.replace(u"plain accent plain");
+    e.selection = {{0, 6}, {0, 12}};
+    e.format([](auto &s) {
+        s.italic = true;
+        s.color = 0xffcc0000;
+    });
+    const auto look = e.document.styleAt({0, 12});
+    const auto id = e.createCharacterStyleFromSelection("Accent");
+    EXPECT_EQ(id, "Accent");
+    EXPECT_NO_THROW(validateDocument(e.document));
+    const auto &accent = e.document.paragraphs[0].runs[1];
+    EXPECT_EQ(accent.text(), u"accent");
+    EXPECT_EQ(accent.characterStyle, "Accent");
+    EXPECT_EQ(accent.style, look);
+    EXPECT_EQ(accent.direct, 0);
+    const auto *style = e.document.styles.findCharacter("Accent");
+    ASSERT_NE(style, nullptr);
+    EXPECT_EQ(style->character.italic, true);
+    EXPECT_FALSE(style->character.size.has_value()); // same as the paragraph style
+    // Typing inside continues the character style.
+    e.selection = {{0, 9}, {0, 9}};
+    e.replace(u"X");
+    EXPECT_EQ(e.document.paragraphs[0].runs[1].text(), u"accXent");
+    // A new paragraph style shows through: Heading 1 size and weight under Accent's colour.
+    e.applyStyle("Heading1");
+    EXPECT_NO_THROW(validateDocument(e.document));
+    const auto &run = e.document.paragraphs[0].runs[1];
+    EXPECT_EQ(run.characterStyle, "Accent");
+    EXPECT_EQ(run.style.size, 20);
+    EXPECT_TRUE(run.style.bold);
+    EXPECT_EQ(run.style.color, 0xffcc0000u);
+    EXPECT_EQ(e.document.paragraphs[0].runs[0].style.color, 0xff185abdu);
+    // Names are shared with paragraph styles; an empty selection defines nothing.
+    e.selection = {{0, 0}, {0, 3}};
+    EXPECT_THROW(e.createCharacterStyleFromSelection("Title"), std::invalid_argument);
+    e.selection = {{0, 0}, {0, 0}};
+    EXPECT_THROW(e.createCharacterStyleFromSelection("Empty"), std::invalid_argument);
+}
+
+TEST(CharacterStyles, ApplyRemoveClearAndDelete) {
+    Editor e;
+    e.replace(u"one two three");
+    e.selection = {{0, 0}, {0, 3}};
+    e.format([](auto &s) { s.bold = true; });
+    e.createCharacterStyleFromSelection("Strong");
+    // Applying replaces direct formatting on the selected text.
+    e.selection = {{0, 8}, {0, 13}};
+    e.format([](auto &s) { s.underline = true; });
+    e.applyCharacterStyle("Strong");
+    EXPECT_NO_THROW(validateDocument(e.document));
+    const auto &three = e.document.paragraphs[0].runs.back();
+    EXPECT_EQ(three.characterStyle, "Strong");
+    EXPECT_TRUE(three.style.bold);
+    EXPECT_FALSE(three.style.underline);
+    e.renameStyle("Strong", "Loud");
+    EXPECT_EQ(e.document.styles.findCharacter("Strong")->name, "Loud");
+    // Removing the style from "three" leaves "one" styled.
+    e.applyCharacterStyle("");
+    EXPECT_TRUE(e.document.paragraphs[0].runs.back().characterStyle.empty());
+    EXPECT_FALSE(e.document.paragraphs[0].runs.back().style.bold);
+    EXPECT_EQ(e.document.paragraphs[0].runs.front().characterStyle, "Strong");
+    // Clear formatting also removes character styles.
+    e.selection = {{0, 0}, {0, 3}};
+    e.clearCharacterFormatting();
+    EXPECT_TRUE(e.document.paragraphs[0].runs.front().characterStyle.empty());
+    ASSERT_TRUE(e.undo());
+    EXPECT_EQ(e.document.paragraphs[0].runs.front().characterStyle, "Strong");
+    // Deleting the style returns its text to the paragraph style, keeping direct italic.
+    e.format([](auto &s) { s.italic = true; });
+    e.deleteStyle("Strong");
+    EXPECT_NO_THROW(validateDocument(e.document));
+    EXPECT_TRUE(e.document.styles.characterStyles.empty());
+    const auto &one = e.document.paragraphs[0].runs.front();
+    EXPECT_TRUE(one.characterStyle.empty());
+    EXPECT_FALSE(one.style.bold);
+    EXPECT_TRUE(one.style.italic);
+    ASSERT_TRUE(e.undo());
+    EXPECT_EQ(e.document.paragraphs[0].runs.front().characterStyle, "Strong");
+    EXPECT_THROW(e.applyCharacterStyle("Missing"), std::invalid_argument);
+}
+
+TEST(CharacterStyles, WfgSevenPersistsAndOlderVersionsAreKept) {
+    Editor e;
+    e.replace(u"note: text");
+    e.selection = {{0, 0}, {0, 5}};
+    e.format([](auto &s) { s.highlight = 0xffffee88; });
+    e.createCharacterStyleFromSelection("Label");
+    const auto bytes = serializeNative(e.document);
+    EXPECT_NE(bytes.find("version=\"7\""), std::string::npos);
+    const auto reopened = parseNative(bytes);
+    EXPECT_EQ(reopened.styles, e.document.styles);
+    EXPECT_EQ(reopened.paragraphs[0].runs, e.document.paragraphs[0].runs);
+    // Unknown references, and character styles in a WFG6 file, are rejected.
+    auto dangling = bytes;
+    dangling.replace(dangling.find("cstyle=\"Label\""), 14, "cstyle=\"Other\"");
+    EXPECT_ANY_THROW(parseNative(dangling));
+    auto older = bytes;
+    older.replace(older.find("version=\"7\""), 11, "version=\"6\"");
+    EXPECT_ANY_THROW(parseNative(older));
+    // Without character styles the file version does not change.
+    e.deleteStyle("Label");
+    EXPECT_EQ(serializeNative(e.document).find("version=\"7\""), std::string::npos);
+}

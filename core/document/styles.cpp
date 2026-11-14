@@ -62,6 +62,36 @@ const ParagraphStyle *StyleSheet::find(const std::string &id) const {
 ParagraphStyle *StyleSheet::find(const std::string &id) {
     return const_cast<ParagraphStyle *>(std::as_const(*this).find(id));
 }
+const NamedCharacterStyle *StyleSheet::findCharacter(const std::string &id) const {
+    const auto found = std::find_if(characterStyles.begin(), characterStyles.end(),
+                                    [&](const auto &style) { return style.id == id; });
+    return found == characterStyles.end() ? nullptr : &*found;
+}
+NamedCharacterStyle *StyleSheet::findCharacter(const std::string &id) {
+    return const_cast<NamedCharacterStyle *>(std::as_const(*this).findCharacter(id));
+}
+
+CharacterProperties resolveCharacterStyle(const StyleSheet &sheet, const std::string &id) {
+    CharacterProperties result;
+    std::unordered_set<std::string> seen;
+    for (auto current = id; !current.empty();) {
+        const auto *style = sheet.findCharacter(current);
+        if (!style)
+            throw std::invalid_argument("Unknown character style: " + current);
+        if (!seen.insert(current).second)
+            throw std::invalid_argument("Character styles are based on each other in a cycle");
+        fillUnset(result, style->character); // the derived style's own values win
+        current = style->basedOn;
+    }
+    return result;
+}
+
+CharacterStyle inheritedCharacter(const StyleSheet &sheet, CharacterStyle paragraphCharacter,
+                                  const std::string &characterStyle) {
+    if (!characterStyle.empty())
+        apply(paragraphCharacter, resolveCharacterStyle(sheet, characterStyle));
+    return paragraphCharacter;
+}
 
 StyleSheet builtinStyles() {
     // Same values as the 0.6 presets, so documents look identical after migration.
@@ -119,7 +149,7 @@ std::string uniqueStyleId(const StyleSheet &sheet, const std::string &name) {
     if (base.empty() || std::isdigit(static_cast<unsigned char>(base.front())))
         base = "Style" + base;
     auto id = base;
-    for (std::size_t n = 2; sheet.find(id) || isBuiltinStyle(id); ++n)
+    for (std::size_t n = 2; sheet.find(id) || sheet.findCharacter(id) || isBuiltinStyle(id); ++n)
         id = base + std::to_string(n);
     return id;
 }
@@ -182,13 +212,24 @@ void validateStyles(const StyleSheet &sheet) {
         if (!ids.insert(style.id).second || !names.insert(style.name).second)
             throw std::invalid_argument("Duplicate paragraph style");
     }
+    if (sheet.paragraphStyles.size() + sheet.characterStyles.size() > maxStyles)
+        throw std::invalid_argument("Too many styles");
+    for (const auto &style : sheet.characterStyles) {
+        checkText(style.id, maxStyleIdBytes, false, "identifier");
+        checkText(style.name, maxStyleNameBytes, false, "name");
+        checkText(style.basedOn, maxStyleIdBytes, true, "base");
+        if (!ids.insert(style.id).second || !names.insert(style.name).second)
+            throw std::invalid_argument("Duplicate style identifier or name");
+    }
+    for (const auto &style : sheet.characterStyles)
+        validateCharacterStyle(inheritedCharacter(sheet, {}, style.id)); // cycles, dangling bases
     for (const auto *id : {"Normal", "Title", "Heading1", "Heading2"})
         if (!ids.contains(id))
             throw std::invalid_argument(std::string("Missing built-in style ") + id);
     if (!sheet.find("Normal")->basedOn.empty())
         throw std::invalid_argument("Normal cannot be based on another style");
     for (const auto &style : sheet.paragraphStyles) {
-        if (!style.next.empty() && !ids.contains(style.next))
+        if (!style.next.empty() && !sheet.find(style.next))
             throw std::invalid_argument("Unknown next style: " + style.next);
         const auto resolved = resolveStyle(sheet, style.id); // detects cycles and dangling bases
         validateParagraphFormat(resolved.paragraph);
@@ -317,8 +358,13 @@ void adoptStyles(Document &document) {
             found = resolved.emplace(paragraph.style, resolveStyle(document.styles, paragraph.style)).first;
         paragraph.direct |= differingFields(static_cast<const ParagraphFormat &>(paragraph),
                                             found->second.paragraph);
-        for (auto &run : paragraph.runs)
-            run.direct |= differingFields(run.style, found->second.character);
+        for (auto &run : paragraph.runs) {
+            if (!run.characterStyle.empty() && !document.styles.findCharacter(run.characterStyle))
+                run.characterStyle.clear();
+            run.direct |= differingFields(
+                run.style,
+                inheritedCharacter(document.styles, found->second.character, run.characterStyle));
+        }
     }
 }
 

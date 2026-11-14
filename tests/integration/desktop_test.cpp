@@ -76,7 +76,8 @@ class DesktopTest : public QObject {
             "bullets", "numbering", "decreaseIndent", "increaseIndent", "alignLeft", "alignCenter",
             "alignRight", "lineSpacing1", "lineSpacing115", "lineSpacing15", "lineSpacing2",
             "styleNormal", "styleTitle", "styleHeading1", "styleHeading2", "updateStyle",
-            "newStyle", "renameStyle", "deleteStyle",
+            "newStyle", "renameStyle", "deleteStyle", "newCharacterStyle",
+            "removeCharacterStyle",
             "pageBreak", "date",
             "symbol0", "symbol6", "picture", "pictureSize", "table", "tableRowAbove", "tableRowBelow",
             "tableColumnLeft", "tableColumnRight", "tableDeleteRow", "tableDeleteColumn",
@@ -961,6 +962,35 @@ class DesktopTest : public QObject {
         QCOMPARE(styles->itemText(4), QString("Quote"));
         QCOMPARE(QString::fromStdString(reopened.pageView()->document().paragraphs[0].style),
                  QString("Pullquote"));
+    }
+    void characterStylesAppearAfterParagraphStylesAndApply() {
+        wf::MainWindow window;
+        auto *view = window.pageView();
+        auto *styles = window.findChild<QComboBox *>("styleCombo");
+        view->insertText("alpha beta");
+        QTest::keyClick(view, Qt::Key_Home);
+        for (int i = 0; i < 5; ++i)
+            QTest::keyClick(view, Qt::Key_Right, Qt::ShiftModifier);
+        view->format([](auto &s) { s.strike = true; });
+        QVERIFY(window.findChild<QAction *>("newCharacterStyleAction")->isEnabled());
+        QVERIFY(view->createCharacterStyleFromSelection("Struck"));
+        QCOMPARE(styles->count(), 6); // 4 built-ins, separator, Struck
+        QCOMPARE(styles->itemText(5), QString("Struck (character)"));
+        QCOMPARE(styles->currentText(), QString("Normal"));
+        auto *rename = window.findChild<QAction *>("renameStyleAction");
+        QVERIFY(rename->isEnabled());
+        QVERIFY(rename->text().contains("Struck"));
+        QTest::keyClick(view, Qt::Key_End);
+        for (int i = 0; i < 4; ++i)
+            QTest::keyClick(view, Qt::Key_Left, Qt::ShiftModifier);
+        emit styles->activated(5);
+        const auto &runs = view->document().paragraphs[0].runs;
+        QCOMPARE(QString::fromStdString(runs.back().characterStyle), QString("Struck"));
+        QVERIFY(runs.back().style.strike);
+        window.findChild<QAction *>("removeCharacterStyleAction")->trigger();
+        QVERIFY(view->document().paragraphs[0].runs.back().characterStyle.empty());
+        QVERIFY(view->deleteStyle("Struck"));
+        QCOMPARE(styles->count(), 4);
     }
     void spellCheckLoadsDictionaryFromUnicodeFolder() {
         // Users unpack the portable build anywhere; Hunspell must open it from such a folder.

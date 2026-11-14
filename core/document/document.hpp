@@ -52,7 +52,8 @@ class Run {
   public:
     Run(std::u16string text = {}, CharacterStyle style = {});
     CharacterStyle style;
-    CharacterMask direct = 0; // fields of `style` set directly, not inherited from the paragraph style
+    CharacterMask direct = 0; // fields of `style` set directly, not inherited from the styles
+    std::string characterStyle; // named character style; empty for none
     const std::u16string &text() const;
     const InlineImage *image() const;
     static Run fromImage(InlineImage, CharacterStyle = {});
@@ -123,6 +124,8 @@ struct Document {
     std::optional<Position> resolve(const Anchor &) const;
     std::vector<Position> bookmarkPositions() const;
     const CharacterStyle &styleAt(Position) const;
+    // The run that typing at `position` continues (the one before it at a boundary).
+    const Run &runAt(Position) const;
     void pruneUnusedImages();
 };
 void validateDocument(const Document &);
@@ -192,11 +195,18 @@ class Editor {
     // current style) and gives it to the selected paragraphs without changing how they
     // look. Returns the new style's identifier.
     std::string createStyleFromSelection(const std::string &name);
-    // Renames a custom style; built-in styles keep their names.
+    // Gives the selected text the character style `id` (empty: none), clearing its direct
+    // character formatting. With no selection it sets the typing formatting.
+    void applyCharacterStyle(const std::string &id);
+    // Defines a character style from the selection's formatting (where the selection ends)
+    // relative to its paragraph style, and gives it to the selected text without changing
+    // how it looks. Returns the new style's identifier.
+    std::string createCharacterStyleFromSelection(const std::string &name);
+    // Renames a custom paragraph or character style; built-in styles keep their names.
     void renameStyle(const std::string &id, const std::string &name);
-    // Removes a custom style. Its paragraphs take the style it was based on (keeping
-    // their direct formatting); styles based on it absorb its properties so they look
-    // the same.
+    // Removes a custom style. Its paragraphs (or text, for a character style) take the
+    // style it was based on, keeping their direct formatting; styles based on it absorb
+    // its properties so they look the same.
     void deleteStyle(const std::string &id);
     // Removes direct character formatting from the selection (or the typing style).
     void clearCharacterFormatting();
@@ -237,6 +247,8 @@ class Editor {
     std::uint64_t serial_ = 0;
     std::uint64_t idHighWater_ = 2;
     bool inTransaction_ = false;
+    // When set, text that replace() inserts takes this character style.
+    const std::string *forcedCharacterStyle_ = nullptr;
     void checkpoint();
     void validate(Selection) const;
     void replaceRange(const std::u16string &, Selection, const Run *object = nullptr);

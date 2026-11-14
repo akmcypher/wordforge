@@ -394,3 +394,29 @@ TEST(Docx, ImportsWordCustomStylesAndKeepsNamesUnique) {
     EXPECT_TRUE(quoteRun.style.bold);
     EXPECT_EQ(quoteRun.direct, BoldField);
 }
+TEST(Docx, RoundTripsCharacterStyles) {
+    Editor editor;
+    editor.replace(u"see the Code here");
+    editor.selection = {{0, 8}, {0, 12}};
+    editor.format([](auto &s) {
+        s.family = "Courier New";
+        s.color = 0xff2a6a2a;
+    });
+    editor.createCharacterStyleFromSelection("Inline code");
+    const auto bytes = serializeDocx(editor.document);
+    const auto parts = opc::read(bytes);
+    EXPECT_NE(parts.at("word/document.xml").find("w:rStyle w:val=\"Inlinecode\""), std::string::npos);
+    EXPECT_NE(parts.at("word/styles.xml").find("w:type=\"character\""), std::string::npos);
+    const auto imported = parseDocx(bytes);
+    EXPECT_TRUE(imported.warnings.empty());
+    const auto &document = imported.document;
+    const auto *style = document.styles.findCharacter("Inlinecode");
+    ASSERT_NE(style, nullptr);
+    EXPECT_EQ(style->name, "Inline code");
+    const auto &runs = document.paragraphs[0].runs;
+    ASSERT_EQ(runs.size(), 3u);
+    EXPECT_EQ(runs[1].characterStyle, "Inlinecode");
+    EXPECT_EQ(runs[1].style, editor.document.paragraphs[0].runs[1].style);
+    EXPECT_EQ(runs[1].direct, 0);
+    EXPECT_TRUE(runs[0].characterStyle.empty());
+}
