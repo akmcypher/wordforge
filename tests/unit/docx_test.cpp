@@ -301,3 +301,96 @@ TEST(Docx, OmitsUnreferencedImageMediaAndRelationships) {
     EXPECT_EQ(parts.at("[Content_Types].xml").find("image/png"), std::string::npos);
     EXPECT_EQ(parseDocx(opc::write(parts)).document.text(), u"deleted picture");
 }
+TEST(Docx, RoundTripsCustomParagraphStylesWithBasesAndNextStyles) {
+    Editor editor;
+    editor.replace(u"Quote\nNote\nBody");
+    editor.selection = {{0, 0}, {0, 0}};
+    editor.applyStyle("Heading1");
+    editor.selection = {{0, 0}, {0, 5}};
+    editor.format([](auto &s) {
+        s.family = "Georgia";
+        s.italic = true;
+        s.bold = false; // un-bolds the bold heading it is based on
+    });
+    editor.formatParagraph([](auto &p) { p.alignment = Alignment::Center; });
+    const auto quote = editor.createStyleFromSelection("Pull quote");
+    editor.selection = {{1, 0}, {1, 4}};
+    editor.format([](auto &s) { s.highlight = 0xffffee88; });
+    editor.formatParagraph([](auto &p) { p.indentLeft = 36; });
+    const auto note = editor.createStyleFromSelection("Note");
+    editor.document.styles.find(note)->next = quote;
+    const auto bytes = serializeDocx(editor.document);
+    const auto parts = opc::read(bytes);
+    const auto &stylesXml = parts.at("word/styles.xml");
+    EXPECT_NE(stylesXml.find("w:styleId=\"Pullquote\""), std::string::npos);
+    EXPECT_NE(stylesXml.find("w:val=\"Pull quote\""), std::string::npos);
+    EXPECT_NE(stylesXml.find("w:val=\"heading 1\""), std::string::npos);
+    EXPECT_NE(parts.at("word/document.xml").find("w:pStyle w:val=\"Pullquote\""), std::string::npos);
+
+    const auto imported = parseDocx(bytes);
+    EXPECT_TRUE(imported.warnings.empty());
+    const auto &document = imported.document;
+    for (const auto *id : {"Pullquote", "Note"}) {
+        const auto *style = document.styles.find(id);
+        ASSERT_NE(style, nullptr) << id;
+        const auto *original = editor.document.styles.find(id);
+        EXPECT_EQ(style->name, original->name);
+        EXPECT_EQ(style->basedOn, original->basedOn);
+        EXPECT_EQ(style->next, original->next);
+        const auto a = resolveStyle(document.styles, id), b = resolveStyle(editor.document.styles, id);
+        EXPECT_EQ(a.character, b.character) << id;
+        EXPECT_EQ(static_cast<const ParagraphFormat &>(a.paragraph),
+                  static_cast<const ParagraphFormat &>(b.paragraph)) << id;
+    }
+    for (std::size_t i = 0; i < 3; ++i) {
+        const auto &p = document.paragraphs[i];
+        EXPECT_EQ(p.style, editor.document.paragraphs[i].style);
+        EXPECT_EQ(p.runs.front().style, editor.document.paragraphs[i].runs.front().style);
+        EXPECT_EQ(p.direct, 0) << i; // everything comes from the style again
+        EXPECT_EQ(p.runs.front().direct, 0) << i;
+    }
+}
+TEST(Docx, ImportsWordCustomStylesAndKeepsNamesUnique) {
+    auto parts = opc::read(serializeDocx(Document{}));
+    parts["word/styles.xml"] =
+        "<w:styles xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'>"
+        "<w:style w:type='paragraph' w:default='1' w:styleId='Normal'><w:name w:val='Normal'/>"
+        "<w:rPr><w:sz w:val='22'/></w:rPr></w:style>"
+        "<w:style w:type='paragraph' w:styleId='MyQuote'><w:name w:val='My Quote'/>"
+        "<w:basedOn w:val='Normal'/><w:next w:val='Normal'/><w:pPr><w:jc w:val='center'/></w:pPr>"
+        "<w:rPr><w:i/></w:rPr></w:style>"
+        "<w:style w:type='paragraph' w:styleId='Fancy'><w:name w:val='Title'/>"
+        "<w:basedOn w:val='MyQuote'/><w:rPr><w:color w:val='C00000'/></w:rPr></w:style>"
+        "<w:style w:type='paragraph' w:styleId='Unused'><w:name w:val='Unused'/></w:style>"
+        "</w:styles>";
+    parts["word/document.xml"] =
+        "<w:document xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'><w:body>"
+        "<w:p><w:pPr><w:pStyle w:val='Fancy'/></w:pPr><w:r><w:t>fancy</w:t></w:r></w:p>"
+        "<w:p><w:pPr><w:pStyle w:val='MyQuote'/></w:pPr><w:r><w:rPr><w:b/></w:rPr>"
+        "<w:t>quote</w:t></w:r></w:p></w:body></w:document>";
+    const auto imported = parseDocx(opc::write(parts));
+    const auto &document = imported.document;
+    const auto *quote = document.styles.find("MyQuote");
+    ASSERT_NE(quote, nullptr);
+    EXPECT_EQ(quote->name, "My Quote");
+    EXPECT_EQ(quote->basedOn, "Normal");
+    EXPECT_EQ(quote->next, "Normal");
+    const auto *fancy = document.styles.find("Fancy");
+    ASSERT_NE(fancy, nullptr);
+    EXPECT_EQ(fancy->name, "Title (2)"); // "Title" is Wordforge's built-in style
+    EXPECT_EQ(fancy->basedOn, "MyQuote");
+    EXPECT_EQ(document.styles.find("Unused"), nullptr);
+    EXPECT_EQ(document.paragraphs[0].style, "Fancy");
+    const auto &fancyRun = document.paragraphs[0].runs.front();
+    EXPECT_TRUE(fancyRun.style.italic);
+    EXPECT_EQ(fancyRun.style.color, 0xffc00000u);
+    EXPECT_EQ(fancyRun.style.size, 11);
+    EXPECT_EQ(document.paragraphs[0].alignment, Alignment::Center);
+    // Word's Normal is 11 pt, so the imported styles carry 11 pt themselves.
+    EXPECT_EQ(quote->character.size, 11);
+    EXPECT_EQ(fancyRun.direct, 0);
+    const auto &quoteRun = document.paragraphs[1].runs.front();
+    EXPECT_EQ(document.paragraphs[1].style, "MyQuote");
+    EXPECT_TRUE(quoteRun.style.bold);
+    EXPECT_EQ(quoteRun.direct, BoldField);
+}

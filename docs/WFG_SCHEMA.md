@@ -20,8 +20,14 @@ style's properties over the defaults.
 WFG1–5 readers map `preset` 0–3 to the built-in styles and then mark every value
 that differs from its style as direct (`adoptStyles`); values equal to the style
 become inherited, which preserves appearance exactly. DOCX import does the same.
-DOCX export writes the nearest built-in ancestor as `pStyle` with fully resolved run
-properties, so custom style definitions are not yet exported (Phase 4).
+DOCX export writes every paragraph style to `styles.xml` (name, `basedOn`, `next`, and the
+properties that differ from the base; b/i/strike as toggles) over `docDefaults` set to
+Wordforge's defaults, and each paragraph's real style as `pStyle`. Built-in headings are
+named `heading 1`/`heading 2` for Word. Paragraphs and runs still carry complete values.
+DOCX import turns each custom paragraph style that a paragraph uses (and its bases) into a
+Wordforge style holding what differs from its base, so it resolves to what Word shows;
+duplicate names get " (2)", unused styles are skipped, and list numbering in styles is
+still applied directly to paragraphs.
 
 Table foundation adds **WFG5 ZIP whenever Document.tables is nonempty**; readers
 accept WFG1–5. Root `table` declares exact id/rows/columns; paragraph attributes

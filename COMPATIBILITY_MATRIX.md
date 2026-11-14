@@ -10,7 +10,7 @@ These are capability statements, not production-readiness checkmarks.
 | Layout | Wrapping, pages, measurement cache, caret mapping | No layout v2 | Incremental checkpoints/pagination, tables, sections, background cancellation |
 | Typography | Real multilingual shaping and fallback | OOXML formatting mapping | Language/feature controls, variable fonts, full visual navigation validation |
 | Native format | WFG1, Unicode/style round trips, atomic save | WFG2 IDs; WFG3 bookmarks; WFG4 PNG ZIP; WFG1/2/3/4/5 readers; WFG5 table foundation | Rich-tree schema and resource integrity |
-| DOCX | Absent | Text/styles/lists/page setup, editable-copy import; DrawingML PNG and table export foundation | Unknown-part preservation, tables/image import/sections/headers/fields/revisions, real Word/LO visual corpus |
+| DOCX | Absent | Text/styles (custom paragraph styles both ways)/lists/page setup, editable-copy import; DrawingML PNG and table export foundation | Unknown-part preservation, tables/image import/sections/headers/fields/revisions, real Word/LO visual corpus |
 | Editing | Ribbon, basic formatting, simple lists, search/replace, plain clipboard | DOCX workflow; bookmarks; PNG/JPEG insert, aspect resize, delete/undo, save/reopen; table controls; HTML copy/paste; Hunspell spell check; printing; word count | Merged cells/widths, floating/wrap/crop, grammar |
 | Advanced content | Absent | Absent | Comments, track changes, TOC, footnotes, equations, citations |
 | Rendering | Retained CPU pages, raster cache, overlays, PDF | Existing renderer reused | Printing, background rendering, richer document objects |

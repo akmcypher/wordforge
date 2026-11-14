@@ -280,7 +280,80 @@ std::string relationship(const opc::Parts &parts, const std::string &owner, cons
     }
     return {};
 }
-constexpr const char *presetNames[] = {"Normal", "Title", "Heading1", "Heading2"};
+// Writes the character formatting `value` into rPr. With `base`, only what differs from
+// it, as a style definition: b/i/strike there toggle the inherited value.
+void writeCharacter(pugi::xml_node rpr, const CharacterStyle &value, const CharacterStyle *base) {
+    auto differs = [&](auto member) { return !base || value.*member != base->*member; };
+    auto opaque = [](std::uint32_t colour) {
+        if ((colour >> 24) != 255)
+            throw std::runtime_error(
+                "DOCX export cannot preserve transparent text colors; save as .wfg");
+    };
+    if (differs(&CharacterStyle::family)) {
+        auto fonts = element(rpr, "rFonts");
+        for (auto script : {"ascii", "hAnsi", "cs", "eastAsia"})
+            set(fonts, script, value.family);
+    }
+    auto toggle = [&](bool CharacterStyle::*member, const char *name, const char *complex) {
+        if (base ? value.*member != base->*member : value.*member) {
+            element(rpr, name);
+            if (complex)
+                element(rpr, complex);
+        }
+    };
+    toggle(&CharacterStyle::bold, "b", "bCs");
+    toggle(&CharacterStyle::italic, "i", "iCs");
+    toggle(&CharacterStyle::strike, "strike", nullptr);
+    if (differs(&CharacterStyle::color)) {
+        opaque(value.color);
+        property(rpr, "color", hex(value.color));
+    }
+    if (differs(&CharacterStyle::size)) {
+        property(rpr, "sz", value.size * 2);
+        property(rpr, "szCs", value.size * 2);
+    }
+    const bool highlight = base ? value.highlight != base->highlight : value.highlight != 0;
+    if (highlight && !value.highlight)
+        property(rpr, "highlight", std::string("none"));
+    if (differs(&CharacterStyle::underline))
+        property(rpr, "u", std::string(value.underline ? "single" : "none"));
+    if (highlight && value.highlight) {
+        opaque(value.highlight);
+        auto shading = element(rpr, "shd");
+        set(shading, "val", std::string("clear"));
+        set(shading, "fill", hex(value.highlight));
+    }
+}
+// Paragraph counterpart of writeCharacter (lists are written on paragraphs only).
+void writeParagraph(pugi::xml_node ppr, const ParagraphFormat &value, const ParagraphFormat *base) {
+    auto differs = [&](auto member) { return !base || value.*member != base->*member; };
+    if (differs(&ParagraphFormat::spaceBefore) || differs(&ParagraphFormat::spaceAfter) ||
+        differs(&ParagraphFormat::lineSpacing)) {
+        auto spacing = element(ppr, "spacing");
+        if (differs(&ParagraphFormat::spaceBefore))
+            set(spacing, "before", value.spaceBefore * 20);
+        if (differs(&ParagraphFormat::spaceAfter))
+            set(spacing, "after", value.spaceAfter * 20);
+        if (differs(&ParagraphFormat::lineSpacing)) {
+            set(spacing, "line", value.lineSpacing * 240);
+            set(spacing, "lineRule", std::string("auto"));
+        }
+    }
+    if (differs(&ParagraphFormat::indentLeft))
+        set(element(ppr, "ind"), "left", value.indentLeft * 20);
+    if (differs(&ParagraphFormat::alignment))
+        property(ppr, "jc", std::string(value.alignment == Alignment::Center  ? "center"
+                                        : value.alignment == Alignment::Right ? "right"
+                                                                              : "left"));
+}
+// Word recognises its built-in headings by these names (navigation pane, outline).
+std::string wordStyleName(const ParagraphStyle &style) {
+    if (style.id == "Heading1")
+        return "heading 1";
+    if (style.id == "Heading2")
+        return "heading 2";
+    return style.name;
+}
 } // namespace
 DocxImport parseDocx(const std::string &bytes) {
     auto parts = opc::read(bytes);
@@ -376,6 +449,63 @@ DocxImport parseDocx(const std::string &bytes) {
             }
     }
     std::string previousNum;
+    // Custom paragraph styles become Wordforge styles: each records what differs from the
+    // style it is based on, so its paragraphs resolve to exactly what Word shows.
+    std::map<std::string, std::string> importedStyles; // DOCX id -> Wordforge id
+    std::vector<std::pair<std::string, pugi::xml_node>> createdStyles;
+    std::function<std::string(const std::string &)> importStyle;
+    importStyle = [&](const std::string &id) -> std::string {
+        if (isBuiltinStyle(id))
+            return id;
+        if (auto done = importedStyles.find(id); done != importedStyles.end())
+            return done->second;
+        const auto found = styleNodes.find(id);
+        if (found == styleNodes.end() || attr(found->second, "type") != "paragraph" ||
+            document.styles.paragraphStyles.size() >= 1024)
+            return "Normal";
+        importedStyles[id] = "Normal"; // until defined; also ends any base cycle
+        const auto node = found->second;
+        const auto basedOn = val(child(node, "basedOn"));
+        const auto parent = basedOn.empty() ? std::string() : importStyle(basedOn);
+        Paragraph format = defaultParagraph;
+        auto character = defaultRun;
+        std::set<std::string> seen;
+        std::vector<std::string> ignored; // reported once, by the paragraphs using the style
+        std::swap(ignored, warnings);
+        applyStyle(id, format, character, seen);
+        std::swap(ignored, warnings);
+        const auto base = parent.empty() ? ResolvedStyle{} : resolveStyle(document.styles, parent);
+        ParagraphStyle style;
+        style.id = id;
+        if (id.empty() || id.size() > 128 ||
+            std::any_of(id.begin(), id.end(), [](char ch) { return static_cast<unsigned char>(ch) < 32; }))
+            style.id = uniqueStyleId(document.styles, id);
+        style.basedOn = parent;
+        auto name = val(child(node, "name"));
+        if (name.empty() || name.size() > 200)
+            name = style.id;
+        auto taken = [&](const std::string &candidate) {
+            return std::any_of(document.styles.paragraphStyles.begin(),
+                               document.styles.paragraphStyles.end(),
+                               [&](const auto &other) { return other.name == candidate; });
+        };
+        style.name = name;
+        for (int n = 2; taken(style.name); ++n)
+            style.name = name + " (" + std::to_string(n) + ")";
+        style.paragraph = propertiesFor(base.paragraph, format);
+        style.character = propertiesFor(base.character, character);
+        auto trial = document.styles;
+        trial.paragraphStyles.push_back(style);
+        try {
+            validateStyles(trial);
+        } catch (const std::exception &) {
+            warn(warnings, "A document style could not be kept; its formatting is applied directly.");
+            return importedStyles[id] = parent.empty() ? std::string("Normal") : parent;
+        }
+        document.styles = std::move(trial);
+        createdStyles.emplace_back(style.id, node);
+        return importedStyles[id] = style.id;
+    };
     for (auto node : body.children()) {
         if (node.type() != pugi::node_element)
             continue;
@@ -412,9 +542,7 @@ DocxImport parseDocx(const std::string &bytes) {
             styleId = defaultStyle;
         std::set<std::string> seen;
         applyStyle(styleId, paragraph, base, seen);
-        for (int index = 0; index < 4; ++index)
-            if (styleId == presetNames[index])
-                paragraph.style = presetNames[index];
+        paragraph.style = styleId.empty() ? std::string("Normal") : importStyle(styleId);
         paragraphProperties(properties, paragraph, warnings);
         // Resolve numbering through the same base -> derived -> direct cascade as styles.
         std::vector<pugi::xml_node> propertyChain{properties};
@@ -524,6 +652,15 @@ DocxImport parseDocx(const std::string &bytes) {
     }
     if (document.paragraphs.empty())
         document.paragraphs.emplace_back(document.allocateId());
+    // Enter after an imported style continues with its DOCX "next" style when that was kept.
+    for (const auto &[id, node] : createdStyles) {
+        const auto next = val(child(node, "next"));
+        const auto target = isBuiltinStyle(next) ? next : importedStyles.contains(next)
+                                                              ? importedStyles.at(next)
+                                                              : std::string();
+        if (!target.empty() && target != id)
+            document.styles.find(id)->next = target;
+    }
     adoptStyles(document); // DOCX values arrive resolved; mark those differing from styles direct
     validateDocument(document);
     return result;
@@ -615,13 +752,9 @@ std::string serializeDocx(const Document &document) {
         previousCell = paragraph.cell;
         auto p = element(parent, "p");
         auto ppr = element(p, "pPr");
-        // Custom styles export as their nearest built-in ancestor; runs carry resolved formatting.
-        auto exported = paragraph.style;
-        while (!isBuiltinStyle(exported))
-            exported = document.styles.find(exported)->basedOn.empty()
-                           ? std::string("Normal")
-                           : document.styles.find(exported)->basedOn;
-        property(ppr, "pStyle", exported);
+        // Paragraphs and runs still carry complete formatting, so a reader that ignores
+        // styles shows the same result.
+        property(ppr, "pStyle", paragraph.style);
         if (paragraph.pageBreakBefore)
             element(ppr, "pageBreakBefore");
         if (paragraph.list != ListKind::None) {
@@ -664,6 +797,8 @@ std::string serializeDocx(const Document &document) {
             property(rpr, "color", hex(run.style.color));
             property(rpr, "sz", run.style.size * 2);
             property(rpr, "szCs", run.style.size * 2);
+            if (!run.style.highlight) // override a highlight the paragraph style may set
+                property(rpr, "highlight", std::string("none"));
             property(rpr, "u", std::string(run.style.underline ? "single" : "none"));
             if (run.style.highlight) {
                 auto shading = element(rpr, "shd");
@@ -744,13 +879,29 @@ std::string serializeDocx(const Document &document) {
     pugi::xml_document styles;
     auto styleRoot = styles.append_child("w:styles");
     styleRoot.append_attribute("xmlns:w") = wordNs;
-    for (int index = 0; index < 4; ++index) {
+    // Wordforge's defaults as document defaults, so styles resolve in Word as they do here.
+    const ResolvedStyle defaults;
+    auto docDefaults = element(styleRoot, "docDefaults");
+    writeCharacter(element(element(docDefaults, "rPrDefault"), "rPr"), defaults.character, nullptr);
+    writeParagraph(element(element(docDefaults, "pPrDefault"), "pPr"), defaults.paragraph, nullptr);
+    for (const auto &definition : document.styles.paragraphStyles) {
         auto style = element(styleRoot, "style");
         set(style, "type", std::string("paragraph"));
-        set(style, "styleId", std::string(presetNames[index]));
-        if (!index)
+        set(style, "styleId", definition.id);
+        if (definition.id == "Normal")
             set(style, "default", std::string("1"));
-        property(style, "name", std::string(presetNames[index]));
+        property(style, "name", wordStyleName(definition));
+        if (!definition.basedOn.empty())
+            property(style, "basedOn", definition.basedOn);
+        if (!definition.next.empty())
+            property(style, "next", definition.next);
+        element(style, "qFormat");
+        const auto self = resolveStyle(document.styles, definition.id);
+        const auto base = definition.basedOn.empty()
+                              ? defaults
+                              : resolveStyle(document.styles, definition.basedOn);
+        writeParagraph(element(style, "pPr"), self.paragraph, &base.paragraph);
+        writeCharacter(element(style, "rPr"), self.character, &base.character);
     }
     opc::Parts parts{
         {"[Content_Types].xml",

@@ -1,5 +1,10 @@
 # Current status
 
+2026-11-14 — Phase 1C slice 3: DOCX paragraph styles both ways. Export writes every
+style (name, base, next, differing properties) and the real `pStyle`; import keeps the
+custom paragraph styles a document uses, resolving exactly as in Word. Windows ARM64:
+all 6 suites pass (2 new DOCX cases); Ubuntu by CI. Not yet opened in Microsoft Word.
+
 2026-11-14 — Phase 1C slice 2: custom paragraph styles (ENGINEERING_ROADMAP.md → 1C).
 Format → Styles → New style from selection / Rename style / Delete style; the toolbar
 style box lists the built-ins then the document's own styles. New styles keep the

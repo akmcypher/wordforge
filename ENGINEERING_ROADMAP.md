@@ -153,8 +153,9 @@ and `deleteStyle` (paragraphs fall back to the base style keeping direct formatt
 derived styles absorb the deleted style's properties so they look the same; `next`
 references are redirected). Format → Styles → New/Rename/Delete; the toolbar style
 box lists built-ins then the document's styles. Undoable; persisted by WFG6.
-Remaining 1C: named character and table styles, theme fonts/colours, DOCX style
-export, numbering definitions, and delta-based undo storage.
+**Slice 3 delivered (2026-11-14): DOCX paragraph styles both ways** (docs/WFG_SCHEMA.md).
+Remaining 1C: named character and table styles, theme fonts/colours, numbering
+definitions in styles, and delta-based undo storage.
 
 Proposed files: `core/document/styles.*`, `numbering.*`, transaction storage.
 Retain defaults, named paragraph/character/table styles, based-on links, theme
