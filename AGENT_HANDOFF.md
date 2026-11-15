@@ -15,9 +15,8 @@ character styles (WFG7). See ENGINEERING_ROADMAP.md → 1C slices 1–4 and
 docs/WFG_SCHEMA.md (WFG7 at the top). Windows installer: docs/WINDOWS.md → Installer.
 
 **Recommended next work, in order** (user agreed with this ranking 2026-11-15):
-1. DOCX **table and picture import** (today dropped with a warning; most real Word files
-   have them). Export already exists (core/formats/docx.cpp); model: core/document/tables.cpp,
-   images.cpp; see docs/TABLE_CHECKPOINT.md.
+1. ~~DOCX table and picture import~~ — done 2026-11-16 (branch feat/docx-table-picture-import;
+   see CURRENT_STATUS.md). Next would be checking it on real Word files.
 2. **Headers, footers and page numbers** (Phase 5).
 3. Table cell merge and column widths.
 4. Built-in character styles Strong/Emphasis/Code (needs WFG migration rule: add missing

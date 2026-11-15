@@ -6,9 +6,35 @@
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFormLayout>
+#include <QBuffer>
+#include <QByteArray>
+#include <QImageReader>
 #include <QSignalBlocker>
 #include <algorithm>
 namespace wf {
+std::optional<std::string> pictureToPng(const std::string &bytes) {
+    if (bytes.size() > 16 * 1024 * 1024)
+        return std::nullopt;
+    QByteArray input(bytes.data(), static_cast<qsizetype>(bytes.size()));
+    QBuffer source(&input);
+    if (!source.open(QIODevice::ReadOnly))
+        return std::nullopt;
+    QImageReader::setAllocationLimit(128);
+    QImageReader reader(&source);
+    reader.setAutoTransform(true);
+    const auto size = reader.size();
+    if (!size.isValid() || size.width() > 16384 || size.height() > 16384 ||
+        static_cast<std::uint64_t>(size.width()) * size.height() > 25000000)
+        return std::nullopt;
+    const auto pixels = reader.read();
+    if (pixels.isNull())
+        return std::nullopt;
+    QByteArray png;
+    QBuffer output(&png);
+    if (!output.open(QIODevice::WriteOnly) || !pixels.save(&output, "PNG"))
+        return std::nullopt;
+    return png.toStdString();
+}
 void insertPictureDialog(PageView *view, QWidget *parent) {
     const auto path =
         QFileDialog::getOpenFileName(parent, "Insert picture", {}, "Pictures (*.png *.jpg *.jpeg)");

@@ -1,5 +1,6 @@
 #include "core/formats/docx.hpp"
 #include "core/formats/zip_package.hpp"
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -47,9 +48,29 @@ TEST(Docx, ExportsRealRectangularTablesWithMultipleParagraphsAndImages) {
     EXPECT_EQ(xml.select_nodes("//w:tblBorders/*[@w:val='single']").size(), 6);
     EXPECT_EQ(xml.select_nodes("//w:tblCellMar/*[@w:w='80'][@w:type='dxa']").size(), 4);
     EXPECT_EQ(parts.at("word/media/image11.png"), png);
+    // Wordforge's own tables and pictures come back without loss or warnings.
     const auto imported = parseDocx(opc::write(parts));
-    EXPECT_FALSE(imported.warnings.empty());
-    EXPECT_EQ(imported.document.text(), u"before\nafter");
+    EXPECT_TRUE(imported.warnings.empty());
+    const auto &back = imported.document;
+    EXPECT_EQ(back.text(), document.text());
+    ASSERT_EQ(back.tables.size(), 1u);
+    EXPECT_EQ(back.tables[0].rows, 2u);
+    EXPECT_EQ(back.tables[0].columns, 2u);
+    ASSERT_EQ(back.paragraphs.size(), 7u);
+    for (std::size_t index = 0; index < 7; ++index) {
+        EXPECT_EQ(back.paragraphs[index].cell.has_value(), document.paragraphs[index].cell.has_value());
+        if (back.paragraphs[index].cell) {
+            EXPECT_EQ(back.paragraphs[index].cell->row, document.paragraphs[index].cell->row);
+            EXPECT_EQ(back.paragraphs[index].cell->column, document.paragraphs[index].cell->column);
+        }
+    }
+    EXPECT_TRUE(back.paragraphs[1].runs[0].style.bold);
+    const auto *picture = back.paragraphs[2].runs.back().image();
+    ASSERT_NE(picture, nullptr);
+    EXPECT_EQ(picture->width, 72);
+    EXPECT_EQ(picture->height, 36);
+    EXPECT_EQ(picture->description, "cell picture");
+    EXPECT_EQ(back.images.at(picture->resourceId)->png, png);
 }
 TEST(Docx, ImportsIndependentPythonDocxFixture) {
     const auto path = std::filesystem::path(__FILE__).parent_path().parent_path() /
@@ -275,8 +296,9 @@ TEST(Docx, ExportsInlinePictureMediaRelationshipsAndGeometry) {
                  xml.select_node("(//wp:docPr)[2]").node().attribute("id").value());
     EXPECT_NE(parts.at("[Content_Types].xml").find("image/png"), std::string::npos);
     const auto imported = parseDocx(opc::write(parts));
-    EXPECT_FALSE(imported.warnings.empty());
-    EXPECT_EQ(imported.document.text(), u"beforeafter");
+    EXPECT_TRUE(imported.warnings.empty());
+    EXPECT_EQ(imported.document.text(), u"before￼￼after"); // both pictures come back
+    EXPECT_EQ(imported.document.images.size(), 2u);
 }
 TEST(Docx, OmitsUnreferencedImageMediaAndRelationships) {
     const auto path =
@@ -419,4 +441,147 @@ TEST(Docx, RoundTripsCharacterStyles) {
     EXPECT_EQ(runs[1].style, editor.document.paragraphs[0].runs[1].style);
     EXPECT_EQ(runs[1].direct, 0);
     EXPECT_TRUE(runs[0].characterStyle.empty());
+}
+
+namespace {
+opc::Parts wordDocument(const std::string &body, const std::string &rels = {}) {
+    auto parts = opc::read(serializeDocx(Document{}));
+    parts["word/document.xml"] =
+        "<w:document xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main' "
+        "xmlns:wp='http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing' "
+        "xmlns:a='http://schemas.openxmlformats.org/drawingml/2006/main' "
+        "xmlns:pic='http://schemas.openxmlformats.org/drawingml/2006/picture' "
+        "xmlns:r='http://schemas.openxmlformats.org/officeDocument/2006/relationships'><w:body>" +
+        body + "</w:body></w:document>";
+    if (!rels.empty()) {
+        auto &relationships = parts["word/_rels/document.xml.rels"];
+        relationships.insert(relationships.rfind("</Relationships>"), rels);
+    }
+    return parts;
+}
+std::string cell(const std::string &text, const std::string &properties = {}) {
+    return "<w:tc>" + properties + "<w:p><w:r><w:t>" + text + "</w:t></w:r></w:p></w:tc>";
+}
+std::string drawing(const char *kind, const char *id, long long cx, long long cy) {
+    return std::string("<w:r><w:drawing><wp:") + kind + "><wp:extent cx='" + std::to_string(cx) +
+           "' cy='" + std::to_string(cy) +
+           "'/><wp:docPr id='1' name='Photo' descr='A photo'/><a:graphic><a:graphicData><pic:pic>"
+           "<pic:blipFill><a:blip r:embed='" + id + "'/></pic:blipFill></pic:pic></a:graphicData>"
+           "</a:graphic></wp:" + kind + "></w:drawing></w:r>";
+}
+std::string redBluePng() {
+    const auto path =
+        std::filesystem::path(__FILE__).parent_path().parent_path() / "fixtures/red-blue.png";
+    std::ifstream file(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(file), {}};
+}
+} // namespace
+TEST(Docx, ImportsWordTablesSplittingMergesAndFlatteningNestedTables) {
+    // Two adjacent tables, the second at the very end: Wordforge inserts body paragraphs.
+    const auto body =
+        "<w:p><w:r><w:t>intro</w:t></w:r></w:p>"
+        "<w:tbl><w:tblPr><w:tblStyle w:val='TableGrid'/><w:tblLook w:val='04A0'/></w:tblPr>"
+        "<w:tblGrid><w:gridCol w:w='3000'/><w:gridCol w:w='3000'/><w:gridCol w:w='3000'/></w:tblGrid>"
+        "<w:tr>" + cell("wide", "<w:tcPr><w:gridSpan w:val='2'/></w:tcPr>") + cell("c") + "</w:tr>"
+        "<w:tr>" + cell("a") + cell("b") + "</w:tr>"  // short row: padded with an empty cell
+        "<w:tr><w:tc><w:p><w:r><w:t>outer</w:t></w:r></w:p><w:tbl><w:tr>" + cell("inner") +
+        "</w:tr></w:tbl><w:p/></w:tc>" + cell("x") + cell("y", "<w:tcPr><w:vMerge/></w:tcPr>") +
+        "</w:tr></w:tbl>"
+        "<w:tbl><w:tr>" + cell("second") + "</w:tr></w:tbl>";
+    const auto imported = parseDocx(opc::write(wordDocument(body)));
+    const auto &document = imported.document;
+    EXPECT_NO_THROW(validateDocument(document));
+    ASSERT_EQ(document.tables.size(), 2u);
+    EXPECT_EQ(document.tables[0].rows, 3u);
+    EXPECT_EQ(document.tables[0].columns, 3u);
+    EXPECT_EQ(document.tables[1].rows, 1u);
+    EXPECT_EQ(document.tables[1].columns, 1u);
+    auto cellText = [&](std::uint64_t table, std::size_t row, std::size_t column) {
+        std::u16string text;
+        for (const auto &p : document.paragraphs)
+            if (p.cell && p.cell->tableId == table && p.cell->row == row && p.cell->column == column)
+                text += p.text() + u"|";
+        return text;
+    };
+    const auto first = document.tables[0].id;
+    EXPECT_EQ(cellText(first, 0, 0), u"wide|");
+    EXPECT_EQ(cellText(first, 0, 1), u"|"); // covered by the span
+    EXPECT_EQ(cellText(first, 0, 2), u"c|");
+    EXPECT_EQ(cellText(first, 1, 2), u"|"); // padded
+    EXPECT_EQ(cellText(first, 2, 0), u"outer|inner||");
+    EXPECT_FALSE(document.paragraphs.back().cell); // a body paragraph closes the document
+    // The tables are separated by a body paragraph.
+    std::size_t separators = 0;
+    for (std::size_t i = 1; i + 1 < document.paragraphs.size(); ++i)
+        if (!document.paragraphs[i].cell && document.paragraphs[i - 1].cell &&
+            document.paragraphs[i + 1].cell)
+            ++separators;
+    EXPECT_EQ(separators, 1u);
+    auto warned = [&](const char *text) {
+        return std::any_of(imported.warnings.begin(), imported.warnings.end(),
+                           [&](const auto &warning) { return warning.find(text) != std::string::npos; });
+    };
+    EXPECT_TRUE(warned("Merged table cells"));
+    EXPECT_TRUE(warned("Nested tables"));
+    EXPECT_FALSE(warned("Unsupported"));
+}
+TEST(Docx, LargeTablesBecomeParagraphs) {
+    std::string row = "<w:tr>";
+    for (int column = 0; column < 11; ++column)
+        row += cell("c" + std::to_string(column));
+    row += "</w:tr>";
+    const auto imported = parseDocx(opc::write(wordDocument("<w:tbl>" + row + "</w:tbl>")));
+    EXPECT_TRUE(imported.document.tables.empty());
+    EXPECT_EQ(imported.document.paragraphs.size(), 11u);
+    EXPECT_NO_THROW(validateDocument(imported.document));
+}
+TEST(Docx, ImportsPicturesConvertingOtherFormatsAndFittingThePage) {
+    const auto png = redBluePng();
+    ASSERT_FALSE(png.empty());
+    const std::string rels =
+        "<Relationship Id='rPng' Type='http://schemas.openxmlformats.org/officeDocument/2006/"
+        "relationships/image' Target='media/a.png'/>"
+        "<Relationship Id='rJpg' Type='http://schemas.openxmlformats.org/officeDocument/2006/"
+        "relationships/image' Target='media/b.jpeg'/>";
+    // A 20-inch-wide inline PNG, and a floating "JPEG".
+    const auto body = "<w:p><w:r><w:t>see </w:t></w:r>" + drawing("inline", "rPng", 18288000, 9144000) +
+                      "<w:r><w:t> and </w:t></w:r>" + drawing("anchor", "rJpg", 914400, 914400) +
+                      "</w:p>";
+    auto parts = wordDocument(body, rels);
+    parts["word/media/a.png"] = png;
+    parts["word/media/b.jpeg"] = "\xff\xd8\xff\xe0 not really a jpeg";
+    const auto bytes = opc::write(parts);
+
+    const auto withoutConverter = parseDocx(bytes);
+    const auto &plain = withoutConverter.document;
+    ASSERT_EQ(plain.images.size(), 1u);
+    const auto &runs = plain.paragraphs[0].runs;
+    ASSERT_EQ(runs.size(), 3u);
+    const auto *picture = runs[1].image();
+    ASSERT_NE(picture, nullptr);
+    EXPECT_EQ(picture->description, "A photo");
+    const double content = plain.page.width - 2 * plain.page.margin;
+    EXPECT_LE(picture->width, content);
+    EXPECT_NEAR(picture->width / picture->height, 2.0, 0.01); // aspect ratio kept
+    EXPECT_EQ(plain.images.at(picture->resourceId)->png, png);
+    auto warned = [](const DocxImport &result, const char *text) {
+        return std::any_of(result.warnings.begin(), result.warnings.end(),
+                           [&](const auto &warning) { return warning.find(text) != std::string::npos; });
+    };
+    EXPECT_TRUE(warned(withoutConverter, "unsupported format"));
+    EXPECT_TRUE(warned(withoutConverter, "Floating pictures"));
+
+    // With a converter (the desktop uses Qt) the second picture is kept too.
+    int conversions = 0;
+    const auto converted = parseDocx(bytes, [&](const std::string &) {
+        ++conversions;
+        return std::optional<std::string>(png);
+    });
+    EXPECT_EQ(conversions, 1);
+    EXPECT_EQ(converted.document.images.size(), 2u);
+    EXPECT_FALSE(warned(converted, "unsupported format"));
+    const auto &last = converted.document.paragraphs[0].runs.back();
+    ASSERT_NE(last.image(), nullptr);
+    EXPECT_EQ(last.image()->width, 72); // one inch, fits
+    EXPECT_NO_THROW(validateDocument(converted.document));
 }

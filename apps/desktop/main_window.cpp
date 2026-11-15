@@ -2,6 +2,7 @@
 #include "apps/desktop/appearance.hpp"
 #include "apps/desktop/bookmarks_dialog.hpp"
 #include "apps/desktop/commands.hpp"
+#include "apps/desktop/pictures.hpp"
 #include "apps/desktop/search_bar.hpp"
 #include "apps/desktop/shell.hpp"
 #include "apps/desktop/spelling.hpp"
@@ -181,7 +182,7 @@ void MainWindow::openFile(const QString &path) {
         imported.replace(utf16(text));
         document = std::move(imported.document);
     } else if (QFileInfo(path).suffix().compare("docx", Qt::CaseInsensitive) == 0) {
-        auto imported = parseDocx(bytes.toStdString());
+        auto imported = parseDocx(bytes.toStdString(), pictureToPng);
         if (!imported.warnings.empty()) {
             QStringList warnings;
             for (const auto &warning : imported.warnings)

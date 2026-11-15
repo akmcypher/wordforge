@@ -248,7 +248,8 @@ void paragraphProperties(pugi::xml_node properties, Paragraph &paragraph,
             warn(warnings, "Some paragraph options are not supported: " + local(node.name()));
     }
 }
-std::string relationship(const opc::Parts &parts, const std::string &owner, const char *type) {
+std::string relationship(const opc::Parts &parts, const std::string &owner, const char *type,
+                         const std::string &id = {}) {
     const auto path = std::filesystem::path(owner);
     const auto rel = owner.empty()
                          ? std::string("_rels/.rels")
@@ -262,7 +263,8 @@ std::string relationship(const opc::Parts &parts, const std::string &owner, cons
         if (local(node.name()) != "Relationship" || namespaceOf(node, node.name()) != relNs)
             continue;
         auto relation = std::string(node.attribute("Type").value());
-        if (!relation.ends_with("/" + std::string(type)))
+        if (!relation.ends_with("/" + std::string(type)) ||
+            (!id.empty() && id != node.attribute("Id").value()))
             continue;
         if (std::string_view(node.attribute("TargetMode").value()) == "External")
             throw std::runtime_error("External DOCX document parts are not loaded");
@@ -354,8 +356,40 @@ std::string wordStyleName(const ParagraphStyle &style) {
         return "heading 2";
     return style.name;
 }
+constexpr const char *drawingNs = "http://schemas.openxmlformats.org/drawingml/2006/main";
+constexpr const char *placementNs =
+    "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing";
+constexpr const char *relationshipsNs =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+bool isIn(pugi::xml_node node, const char *name, const char *uri) {
+    return node.type() == pugi::node_element && local(node.name()) == name &&
+           namespaceOf(node, node.name()) == uri;
+}
+pugi::xml_node childIn(pugi::xml_node node, const char *name, const char *uri) {
+    for (auto item : node.children())
+        if (isIn(item, name, uri))
+            return item;
+    return {};
+}
+// First element named `name` in `uri` below `node`, at most `depth` levels down.
+pugi::xml_node findIn(pugi::xml_node node, const char *name, const char *uri, int depth = 8) {
+    for (auto item : node.children()) {
+        if (isIn(item, name, uri))
+            return item;
+        if (depth > 0)
+            if (auto found = findIn(item, name, uri, depth - 1))
+                return found;
+    }
+    return {};
+}
+std::string attrIn(pugi::xml_node node, const char *name, const char *uri) {
+    for (auto item : node.attributes())
+        if (local(item.name()) == name && namespaceOf(node, item.name(), true) == uri)
+            return item.value();
+    return {};
+}
 } // namespace
-DocxImport parseDocx(const std::string &bytes) {
+DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPicture) {
     auto parts = opc::read(bytes);
     if (!parts.contains("[Content_Types].xml"))
         throw std::runtime_error("Missing DOCX content types");
@@ -550,32 +584,86 @@ DocxImport parseDocx(const std::string &bytes) {
         createdStyles.emplace_back(style.id, node);
         return importedStyles[id] = style.id;
     };
-    for (auto node : body.children()) {
-        if (node.type() != pugi::node_element)
-            continue;
-        if (is(node, "sectPr")) {
-            if (auto size = child(node, "pgSz")) {
-                document.page.width = number(attr(size, "w")) / 20;
-                document.page.height = number(attr(size, "h")) / 20;
-            }
-            if (auto margin = child(node, "pgMar")) {
-                const auto top = number(attr(margin, "top")) / 20;
-                document.page.margin = top;
-                for (auto side : {"left", "right", "bottom"})
-                    if (number(attr(margin, side)) / 20 != top)
-                        warn(warnings, "Unequal page margins are approximated by the top margin.");
-            }
-            for (auto propertyNode : node.children())
-                if (propertyNode.type() == pugi::node_element && !is(propertyNode, "pgSz") &&
-                    !is(propertyNode, "pgMar"))
-                    warn(warnings,
-                         "Section features are not preserved: " + local(propertyNode.name()));
-            continue;
+    // Inline (and floating, placed inline) pictures: PNG directly, other formats through
+    // the converter. Sizes come from the drawing's extent and are fitted to the page later.
+    std::size_t pictureBytes = 0;
+    auto readPicture = [&](pugi::xml_node drawing, const CharacterStyle &style) -> std::optional<Run> {
+        auto frame = childIn(drawing, "inline", placementNs);
+        if (!frame) {
+            frame = childIn(drawing, "anchor", placementNs);
+            if (frame)
+                warn(warnings, "Floating pictures are placed inline with the text.");
         }
-        if (!is(node, "p")) {
-            warn(warnings, "Unsupported document content was omitted: " + local(node.name()));
-            continue;
+        const auto blip = findIn(frame, "blip", drawingNs);
+        const auto embed = attrIn(blip, "embed", relationshipsNs);
+        if (!frame || embed.empty()) {
+            warn(warnings, "A drawing that is not a picture was omitted.");
+            return std::nullopt;
         }
+        const auto target = relationship(parts, main, "image", embed);
+        if (target.empty() || !parts.contains(target)) {
+            warn(warnings, "A picture whose data is missing was omitted.");
+            return std::nullopt;
+        }
+        std::string png = parts.at(target);
+        if (png.compare(0, 8, std::string("\x89PNG\r\n\x1a\n", 8)) != 0) {
+            std::optional<std::string> converted;
+            if (convertPicture)
+                converted = convertPicture(png);
+            if (!converted) {
+                warn(warnings, "A picture in an unsupported format was omitted.");
+                return std::nullopt;
+            }
+            png = std::move(*converted);
+        }
+        if (png.size() < 24) {
+            warn(warnings, "An unreadable picture was omitted.");
+            return std::nullopt;
+        }
+        auto dimension = [&](std::size_t offset) {
+            std::uint32_t value = 0;
+            for (std::size_t index = offset; index < offset + 4; ++index)
+                value = (value << 8) | static_cast<unsigned char>(png[index]);
+            return value;
+        };
+        auto resource = std::make_shared<ImageResource>(
+            ImageResource{dimension(16), dimension(20), std::move(png)});
+        try {
+            validateImageResource(*resource);
+        } catch (const std::exception &) {
+            warn(warnings, "A picture larger than the preview limits was omitted.");
+            return std::nullopt;
+        }
+        if (resource->png.size() > 64 * 1024 * 1024 - pictureBytes) {
+            warn(warnings, "Pictures beyond the 64 MiB document limit were omitted.");
+            return std::nullopt;
+        }
+        pictureBytes += resource->png.size();
+        const auto extent = childIn(frame, "extent", placementNs);
+        double width = extent.attribute("cx").as_double() / 12700,
+               height = extent.attribute("cy").as_double() / 12700;
+        if (!(width >= 1 && height >= 1 && std::isfinite(width) && std::isfinite(height))) {
+            width = resource->pixelWidth * 0.75;
+            height = resource->pixelHeight * 0.75;
+        }
+        const auto scale = std::min({1.0, 2880 / width, 2880 / height});
+        const auto properties = childIn(frame, "docPr", placementNs);
+        std::string description = properties.attribute("descr").value();
+        if (description.empty())
+            description = properties.attribute("name").value();
+        if (description.size() > 4096)
+            description.resize(4096);
+        for (auto &ch : description)
+            if (static_cast<unsigned char>(ch) < 32)
+                ch = ' ';
+        const auto id = document.allocateId();
+        document.images[id] = std::move(resource);
+        return Run::fromImage({id, std::max(1.0, width * scale), std::max(1.0, height * scale),
+                               description},
+                              style);
+    };
+    std::function<void(pugi::xml_node, const std::optional<TableCell> &)> readParagraph =
+        [&](pugi::xml_node node, const std::optional<TableCell> &cell) {
         Paragraph paragraph = defaultParagraph;
         paragraph.id = document.allocateId();
         paragraph.runs.clear();
@@ -588,6 +676,10 @@ DocxImport parseDocx(const std::string &bytes) {
         applyStyle(styleId, paragraph, base, seen);
         paragraph.style = styleId.empty() ? std::string("Normal") : importStyle(styleId);
         paragraphProperties(properties, paragraph, warnings);
+        if (cell) {
+            paragraph.cell = cell;
+            paragraph.pageBreakBefore = false; // not allowed inside a table
+        }
         // Resolve numbering through the same base -> derived -> direct cascade as styles.
         std::vector<pugi::xml_node> propertyChain{properties};
         auto numberingStyle = styleId;
@@ -649,8 +741,22 @@ DocxImport parseDocx(const std::string &bytes) {
                     applyStyle(val(child(child(run, "rPr"), "rStyle")), paragraph, style, runSeen);
                     runProperties(child(run, "rPr"), style, warnings);
                     std::u16string text;
+                    const auto characterStyle =
+                        importCharacterStyle(val(child(child(run, "rPr"), "rStyle")), 0);
+                    bool pictures = false;
                     for (auto item : run.children()) {
-                        if (is(item, "t")) {
+                        if (is(item, "drawing")) {
+                            pictures = true; // even when omitted: no empty run is left behind
+                            if (auto picture = readPicture(item, style)) {
+                                if (!text.empty()) {
+                                    paragraph.runs.push_back({std::move(text), style});
+                                    paragraph.runs.back().characterStyle = characterStyle;
+                                    text.clear();
+                                }
+                                picture->characterStyle = characterStyle;
+                                paragraph.runs.push_back(std::move(*picture));
+                            }
+                        } else if (is(item, "t")) {
                             for (auto chunk : item.children())
                                 if (chunk.type() == pugi::node_pcdata ||
                                     chunk.type() == pugi::node_cdata)
@@ -665,9 +771,10 @@ DocxImport parseDocx(const std::string &bytes) {
                             warn(warnings,
                                  "Unsupported inline content was omitted: " + local(item.name()));
                     }
-                    paragraph.runs.push_back({std::move(text), std::move(style)});
-                    paragraph.runs.back().characterStyle =
-                        importCharacterStyle(val(child(child(run, "rPr"), "rStyle")), 0);
+                    if (!text.empty() || !pictures) {
+                        paragraph.runs.push_back({std::move(text), std::move(style)});
+                        paragraph.runs.back().characterStyle = characterStyle;
+                    }
                 } else
                     warn(warnings,
                          "Unsupported paragraph content was omitted: " + local(run.name()));
@@ -677,6 +784,10 @@ DocxImport parseDocx(const std::string &bytes) {
         Paragraph split = paragraph;
         split.runs.clear();
         for (const auto &run : paragraph.runs) {
+            if (run.image()) {
+                split.runs.push_back(run);
+                continue;
+            }
             std::size_t start = 0;
             for (;;) {
                 const auto end = run.text().find(u'\n', start);
@@ -696,9 +807,173 @@ DocxImport parseDocx(const std::string &bytes) {
         if (split.runs.empty())
             split.runs.push_back({u"", base});
         document.paragraphs.push_back(std::move(split));
+        };
+    auto emptyParagraph = [&](const std::optional<TableCell> &cell) {
+        Paragraph paragraph = defaultParagraph;
+        paragraph.id = document.allocateId();
+        paragraph.style = defaultStyle.empty() ? std::string("Normal") : importStyle(defaultStyle);
+        paragraph.cell = cell;
+        paragraph.pageBreakBefore = false;
+        paragraph.runs = {{u"", defaultRun}};
+        return paragraph;
+    };
+    // Tables: Wordforge tables are a complete grid of 1-1000 rows and 1-10 columns whose
+    // cells hold paragraphs. Merged cells are split; nested tables are flattened into the
+    // cell that holds them; larger tables become plain paragraphs.
+    bool nestedWarned = false;
+    std::function<void(pugi::xml_node, const std::optional<TableCell> &, unsigned)> readCell =
+        [&](pugi::xml_node cellNode, const std::optional<TableCell> &cell, unsigned depth) {
+            if (depth > 16)
+                throw std::runtime_error("Excessively nested DOCX tables");
+            for (auto item : cellNode.children()) {
+                if (item.type() != pugi::node_element || is(item, "tcPr"))
+                    continue;
+                if (is(item, "p"))
+                    readParagraph(item, cell);
+                else if (is(item, "tbl")) {
+                    if (!nestedWarned)
+                        warn(warnings, "Nested tables are flattened into the cell that holds them.");
+                    nestedWarned = true;
+                    for (auto row : item.children())
+                        if (is(row, "tr"))
+                            for (auto inner : row.children())
+                                if (is(inner, "tc"))
+                                    readCell(inner, cell, depth + 1);
+                } else
+                    warn(warnings, "Unsupported table content was omitted: " + local(item.name()));
+            }
+        };
+    std::function<void(pugi::xml_node)> readTable = [&](pugi::xml_node table) {
+        std::vector<std::vector<pugi::xml_node>> rows; // null nodes are cells covered by a span
+        std::size_t columns = 0;
+        bool merged = false, shaded = false;
+        for (auto row : table.children()) {
+            if (row.type() != pugi::node_element || is(row, "tblPr") || is(row, "tblGrid"))
+                continue;
+            if (!is(row, "tr")) {
+                warn(warnings, "Unsupported table content was omitted: " + local(row.name()));
+                continue;
+            }
+            std::vector<pugi::xml_node> cells;
+            for (auto cell : row.children()) {
+                if (!is(cell, "tc")) {
+                    if (cell.type() == pugi::node_element && !is(cell, "trPr") && !is(cell, "tblPrEx"))
+                        warn(warnings, "Unsupported table content was omitted: " + local(cell.name()));
+                    continue;
+                }
+                cells.push_back(cell);
+                const auto properties = child(cell, "tcPr");
+                if (child(properties, "vMerge"))
+                    merged = true;
+                if (child(properties, "shd"))
+                    shaded = true;
+                const auto span = val(child(properties, "gridSpan"));
+                const auto count = span.empty() ? 1.0 : std::clamp(number(span), 1.0, 64.0);
+                for (int extra = 1; extra < static_cast<int>(count); ++extra) {
+                    cells.emplace_back();
+                    merged = true;
+                }
+            }
+            columns = std::max(columns, cells.size());
+            rows.push_back(std::move(cells));
+        }
+        if (rows.empty() || !columns)
+            return;
+        if (columns > 10 || rows.size() > 1000) {
+            warn(warnings, "A table with more than 10 columns or 1000 rows was imported as paragraphs.");
+            for (const auto &row : rows)
+                for (auto cell : row)
+                    if (cell)
+                        readCell(cell, std::nullopt, 0);
+            return;
+        }
+        if (merged)
+            warn(warnings, "Merged table cells are split into separate cells.");
+        if (shaded)
+            warn(warnings, "Table cell shading is not preserved.");
+        // Two tables in a row need a body paragraph between them.
+        if (!document.paragraphs.empty() && document.paragraphs.back().cell)
+            document.paragraphs.push_back(emptyParagraph(std::nullopt));
+        const Table created{document.allocateId(), rows.size(), columns};
+        document.tables.push_back(created);
+        for (std::size_t r = 0; r < rows.size(); ++r)
+            for (std::size_t c = 0; c < columns; ++c) {
+                const TableCell cell{created.id, r, c};
+                const auto before = document.paragraphs.size();
+                if (c < rows[r].size() && rows[r][c])
+                    readCell(rows[r][c], cell, 0);
+                if (document.paragraphs.size() == before)
+                    document.paragraphs.push_back(emptyParagraph(cell));
+            }
+    };
+    for (auto node : body.children()) {
+        if (node.type() != pugi::node_element)
+            continue;
+        if (is(node, "sectPr")) {
+            if (auto size = child(node, "pgSz")) {
+                document.page.width = number(attr(size, "w")) / 20;
+                document.page.height = number(attr(size, "h")) / 20;
+            }
+            if (auto margin = child(node, "pgMar")) {
+                const auto top = number(attr(margin, "top")) / 20;
+                document.page.margin = top;
+                for (auto side : {"left", "right", "bottom"})
+                    if (number(attr(margin, side)) / 20 != top)
+                        warn(warnings, "Unequal page margins are approximated by the top margin.");
+            }
+            for (auto propertyNode : node.children())
+                if (propertyNode.type() == pugi::node_element && !is(propertyNode, "pgSz") &&
+                    !is(propertyNode, "pgMar"))
+                    warn(warnings,
+                         "Section features are not preserved: " + local(propertyNode.name()));
+            continue;
+        }
+        if (is(node, "tbl")) {
+            readTable(node);
+            continue;
+        }
+        if (!is(node, "p")) {
+            warn(warnings, "Unsupported document content was omitted: " + local(node.name()));
+            continue;
+        }
+        readParagraph(node, std::nullopt);
     }
+    // A table must be followed by a body paragraph.
+    if (!document.paragraphs.empty() && document.paragraphs.back().cell)
+        document.paragraphs.push_back(emptyParagraph(std::nullopt));
     if (document.paragraphs.empty())
         document.paragraphs.emplace_back(document.allocateId());
+    // Pictures larger than their column or the page would not lay out: scale them down.
+    if (!document.images.empty()) {
+        const double content = document.page.width - 2 * document.page.margin;
+        std::map<std::uint64_t, std::size_t> tableColumns;
+        for (const auto &table : document.tables)
+            tableColumns[table.id] = table.columns;
+        for (auto &paragraph : document.paragraphs) {
+            double available = paragraph.cell ? content / tableColumns.at(paragraph.cell->tableId) - 8
+                                              : content;
+            available -= paragraph.indentLeft + (paragraph.list != ListKind::None ? 40 : 0) + 1;
+            double tallest = 0;
+            for (const auto &run : paragraph.runs)
+                tallest = std::max(tallest, run.style.size);
+            const double maxHeight = (document.page.height - 2 * document.page.margin) /
+                                         std::max(1.0, paragraph.lineSpacing) -
+                                     tallest - 1;
+            for (auto &run : paragraph.runs)
+                if (const auto *image = run.image()) {
+                    const auto scale = std::min(
+                        {1.0, available / image->width, maxHeight / image->height});
+                    if (scale >= 1)
+                        continue;
+                    auto fitted = *image;
+                    fitted.width = std::max(1.0, image->width * scale);
+                    fitted.height = std::max(1.0, image->height * scale);
+                    auto characterStyle = run.characterStyle;
+                    run = Run::fromImage(std::move(fitted), run.style);
+                    run.characterStyle = std::move(characterStyle);
+                }
+        }
+    }
     // Enter after an imported style continues with its DOCX "next" style when that was kept.
     for (const auto &[id, node] : createdStyles) {
         const auto next = val(child(node, "next"));

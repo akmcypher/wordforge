@@ -1,5 +1,15 @@
 # Current status
 
+2026-11-16 — DOCX table and picture import. Word tables (up to 10 columns, 1000 rows)
+open as real Wordforge tables: merged cells (gridSpan/vMerge) are split into separate
+cells, nested tables are flattened into their cell, short rows are padded, and adjacent
+tables get a separating paragraph, each with a warning. Wider tables become paragraphs.
+Inline pictures and floating pictures (placed inline, with a warning) are imported:
+PNG directly, JPEG/GIF/BMP etc. converted to PNG through Qt in the desktop app, and
+scaled to fit the column/page. Cell shading, widths and wrap are not preserved.
+Windows ARM64: all 6 suites pass (3 new DOCX cases, 2 updated); Ubuntu by CI. Not yet
+tried on a corpus of real Word files.
+
 2026-11-15 — v0.6.3 released: Windows installers/ZIPs on GitHub, Snap `latest/stable`
 0.6.3 (amd64 rev 17, arm64 rev 16). Contains the 1C style slices below. Handoff for the
 next agent: AGENT_HANDOFF.md → Current state.
