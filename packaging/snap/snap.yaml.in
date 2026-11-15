@@ -15,6 +15,11 @@ description: |
   Unsaved work is recovered after a crash. Light and dark themes, a Ctrl+K
   command palette and a distraction-free focus mode keep the page in front.
 
+  Opens and saves DOCX, the document format used by Microsoft Word (MS Word),
+  LibreOffice Writer, WPS Office, ONLYOFFICE and Google Docs downloads, so you can
+  exchange files with people who use them. A lightweight, offline office writer
+  for letters, reports, notes and assignments.
+
   This is a developer preview: headers and footers, comments and track changes
   are still to come. Built with C++20, Qt 6 and Skia; open source under
   Apache-2.0. Also available for Windows.
