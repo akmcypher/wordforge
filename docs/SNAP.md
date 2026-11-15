@@ -105,6 +105,14 @@ tables/images, broader desktop testing and recovery across upgrades remain open.
   `localhost:631`; `packaging/snap/wordforge-launch` now sets `CUPS_SERVER` to the
   cups interface socket `/run/cups/cups.sock` (unless already set), so the
   network-free snap never tries TCP (df43f29).
+* 2026-11-14: 0.6.2-preview reached `latest/edge` automatically from the release merge;
+  stable stayed on 0.6.1.
+* 2026-11-15: 0.6.3-preview promoted to `latest/stable` on the user's approval: amd64
+  revision 17 and arm64 revision 16 (edge builds of 41ee309, the v0.6.3 tag), both
+  having passed the CI strict-confinement self-test. Command (in WSL, with the Store
+  login exported as `SNAPCRAFT_STORE_CREDENTIALS`): `snapcraft release wordforge 17
+  stable` and `... 16 stable`; `snapcraft status wordforge` confirmed. Store metrics on
+  2026-11-14: about 2 real installs (Germany, Russia) plus Store-internal ones.
 * Store listing live at <https://snapcraft.io/wordforge>: title "Wordforge - Word
   Processor", summary, description, icon, two screenshots, categories Productivity
   and Utilities. Snap Store search for "wordforge" ranks it #1 and "word processor"

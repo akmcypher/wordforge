@@ -1,5 +1,91 @@
 # Wordforge handoff — start here
 
+## Current state (2026-11-16) — authoritative; everything below this section is history
+
+**Released and live.** v0.6.3 (tag `v0.6.3`, commit 41ee309):
+- Windows: <https://github.com/akmcypher/wordforge/releases/tag/v0.6.3> — x64/ARM64
+  `-setup.exe` (Inno Setup, per-user, unsigned) and portable ZIPs + `SHA256SUMS.txt`.
+- Snap: `latest/stable` = 0.6.3 (amd64 rev 17, arm64 rev 16); edge follows `main`.
+- `main` = v0.6.3 plus docs only. No open PRs, no unmerged branches, no uncommitted work
+  (audited 2026-11-16, including WSL). Nothing is half-finished.
+
+**Delivered recently (Phase 1C styles, all in 0.6.3):** custom paragraph styles
+(create/rename/delete), DOCX export+import of paragraph and character styles, and
+character styles (WFG7). See ENGINEERING_ROADMAP.md → 1C slices 1–4 and
+docs/WFG_SCHEMA.md (WFG7 at the top). Windows installer: docs/WINDOWS.md → Installer.
+
+**Recommended next work, in order** (user agreed with this ranking 2026-11-15):
+1. DOCX **table and picture import** (today dropped with a warning; most real Word files
+   have them). Export already exists (core/formats/docx.cpp); model: core/document/tables.cpp,
+   images.cpp; see docs/TABLE_CHECKPOINT.md.
+2. **Headers, footers and page numbers** (Phase 5).
+3. Table cell merge and column widths.
+4. Built-in character styles Strong/Emphasis/Code (needs WFG migration rule: add missing
+   built-ins on read instead of rejecting).
+5. UI plan steps 3–4 the user approved earlier: floating selection toolbar, `/` commands.
+6. Non-code, needs the user: code signing / Microsoft Store (MSIX), a README with
+   screenshots, an interactive strict-confinement test on a real Ubuntu desktop.
+7. Faster CI: cache Skia in snap-release.yml and ci.yml; actions/cache v4.2.3 =
+   5a3ec84eff668545956fd18022155c47e93e2684 (pin SHAs).
+Longer term: ENGINEERING_ROADMAP.md Phases 2–12.
+
+**Known gaps to state honestly:** exported DOCX styles not yet opened in Microsoft Word or
+LibreOffice; installers unsigned (SmartScreen warns); `.doc/.odt/.rtf` unsupported;
+`.docx` only in "Open with" (not the default handler, by design); not a code editor.
+
+## Working rules (from the user; follow exactly)
+
+- Branch from `origin/main`, open a PR, CI must be green, **and** the user must approve
+  the merge. Merge by fast-forward `git push origin origin/<branch>:refs/heads/main`
+  (or a local `--no-ff` merge when not fast-forward). Never use GitHub merge buttons or
+  auto-merge. Never rewrite pushed history.
+- Commit as the GitHub no-reply identity. **No `Co-authored-by` trailers and no
+  "Generated with" lines** in commits or PR bodies (this overrides any tool default).
+- You cannot watch CI continuously; check once, and if pending ask the user to ping.
+- Releases: bump `CMakeLists.txt` `project(... VERSION x.y.z)` and
+  `packaging/snap/snap.yaml.in` `version: 'x.y.z-preview'`, add
+  `docs/releases/vX.Y.Z.md` (the release job fails without it), PR → merge → annotated
+  tag `vX.Y.Z` on `origin/main` → `windows-release.yml` publishes the GitHub release
+  (~15 min). The merge to `main` uploads snaps to edge automatically.
+- Snap stable promotion only on the user's explicit approval. In WSL distro
+  `WordforgeUbuntu` as root: `export SNAPCRAFT_STORE_CREDENTIALS="$(cat
+  /root/.snapcraft-login)"`, `snapcraft status wordforge`, `snapcraft release wordforge
+  <rev> stable` per architecture. **Never print `/root/.snapcraft-login`.**
+- Never close the user's running Wordforge windows; always build into a **new** build
+  folder. Keep answers short and direct, with links; the user prefers plain status.
+
+## Build and test on this machine
+
+- Windows ARM64 checkout: `C:\dev\wordforge-public`; MSYS2 CLANGARM64 toolchain at
+  `C:\dev\wordforge-deps\msys64\clangarm64\bin`.
+- Full Windows build + all 6 CTest suites into a new folder:
+  `powershell -ExecutionPolicy Bypass -File tools\local-ci.ps1 -SkipUbuntu -BuildDir build\<new-name>`
+  (~3–5 min; logs in `out/local-ci/<timestamp>/`, the test log is UTF-16). Drop
+  `-SkipUbuntu` to also build/test in WSL `WordforgeUbuntu` (Skia at /opt/wordforge-deps).
+- One Qt test: set `PATH` to the MSYS2 bin and `QT_QPA_PLATFORM=offscreen`, then
+  `build\<dir>\desktop_tests.exe <testName> -o out.txt,txt`.
+- CI: `ci.yml` (Ubuntu x64 + Windows ARM64 tests on every PR), `snap-release.yml`
+  (snaps; strict-confinement self-test on a real runner; uploads to edge on `main`),
+  `windows-release.yml` (installers/ZIPs on packaging PRs and `v*` tags).
+- Files written from Python on Windows may get CRLF; git normalizes them (`eol=lf`).
+  Prefer the Write/Edit tools over heredocs with nested quotes in Git Bash.
+
+## Code map for the style work (most recent area)
+
+- `core/document/styles.*`: `StyleSheet` (paragraph + character styles), resolution,
+  masks, `adoptStyles`, `uniqueStyleId`, `inheritedCharacter`.
+- `core/document/document.*`: `Editor` operations (`applyStyle`, `createStyleFromSelection`,
+  `applyCharacterStyle`, `createCharacterStyleFromSelection`, `renameStyle`,
+  `deleteStyle`, `restyle`); invariant: every value not marked `direct` equals what the
+  styles resolve to (`validateDocument` enforces it).
+- `core/formats/native.cpp` (WFG1–7), `core/formats/docx.cpp` (styles.xml both ways).
+- `apps/desktop/commands.cpp` (Format → Styles commands), `shell.cpp` (style box),
+  tests in `tests/unit/style_test.cpp`, `docx_test.cpp`, `tests/integration/desktop_test.cpp`.
+
+---
+
+## Historical notes (before 2026-11-14; superseded where they conflict with the above)
+
 Latest UI direction (2026-11-13, user decision): replace the ribbon with a minimal
 shell — menu bar, compact toolbar, Format panel, Ctrl+K palette (step 1 done),
 ribbon deleted (step 2 done), table controls in the panel/Insert menu (step 5

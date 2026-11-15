@@ -1,5 +1,9 @@
 # Current status
 
+2026-11-15 — v0.6.3 released: Windows installers/ZIPs on GitHub, Snap `latest/stable`
+0.6.3 (amd64 rev 17, arm64 rev 16). Contains the 1C style slices below. Handoff for the
+next agent: AGENT_HANDOFF.md → Current state.
+
 2026-11-14 — Phase 1C slice 4: character styles. Format → Styles → New character style
 from selection / Remove character style; they appear after a separator in the style box
 and layer over the paragraph style. Rename/Delete act on the character style at the
