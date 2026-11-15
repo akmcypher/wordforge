@@ -117,6 +117,11 @@ tables/images, broader desktop testing and recovery across upgrades remain open.
   Processor", summary, description, icon, two screenshots, categories Productivity
   and Utilities. Snap Store search for "wordforge" ranks it #1 and "word processor"
   #3 (checked 2026-11-13).
+* 2026-11-15: Store search ranked Wordforge #3 for "word processor", #7 for "word", #9
+  for "docx", but not in the top 100 for "office", "writer" or "document": search uses
+  the name, title and summary. Title changed to "Wordforge - Office Word Processor" and
+  summary to "Office word processor and document writer - DOCX, PDF, offline and
+  private" (snap.yaml.in); the listing updates with the next upload.
 * Still not done: an interactive strict-confinement session on a real Ubuntu
   desktop (X11 and Wayland, dialogs, printing to a real printer). The CI test is
   headless.
