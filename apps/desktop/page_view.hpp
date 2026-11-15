@@ -83,6 +83,10 @@ class PageView : public QAbstractScrollArea {
     bool tableRow(bool insert, bool before = false);
     bool tableColumn(bool insert, bool before = false);
     bool removeTable();
+    bool mergeCells();
+    bool splitCell();
+    bool setColumnWidth(double points);
+    bool distributeColumns();
     // Width available for content at the caret: the page body or the table cell,
     // less the paragraph's indent and list marker.
     double writingWidth() const;

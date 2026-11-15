@@ -1,9 +1,51 @@
 #include "core/document/document.hpp"
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <stdexcept>
 #include <unordered_set>
 namespace wf {
+const CellMerge *Table::mergeAt(std::size_t row, std::size_t column) const {
+    for (const auto &merge : merges)
+        if (merge.contains(row, column))
+            return &merge;
+    return nullptr;
+}
+std::vector<double> columnEdges(const Table &table, double width) {
+    if (table.columns * minimumColumnWidth > width + 1e-9)
+        throw std::runtime_error("Table columns leave insufficient writing space; use fewer "
+                                 "columns or a wider page");
+    std::vector<double> widths = table.widths.size() == table.columns
+                                     ? table.widths
+                                     : std::vector<double>(table.columns, 1.0);
+    // Scale to the width; repeatedly pin columns below the minimum and rescale the rest.
+    std::vector<bool> pinned(table.columns, false);
+    for (std::size_t pass = 0; pass <= table.columns; ++pass) {
+        double free = width, total = 0;
+        for (std::size_t c = 0; c < table.columns; ++c)
+            pinned[c] ? free -= minimumColumnWidth : total += widths[c];
+        bool changed = false;
+        for (std::size_t c = 0; c < table.columns; ++c) {
+            if (pinned[c])
+                continue;
+            widths[c] = widths[c] * free / total;
+            if (widths[c] < minimumColumnWidth) {
+                pinned[c] = true;
+                changed = true;
+            }
+        }
+        if (!changed)
+            break;
+        for (std::size_t c = 0; c < table.columns; ++c)
+            if (pinned[c])
+                widths[c] = minimumColumnWidth;
+    }
+    std::vector<double> edges{0};
+    for (auto w : widths)
+        edges.push_back(edges.back() + w);
+    edges.back() = width;
+    return edges;
+}
 void validateTables(const Document &document) {
     std::map<std::uint64_t, std::vector<std::size_t>> members;
     for (std::size_t i = 0; i < document.paragraphs.size(); ++i)
@@ -12,6 +54,26 @@ void validateTables(const Document &document) {
     for (const auto &table : document.tables) {
         if (!table.id || !table.rows || table.rows > 1000 || !table.columns || table.columns > 10)
             throw std::invalid_argument("Table requires 1–1000 rows and 1–10 columns");
+        if (!table.widths.empty() &&
+            (table.widths.size() != table.columns ||
+             std::any_of(table.widths.begin(), table.widths.end(),
+                         [](double w) { return !std::isfinite(w) || w <= 0 || w > 2880; })))
+            throw std::invalid_argument("Invalid table column widths");
+        if (table.merges.size() > table.rows * table.columns)
+            throw std::invalid_argument("Too many merged table cells");
+        std::vector<bool> covered(table.rows * table.columns, false);
+        for (const auto &merge : table.merges) {
+            if (merge.rows < 1 || merge.columns < 1 || merge.rows * merge.columns < 2 ||
+                merge.row >= table.rows || merge.column >= table.columns ||
+                merge.rows > table.rows - merge.row || merge.columns > table.columns - merge.column)
+                throw std::invalid_argument("Invalid merged table cells");
+            for (auto r = merge.row; r < merge.row + merge.rows; ++r)
+                for (auto c = merge.column; c < merge.column + merge.columns; ++c) {
+                    if (covered[r * table.columns + c])
+                        throw std::invalid_argument("Merged table cells overlap");
+                    covered[r * table.columns + c] = true;
+                }
+        }
         auto found = members.find(table.id);
         if (found == members.end())
             throw std::invalid_argument("Table has no cells");
@@ -111,6 +173,31 @@ void reshape(Editor &editor, bool row, bool insert, bool before) {
         table.rows = insert ? oldRows + 1 : oldRows - 1;
     else
         table.columns = insert ? oldColumns + 1 : oldColumns - 1;
+    // A merge grows when a row/column is inserted inside it and shrinks when one is deleted.
+    std::vector<CellMerge> merges;
+    for (auto merge : table.merges) {
+        auto &start = row ? merge.row : merge.column;
+        auto &size = row ? merge.rows : merge.columns;
+        if (insert) {
+            if (pivot <= start)
+                ++start;
+            else if (pivot < start + size)
+                ++size;
+        } else if (pivot < start)
+            --start;
+        else if (pivot < start + size)
+            --size;
+        if (size && merge.rows * merge.columns >= 2)
+            merges.push_back(merge);
+    }
+    table.merges = std::move(merges);
+    if (!row && !table.widths.empty()) {
+        if (insert)
+            table.widths.insert(table.widths.begin() + static_cast<std::ptrdiff_t>(pivot),
+                                table.widths[cell->column]);
+        else
+            table.widths.erase(table.widths.begin() + static_cast<std::ptrdiff_t>(pivot));
+    }
     const auto targetRow = row ? std::min(pivot, table.rows - 1) : cell->row;
     const auto targetColumn = row ? cell->column : std::min(pivot, table.columns - 1);
     std::vector<Paragraph> replacement;
@@ -204,39 +291,193 @@ void Editor::removeTable() {
     else
         transact(command);
 }
+namespace {
+std::size_t cellStart(const Document &document, std::uint64_t table, std::size_t row,
+                      std::size_t column) {
+    for (std::size_t i = 0; i < document.paragraphs.size(); ++i)
+        if (document.paragraphs[i].cell == TableCell{table, row, column})
+            return i;
+    throw std::logic_error("Missing table cell");
+}
+const Table &tableOf(const Document &document, std::uint64_t id) {
+    const auto found = std::find_if(document.tables.begin(), document.tables.end(),
+                                    [&](const auto &t) { return t.id == id; });
+    if (found == document.tables.end())
+        throw std::invalid_argument("Unknown table");
+    return *found;
+}
+// Writes a grid's cells back over its paragraphs, in row-major order.
+void store(Document &document, Grid &source) {
+    const auto &table = *source.table;
+    std::vector<Paragraph> replacement;
+    for (std::size_t r = 0; r < table.rows; ++r)
+        for (std::size_t c = 0; c < table.columns; ++c)
+            for (auto &p : source.cells[r * table.columns + c]) {
+                p.cell = TableCell{table.id, r, c};
+                replacement.push_back(std::move(p));
+            }
+    auto begin = document.paragraphs.begin() + static_cast<std::ptrdiff_t>(source.first);
+    begin = document.paragraphs.erase(
+        begin, document.paragraphs.begin() + static_cast<std::ptrdiff_t>(source.last + 1));
+    document.paragraphs.insert(begin, std::make_move_iterator(replacement.begin()),
+                               std::make_move_iterator(replacement.end()));
+}
+template <class Command> void run(Editor &editor, bool inTransaction, Command command) {
+    if (inTransaction)
+        command(editor);
+    else
+        editor.transact(command);
+}
+} // namespace
 bool Editor::nextCell(bool backward) {
     const auto cell = selectedCell();
     if (!cell)
         return false;
-    if (backward && cell->row == 0 && cell->column == 0)
-        return true;
-    auto index = selection.focus.paragraph;
+    const auto &table = tableOf(document, cell->tableId);
+    const auto columns = table.columns;
+    auto linear = cell->row * columns + cell->column;
+    if (const auto *merge = table.mergeAt(cell->row, cell->column))
+        linear = merge->row * columns + merge->column;
+    // Covered cells are skipped: only merge anchors and plain cells are visited.
+    auto visible = [&](std::size_t l) {
+        const auto *merge = table.mergeAt(l / columns, l % columns);
+        return !merge || (merge->row == l / columns && merge->column == l % columns);
+    };
+    std::optional<std::size_t> target;
     if (backward) {
-        while (index && document.paragraphs[index - 1].cell == cell)
-            --index;
-        --index;
-        const auto target = document.paragraphs[index].cell;
-        while (index && document.paragraphs[index - 1].cell == target)
-            --index;
+        for (auto l = linear; l-- > 0;)
+            if (visible(l)) {
+                target = l;
+                break;
+            }
+        if (!target)
+            return true;
     } else {
-        while (index + 1 < document.paragraphs.size() &&
-               document.paragraphs[index + 1].cell == cell)
-            ++index;
-        ++index;
-        if (!document.paragraphs[index].cell ||
-            document.paragraphs[index].cell->tableId != cell->tableId) {
+        for (auto l = linear + 1; l < table.rows * columns; ++l)
+            if (visible(l)) {
+                target = l;
+                break;
+            }
+        if (!target) { // past the last cell: add a row
+            const auto id = table.id, lastRow = table.rows - 1;
+            const auto at = cellStart(document, id, lastRow, 0);
+            selection = {{at, 0}, {at, 0}};
             tableRow(true);
-            index = selection.focus.paragraph;
-            const auto row = *selectedCell();
-            while (index && document.paragraphs[index - 1].cell &&
-                   document.paragraphs[index - 1].cell->tableId == row.tableId &&
-                   document.paragraphs[index - 1].cell->row == row.row)
-                --index;
+            target = (lastRow + 1) * columns;
         }
     }
+    const auto index = cellStart(document, cell->tableId, *target / columns, *target % columns);
     selection = {{index, 0}, {index, 0}};
     typingStyle = document.styleAt(selection.focus);
     return true;
+}
+void Editor::mergeCells() {
+    run(*this, inTransaction_, [](Editor &e) {
+        const auto &paragraphs = e.document.paragraphs;
+        const auto a = paragraphs[e.selection.anchor.paragraph].cell;
+        const auto b = paragraphs[e.selection.focus.paragraph].cell;
+        if (!a || !b || a->tableId != b->tableId || *a == *b)
+            throw std::invalid_argument("Select from one cell into another cell of the same "
+                                        "table first");
+        auto source = grid(e.document, a->tableId);
+        auto &table = *source.table;
+        auto r0 = std::min(a->row, b->row), r1 = std::max(a->row, b->row);
+        auto c0 = std::min(a->column, b->column), c1 = std::max(a->column, b->column);
+        // Grow the rectangle to include every merge it touches.
+        for (bool grown = true; grown;) {
+            grown = false;
+            for (const auto &m : table.merges)
+                if (m.row <= r1 && m.row + m.rows > r0 && m.column <= c1 &&
+                    m.column + m.columns > c0) {
+                    const auto nr0 = std::min(r0, m.row), nr1 = std::max(r1, m.row + m.rows - 1);
+                    const auto nc0 = std::min(c0, m.column),
+                               nc1 = std::max(c1, m.column + m.columns - 1);
+                    grown = grown || nr0 != r0 || nr1 != r1 || nc0 != c0 || nc1 != c1;
+                    r0 = nr0, r1 = nr1, c0 = nc0, c1 = nc1;
+                }
+        }
+        const CellMerge merged{r0, c0, r1 - r0 + 1, c1 - c0 + 1};
+        std::erase_if(table.merges, [&](const CellMerge &m) {
+            return merged.contains(m.row, m.column);
+        });
+        table.merges.push_back(merged);
+        // Content moves into the top-left cell, as in Word; covered cells keep one empty
+        // paragraph.
+        auto hasContent = [](const std::vector<Paragraph> &cell) {
+            return std::any_of(cell.begin(), cell.end(),
+                               [](const Paragraph &p) { return !p.text().empty(); });
+        };
+        auto &anchor = source.cells[r0 * table.columns + c0];
+        std::vector<Paragraph> moved;
+        for (auto r = r0; r <= r1; ++r)
+            for (auto c = c0; c <= c1; ++c) {
+                if (r == r0 && c == c0)
+                    continue;
+                auto &cell = source.cells[r * table.columns + c];
+                if (hasContent(cell)) {
+                    for (auto &p : cell)
+                        moved.push_back(std::move(p));
+                    cell = {emptyCell(e.document, {table.id, r, c}, e.typingStyle)};
+                } else
+                    cell.resize(1);
+            }
+        if (!moved.empty()) {
+            if (!hasContent(anchor))
+                anchor.clear();
+            for (auto &p : moved)
+                anchor.push_back(std::move(p));
+        }
+        store(e.document, source);
+        const auto at = cellStart(e.document, table.id, r0, c0);
+        e.selection = {{at, 0}, {at, 0}};
+        e.typingStyle = e.document.styleAt(e.selection.focus);
+        repairBookmarks(e.document, e.selection.focus);
+    });
+}
+void Editor::splitCell() {
+    run(*this, inTransaction_, [](Editor &e) {
+        const auto cell = e.selectedCell();
+        if (!cell)
+            throw std::invalid_argument("Place the caret in a merged cell first");
+        auto &table = *grid(e.document, cell->tableId).table;
+        const auto before = table.merges.size();
+        std::erase_if(table.merges,
+                      [&](const CellMerge &m) { return m.contains(cell->row, cell->column); });
+        if (table.merges.size() == before)
+            throw std::invalid_argument("The caret is not in a merged cell");
+    });
+}
+void Editor::setColumnWidth(double points) {
+    run(*this, inTransaction_, [points](Editor &e) {
+        const auto cell = e.selectedCell();
+        if (!cell)
+            throw std::invalid_argument("Place the caret in a table first");
+        auto &table = *grid(e.document, cell->tableId).table;
+        if (table.columns == 1)
+            throw std::invalid_argument("A single column always spans the page width");
+        const double width = e.document.page.width - 2 * e.document.page.margin;
+        const double most = width - minimumColumnWidth * (table.columns - 1);
+        if (!std::isfinite(points) || points < minimumColumnWidth || points > most)
+            throw std::invalid_argument("Column width must be between " +
+                                        std::to_string(static_cast<int>(minimumColumnWidth)) +
+                                        " and " + std::to_string(static_cast<int>(most)) + " pt");
+        const auto edges = columnEdges(table, width);
+        const double others = width - (edges[cell->column + 1] - edges[cell->column]);
+        std::vector<double> widths;
+        for (std::size_t c = 0; c < table.columns; ++c)
+            widths.push_back(c == cell->column
+                                 ? points
+                                 : (edges[c + 1] - edges[c]) * (width - points) / others);
+        table.widths = std::move(widths);
+    });
+}
+void Editor::distributeColumns() {
+    run(*this, inTransaction_, [](Editor &e) {
+        const auto cell = e.selectedCell();
+        if (!cell)
+            throw std::invalid_argument("Place the caret in a table first");
+        grid(e.document, cell->tableId).table->widths.clear();
+    });
 }
 
 } // namespace wf

@@ -2,8 +2,10 @@
 #include "core/typography/shaper.hpp"
 #include <unordered_map>
 namespace wf {
+constexpr std::size_t noBox = static_cast<std::size_t>(-1);
 struct Line {
     std::size_t paragraph = 0, start = 0, end = 0, page = 0;
+    std::size_t box = noBox; // index into Layout::cells for table text
     double x = 0, baseline = 0, height = 0;
     ShapedLine shaped;
     ShapedLine marker;

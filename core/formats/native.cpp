@@ -1,5 +1,6 @@
 #include "core/formats/native.hpp"
 #include "core/formats/zip_package.hpp"
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
@@ -199,9 +200,15 @@ std::string serializeNative(const Document &document) {
     const bool styled = document.styles != builtinStyles();
     // WFG7 only when character styles exist, so other styled files stay readable by 0.6.2.
     const bool characterStyled = !document.styles.characterStyles.empty();
-    // WFG8 only when a header or footer exists, so other files stay readable by 0.6.3.
-    const bool banded = !document.page.header.empty() || !document.page.footer.empty() ||
-                        document.page.differentFirstPage;
+    // WFG8 only for headers/footers or table widths/merges, so other files stay readable
+    // by 0.6.3.
+    const bool banded =
+        !document.page.header.empty() || !document.page.footer.empty() ||
+        document.page.differentFirstPage ||
+        std::any_of(document.tables.begin(), document.tables.end(),
+                    [](const Table &t) { return !t.widths.empty() || !t.merges.empty(); });
+    // WFG6 and later store paragraph style names and direct-formatting masks.
+    const bool semantic = styled || banded;
     root.append_attribute("version") = banded                       ? "8"
                                        : characterStyled            ? "7"
                                        : styled                     ? "6"
@@ -236,7 +243,7 @@ std::string serializeNative(const Document &document) {
             if (!text->empty())
                 node.append_attribute(key) = utf8(*text).c_str();
     }
-    if (styled || banded) // WFG6 and later always list the paragraph styles
+    if (semantic) // WFG6 and later always list the paragraph styles
         for (const auto &style : document.styles.paragraphStyles)
             writeStyle(root, style);
     for (const auto &style : document.styles.characterStyles) {
@@ -252,6 +259,15 @@ std::string serializeNative(const Document &document) {
         node.append_attribute("id") = static_cast<unsigned long long>(table.id);
         node.append_attribute("rows") = static_cast<unsigned long long>(table.rows);
         node.append_attribute("columns") = static_cast<unsigned long long>(table.columns);
+        for (const auto width : table.widths)
+            node.append_child("column").append_attribute("width") = width;
+        for (const auto &merge : table.merges) {
+            auto item = node.append_child("merge");
+            item.append_attribute("row") = static_cast<unsigned long long>(merge.row);
+            item.append_attribute("column") = static_cast<unsigned long long>(merge.column);
+            item.append_attribute("rows") = static_cast<unsigned long long>(merge.rows);
+            item.append_attribute("columns") = static_cast<unsigned long long>(merge.columns);
+        }
     }
     for (const auto &p : document.paragraphs) {
         auto paragraph = root.append_child("p");
@@ -265,7 +281,7 @@ std::string serializeNative(const Document &document) {
         paragraph.append_attribute("after") = p.spaceAfter;
         if (p.list != ListKind::None)
             paragraph.append_attribute("list") = static_cast<int>(p.list);
-        if (styled) {
+        if (semantic) {
             if (p.style != "Normal")
                 paragraph.append_attribute("style") = p.style.c_str();
             if (p.direct)
@@ -301,7 +317,7 @@ std::string serializeNative(const Document &document) {
             if (r.style.highlight)
                 run.append_attribute("highlight") =
                     static_cast<unsigned long long>(r.style.highlight);
-            if (styled && r.direct)
+            if (semantic && r.direct)
                 run.append_attribute("direct") = r.direct;
             if (!r.characterStyle.empty())
                 run.append_attribute("cstyle") = r.characterStyle.c_str();
@@ -410,10 +426,26 @@ Document parseNative(const std::string &input) {
         }
         if ((version == "5" || v6) && std::string_view(p.name()) == "table") {
             attributes(p, {"id", "rows", "columns"});
-            for (auto nested : p.children())
-                if (!indentation(nested))
+            Table table{identifier(p, "id"), index(p, "rows"), index(p, "columns")};
+            for (auto nested : p.children()) {
+                if (indentation(nested))
+                    continue;
+                const std::string_view name = nested.name();
+                if (v8 && name == "column" && table.merges.empty()) {
+                    attributes(nested, {"width"});
+                    if (!nested.attribute("width") || nested.first_child())
+                        throw std::runtime_error("Invalid native table column");
+                    table.widths.push_back(number(nested, "width", 0, 0.01, 2880));
+                } else if (v8 && name == "merge") {
+                    attributes(nested, {"row", "column", "rows", "columns"});
+                    if (nested.first_child() || table.merges.size() >= 10000)
+                        throw std::runtime_error("Invalid native table merge");
+                    table.merges.push_back({index(nested, "row", true), index(nested, "column", true),
+                                            index(nested, "rows"), index(nested, "columns")});
+                } else
                     throw std::runtime_error("Unexpected native table metadata content");
-            document.tables.push_back({identifier(p, "id"), index(p, "rows"), index(p, "columns")});
+            }
+            document.tables.push_back(std::move(table));
             continue;
         }
         if ((version == "4" || version == "5" || v6) &&

@@ -166,63 +166,118 @@ Layout LayoutEngine::compose(const Document &document) {
         const auto &paragraph = document.paragraphs[index];
         if (paragraph.cell) {
             const auto cell = *paragraph.cell;
-            const auto table =
-                std::find_if(document.tables.begin(), document.tables.end(),
-                             [&](const auto &value) { return value.id == cell.tableId; });
-            const double columnWidth = width / table->columns;
-            if (columnWidth - 8 < 36)
-                throw std::runtime_error("Table columns leave insufficient writing space; use "
-                                         "fewer columns or a wider page");
-            std::vector<std::vector<Line>> columns(table->columns);
-            std::vector<double> heights(table->columns, 4);
-            std::vector<std::size_t> first(table->columns, index), last(table->columns, index);
-            std::vector<bool> seen(table->columns, false);
-            std::vector<std::size_t> cellNumbers(table->columns, 0);
+            const auto &table =
+                *std::find_if(document.tables.begin(), document.tables.end(),
+                              [&](const auto &value) { return value.id == cell.tableId; });
+            const auto edges = columnEdges(table, width);
+            // Rows tied together by a vertical merge are laid out (and paginated) together.
+            auto groupEnd = cell.row + 1;
+            for (bool grown = true; grown;) {
+                grown = false;
+                for (const auto &merge : table.merges)
+                    if (merge.row >= cell.row && merge.row < groupEnd &&
+                        merge.row + merge.rows > groupEnd) {
+                        groupEnd = merge.row + merge.rows;
+                        grown = true;
+                    }
+            }
+            // One box per visible cell; covered cells' paragraphs go into their merged cell,
+            // and empty ones overlay its last line so they add no height.
+            struct Box {
+                std::size_t row, column, rows = 1, columns = 1;
+                std::vector<Line> lines;
+                double height = 4;
+                std::size_t number = 0, first = 0, last = 0;
+                bool seen = false;
+            };
+            std::map<std::pair<std::size_t, std::size_t>, Box> boxes;
             auto end = index;
             for (; end < document.paragraphs.size(); ++end) {
                 const auto &p = document.paragraphs[end];
-                if (!p.cell || p.cell->tableId != cell.tableId || p.cell->row != cell.row)
+                if (!p.cell || p.cell->tableId != cell.tableId || p.cell->row >= groupEnd)
                     break;
-                const auto c = p.cell->column;
-                if (!seen[c]) {
-                    first[c] = end;
-                    seen[c] = true;
+                const auto *merge = table.mergeAt(p.cell->row, p.cell->column);
+                const auto row = merge ? merge->row : p.cell->row;
+                const auto column = merge ? merge->column : p.cell->column;
+                auto &box = boxes[{row, column}];
+                if (!box.seen) {
+                    box.row = row;
+                    box.column = column;
+                    box.rows = merge ? merge->rows : 1;
+                    box.columns = merge ? merge->columns : 1;
+                    box.first = end;
+                    box.seen = true;
                 }
-                last[c] = end;
-                heights[c] += p.spaceBefore;
-                cellNumbers[c] = p.list == ListKind::Decimal ? cellNumbers[c] + 1 : 0;
-                for (auto line : measure(p, columnWidth - 8, cellNumbers[c])) {
+                box.first = std::min(box.first, end);
+                box.last = std::max(box.last, end);
+                const bool ghost = (row != p.cell->row || column != p.cell->column) && p.text().empty();
+                const double boxWidth = edges[column + box.columns] - edges[column];
+                if (!ghost)
+                    box.height += p.spaceBefore;
+                box.number = p.list == ListKind::Decimal ? box.number + 1 : 0;
+                for (auto line : measure(p, boxWidth - 8, box.number)) {
                     line.paragraph = end;
-                    line.x += 4 + c * columnWidth;
-                    line.markerX += 4 + c * columnWidth;
-                    line.baseline = heights[c] + line.shaped.ascent;
-                    heights[c] += line.height;
-                    columns[c].push_back(std::move(line));
+                    line.x += 4 + edges[column];
+                    line.markerX += 4 + edges[column];
+                    if (ghost) {
+                        line.baseline = std::max(4.0, box.height - line.height) + line.shaped.ascent;
+                    } else {
+                        line.baseline = box.height + line.shaped.ascent;
+                        box.height += line.height;
+                    }
+                    box.lines.push_back(std::move(line));
                 }
-                heights[c] += p.spaceAfter;
+                if (!ghost)
+                    box.height += p.spaceAfter;
             }
-            const double rowHeight =
-                std::max(24.0, *std::max_element(heights.begin(), heights.end()) + 4);
-            if (rowHeight > availableHeight)
-                throw std::runtime_error("A table row is taller than the page; shorten its content "
-                                         "or increase the page size");
-            if (y + rowHeight > page.height - page.margin && y > page.margin) {
+            // Row heights: single-row cells first, then spanning cells stretch their last row.
+            std::vector<double> heights(groupEnd - cell.row, 24);
+            for (const auto &[key, box] : boxes)
+                if (box.rows == 1)
+                    heights[box.row - cell.row] =
+                        std::max(heights[box.row - cell.row], box.height + 4);
+            for (const auto &[key, box] : boxes) {
+                if (box.rows == 1)
+                    continue;
+                double spanned = 0;
+                for (auto r = box.row; r < box.row + box.rows; ++r)
+                    spanned += heights[r - cell.row];
+                if (box.height + 4 > spanned)
+                    heights[box.row + box.rows - 1 - cell.row] += box.height + 4 - spanned;
+            }
+            double groupHeight = 0;
+            for (auto h : heights)
+                groupHeight += h;
+            if (groupHeight > availableHeight)
+                throw std::runtime_error(groupEnd - cell.row > 1
+                                             ? "Merged table rows are taller than the page; "
+                                               "shorten their content or split the cells"
+                                             : "A table row is taller than the page; shorten its "
+                                               "content or increase the page size");
+            if (y + groupHeight > page.height - page.margin && y > page.margin) {
                 ++pageIndex;
                 y = page.margin;
             }
-            for (std::size_t c = 0; c < table->columns; ++c) {
-                result.cells.push_back({page.margin + c * columnWidth, y, columnWidth, rowHeight,
-                                        pageIndex, first[c], last[c]});
-                for (auto &line : columns[c]) {
+            for (auto &[key, box] : boxes) {
+                double top = y, height = 0;
+                for (auto r = cell.row; r < box.row; ++r)
+                    top += heights[r - cell.row];
+                for (auto r = box.row; r < box.row + box.rows; ++r)
+                    height += heights[r - cell.row];
+                result.cells.push_back({page.margin + edges[box.column], top,
+                                        edges[box.column + box.columns] - edges[box.column], height,
+                                        pageIndex, box.first, box.last});
+                for (auto &line : box.lines) {
                     line.page = pageIndex;
+                    line.box = result.cells.size() - 1;
                     line.x += page.margin;
                     line.markerX += page.margin;
-                    line.baseline += y;
+                    line.baseline += top;
                     result.lines.push_back(std::move(line));
                 }
             }
-            y += rowHeight;
-            if (cell.row + 1 == table->rows)
+            y += groupHeight;
+            if (groupEnd == table.rows)
                 y += 8;
             index = end - 1;
             listNumber = 0;
@@ -293,16 +348,17 @@ Layout LayoutEngine::compose(const Document &document) {
 Position Layout::hitTest(double x, double y, std::size_t pageIndex) const {
     const Line *closest = nullptr;
     double distance = std::numeric_limits<double>::max();
-    const CellRectangle *targetCell = nullptr;
-    for (const auto &cell : cells)
+    std::size_t targetCell = noBox;
+    for (std::size_t i = 0; i < cells.size(); ++i) {
+        const auto &cell = cells[i];
         if (cell.page == pageIndex && x >= cell.x && x <= cell.x + cell.width && y >= cell.y &&
             y <= cell.y + cell.height) {
-            targetCell = &cell;
+            targetCell = i;
             break;
         }
+    }
     for (const auto &line : lines) {
-        if (targetCell && (line.paragraph < targetCell->firstParagraph ||
-                           line.paragraph > targetCell->lastParagraph))
+        if (targetCell != noBox && line.box != targetCell)
             continue;
         const double top = line.baseline - line.shaped.ascent;
         const double vertical = y < top                 ? top - y

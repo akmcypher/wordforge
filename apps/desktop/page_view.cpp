@@ -267,6 +267,18 @@ bool PageView::tableColumn(bool insert, bool before) {
 bool PageView::removeTable() {
     return change([](Editor &candidate) { candidate.removeTable(); });
 }
+bool PageView::mergeCells() {
+    return change([](Editor &candidate) { candidate.mergeCells(); });
+}
+bool PageView::splitCell() {
+    return change([](Editor &candidate) { candidate.splitCell(); });
+}
+bool PageView::setColumnWidth(double points) {
+    return change([points](Editor &candidate) { candidate.setColumnWidth(points); });
+}
+bool PageView::distributeColumns() {
+    return change([](Editor &candidate) { candidate.distributeColumns(); });
+}
 double PageView::writingWidth() const {
     const auto &page = document().page;
     const auto &paragraph = document().paragraphs[selection().focus.paragraph];

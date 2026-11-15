@@ -1,5 +1,15 @@
 # Current status
 
+2026-11-16 — Merged table cells and column widths. Format → Table (and the format panel):
+Merge cells (select from one cell into another), Split merged cell, Column width… (cm;
+the other columns adjust so the table fits the page) and Distribute columns evenly.
+Merging moves the content into the top-left cell like Word; Tab skips covered cells; row
+and column inserts/deletes grow, shrink or drop merges; rows tied by a vertical merge
+stay on one page. Saved in WFG8. DOCX exports gridCol widths, gridSpan and vMerge, and
+imports them (overlapping merges are split with a warning). Windows ARM64: all 6 suites
+pass; Ubuntu by CI. Not yet: dragging column borders, row heights, cell shading/borders,
+splitting a merged row group across pages.
+
 2026-11-16 — Headers, footers and page numbers (Phase 5D, first slice). Insert → Header
 and footer… (also in the format panel's Page section) sets left/centre/right text for the
 header and the footer; "{PAGE}" and "{NUMPAGES}" become the page number and count, and

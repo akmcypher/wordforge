@@ -278,3 +278,73 @@ TEST(Layout, HeaderTextIsValidated) {
     page.footer.center = u"Page {PAGE}";
     EXPECT_NO_THROW(validatePage(page));
 }
+
+TEST(Layout, MergedCellsSpanTheirRowsAndColumnsWithCustomWidths) {
+    Editor e;
+    e.insertTable(3, 3);
+    e.replace(u"merged");
+    // Select (0,0) to (1,1).
+    std::size_t target = 0;
+    for (std::size_t i = 0; i < e.document.paragraphs.size(); ++i)
+        if (e.document.paragraphs[i].cell == TableCell{e.document.tables[0].id, 1, 1})
+            target = i;
+    e.selection = {{0, 0}, {target, 0}};
+    e.mergeCells();
+    e.setColumnWidth(200); // column 0 (caret in the merged cell)
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    const auto layout = engine.compose(e.document);
+    ASSERT_EQ(layout.cells.size(), 6u); // 9 cells, 4 of them merged into one
+    const auto &merged = layout.cells[0];
+    const auto &right = layout.cells[1]; // (0,2)
+    const auto &below = layout.cells[3]; // (2,0)
+    const double width = e.document.page.width - 2 * e.document.page.margin;
+    EXPECT_NEAR(merged.x, e.document.page.margin, 1e-9);
+    // Column 0 is 200 pt; columns 1 and 2 share the rest.
+    EXPECT_NEAR(merged.width, 200 + (width - 200) / 2, 1e-6);
+    EXPECT_NEAR(right.x, merged.x + merged.width, 1e-6);
+    EXPECT_NEAR(merged.height, layout.cells[2].y + layout.cells[2].height - merged.y, 1e-6);
+    EXPECT_NEAR(below.y, merged.y + merged.height, 1e-6);
+    // Clicking anywhere in the merged cell lands in its text.
+    const auto hit = layout.hitTest(merged.x + merged.width - 5, merged.y + merged.height - 3, 0);
+    EXPECT_EQ(e.document.paragraphs[hit.paragraph].cell, (TableCell{e.document.tables[0].id, 0, 0}));
+    // Covered cells add no height: the merged cell is about two plain rows tall.
+    EXPECT_GE(merged.height, 48);
+    EXPECT_LT(merged.height, 56);
+    // The caret in a covered cell shows inside the merged cell.
+    const auto caret = layout.caret({target, 0});
+    EXPECT_GE(caret.x, merged.x);
+    EXPECT_LE(caret.x, merged.x + merged.width);
+    EXPECT_GE(caret.y, merged.y);
+    EXPECT_LE(caret.y, merged.y + merged.height);
+}
+TEST(Layout, VerticallyMergedRowsStayOnOnePage) {
+    Editor e;
+    e.insertTable(40, 1);
+    auto cellAt = [&](std::size_t row) {
+        for (std::size_t i = 0; i < e.document.paragraphs.size(); ++i)
+            if (e.document.paragraphs[i].cell &&
+                e.document.paragraphs[i].cell->row == row)
+                return i;
+        return std::size_t{0};
+    };
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    auto plain = engine.compose(e.document);
+    // Find the first row on page 2 and merge it with the row before.
+    std::size_t first = 0;
+    for (const auto &cell : plain.cells)
+        if (cell.page == 1) {
+            first = e.document.paragraphs[cell.firstParagraph].cell->row;
+            break;
+        }
+    ASSERT_GT(first, 0u);
+    e.selection = {{cellAt(first - 1), 0}, {cellAt(first), 0}};
+    e.mergeCells();
+    const auto layout = engine.compose(e.document);
+    for (const auto &cell : layout.cells)
+        if (e.document.paragraphs[cell.firstParagraph].cell->row == first - 1) {
+            EXPECT_EQ(cell.page, 1u); // moved to the next page as a whole
+            EXPECT_NEAR(cell.height, 48, 1e-6);
+        }
+}

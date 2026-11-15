@@ -10,6 +10,7 @@
 #include <QDate>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QInputDialog>
 #include <QLineEdit>
@@ -20,6 +21,7 @@
 #include <QLocale>
 #include <QWidget>
 #include <algorithm>
+#include <cmath>
 namespace wf {
 namespace {
 // The style of the paragraph holding the caret.
@@ -87,6 +89,39 @@ void insertTableDialog(PageView *view, QWidget *parent) {
     if (dialog.exec() == QDialog::Accepted)
         view->insertTable(static_cast<std::size_t>(rows->value()),
                           static_cast<std::size_t>(columns->value()));
+}
+// The caret column's width, in centimetres.
+void columnWidthDialog(PageView *view, QWidget *parent) {
+    const auto cell = view->selectedCell();
+    if (!cell)
+        return;
+    const auto &document = view->document();
+    const auto table = std::find_if(document.tables.begin(), document.tables.end(),
+                                    [&](const auto &t) { return t.id == cell->tableId; });
+    const double width = document.page.width - 2 * document.page.margin;
+    const auto edges = columnEdges(*table, width);
+    constexpr double pointsPerCm = 72 / 2.54;
+    QDialog dialog(parent);
+    dialog.setWindowTitle("Column width");
+    dialog.setObjectName("columnWidthDialog");
+    auto *form = new QFormLayout(&dialog);
+    auto *value = new QDoubleSpinBox;
+    value->setObjectName("columnWidth");
+    value->setSuffix(" cm");
+    value->setDecimals(2);
+    value->setSingleStep(0.25);
+    value->setRange(std::ceil(minimumColumnWidth / pointsPerCm * 100) / 100,
+                    std::floor((width - minimumColumnWidth * (table->columns - 1)) /
+                               pointsPerCm * 100) / 100);
+    value->setValue((edges[cell->column + 1] - edges[cell->column]) / pointsPerCm);
+    form->addRow("Width of column " + QString::number(cell->column + 1), value);
+    form->addRow(new QLabel("The other columns adjust so the table fits the page."));
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    form->addRow(buttons);
+    if (dialog.exec() == QDialog::Accepted)
+        view->setColumnWidth(value->value() * pointsPerCm);
 }
 // Header and footer: left/centre/right text for each, page number fields, first page option.
 void headerFooterDialog(PageView *view, QWidget *parent) {
@@ -335,6 +370,16 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
           std::tuple{"tableDelete", "Delete table", "Delete table",
                      std::function<void(PageView *)>([](PageView *v) { v->removeTable(); })}})
         create(id, text, "Table", [view, command] { command(view); })->setIconText(short_);
+    create("tableMerge", "Merge cells", "Table", [view] { view->mergeCells(); })
+        ->setIconText("Merge");
+    create("tableSplit", "Split merged cell", "Table", [view] { view->splitCell(); })
+        ->setIconText("Split");
+    create("tableColumnWidth", "Column width…", "Table",
+           [this, view] { columnWidthDialog(view, window_); })
+        ->setIconText("Width");
+    create("tableDistribute", "Distribute columns evenly", "Table",
+           [view] { view->distributeColumns(); })
+        ->setIconText("Even widths");
 
     create("headerFooter", "Header and footer…", "Insert",
            [this, view] { headerFooterDialog(view, window_); })
@@ -452,5 +497,12 @@ void Commands::sync() {
     get("tableDeleteRow")->setEnabled(table && table->rows > 1);
     get("tableDeleteColumn")->setEnabled(table && table->columns > 1);
     get("tableDelete")->setEnabled(table != nullptr);
+    const auto &paragraphs = view_->document().paragraphs;
+    const auto other = paragraphs[view_->selection().anchor.paragraph].cell;
+    get("tableMerge")->setEnabled(table && other && other->tableId == cell->tableId &&
+                                  *other != *cell);
+    get("tableSplit")->setEnabled(table && table->mergeAt(cell->row, cell->column));
+    get("tableColumnWidth")->setEnabled(table && table->columns > 1);
+    get("tableDistribute")->setEnabled(table && table->columns > 1 && !table->widths.empty());
 }
 } // namespace wf

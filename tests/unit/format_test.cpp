@@ -344,3 +344,54 @@ TEST(NativeFormat, HeadersAndFootersRoundTripInV8Only) {
     EXPECT_THROW(parseNative(variant("version=\"8\"", "version=\"8\" differentFirstPage=\"x\"")),
                  std::exception);
 }
+
+TEST(NativeFormat, TableWidthsAndMergesRoundTripInV8) {
+    Editor e;
+    e.insertTable(2, 3);
+    std::size_t last = 0;
+    for (std::size_t i = 0; i < e.document.paragraphs.size(); ++i)
+        if (e.document.paragraphs[i].cell == TableCell{e.document.tables[0].id, 1, 1})
+            last = i;
+    e.selection = {{0, 0}, {last, 0}};
+    e.mergeCells();
+    e.setColumnWidth(120.5);
+    const auto bytes = serializeNative(e.document);
+    const auto restored = parseNative(bytes);
+    EXPECT_EQ(restored.tables, e.document.tables);
+    // Hand-edited invalid metadata is rejected.
+    auto variant = [&](const std::string &from, const std::string &to) {
+        auto parts = opc::read(bytes);
+        auto &xml = parts.at("document.xml");
+        const auto at = xml.find(from);
+        EXPECT_NE(at, std::string::npos) << from;
+        xml.replace(at, from.size(), to);
+        return opc::write(parts);
+    };
+    EXPECT_THROW(parseNative(variant("rows=\"2\" columns=\"2\"", "rows=\"3\" columns=\"2\"")),
+                 std::exception);
+    EXPECT_THROW(parseNative(variant("<merge ", "<merge extra=\"1\" ")), std::exception);
+    EXPECT_THROW(parseNative(variant("width=\"120.5\"", "width=\"-1\"")), std::exception);
+    EXPECT_THROW(parseNative(variant("version=\"8\"", "version=\"7\"")), std::exception);
+}
+
+TEST(NativeFormat, HeaderDocumentsWithDirectFormattingReopen) {
+    // WFG8 must store direct-formatting masks even without custom styles.
+    Editor e;
+    e.replace(u"plain bold");
+    e.selection = {{0, 6}, {0, 10}};
+    e.format([](CharacterStyle &style) { style.bold = true; });
+    auto page = e.document.page;
+    page.footer.center = u"{PAGE}";
+    e.setPage(page);
+    const auto restored = parseNative(serializeNative(e.document));
+    ASSERT_EQ(restored.paragraphs.size(), 1u);
+    const auto &runs = restored.paragraphs[0].runs;
+    EXPECT_EQ(restored.paragraphs[0].text(), u"plain bold");
+    ASSERT_EQ(runs.size(), e.document.paragraphs[0].runs.size());
+    for (std::size_t i = 0; i < runs.size(); ++i) {
+        EXPECT_EQ(runs[i].style, e.document.paragraphs[0].runs[i].style);
+        EXPECT_EQ(runs[i].direct, e.document.paragraphs[0].runs[i].direct);
+    }
+    EXPECT_TRUE(runs.back().style.bold);
+    EXPECT_EQ(restored.page, e.document.page);
+}

@@ -71,11 +71,30 @@ struct TableCell {
     std::size_t row = 0, column = 0;
     bool operator==(const TableCell &) const = default;
 };
+// A rectangle of cells shown as one. The top-left cell holds the content; the covered
+// cells keep their own paragraphs (normally one empty one), shown inside the merged cell.
+struct CellMerge {
+    std::size_t row = 0, column = 0, rows = 1, columns = 1;
+    bool contains(std::size_t r, std::size_t c) const {
+        return r >= row && r < row + rows && c >= column && c < column + columns;
+    }
+    bool operator==(const CellMerge &) const = default;
+};
 struct Table {
     std::uint64_t id = 0;
     std::size_t rows = 0, columns = 0;
+    // Relative column widths in points (scaled to the text width); empty = equal.
+    std::vector<double> widths;
+    std::vector<CellMerge> merges;
+    // The merge covering (row, column), if any.
+    const CellMerge *mergeAt(std::size_t row, std::size_t column) const;
     bool operator==(const Table &) const = default;
 };
+// Smallest column width that leaves a cell 36 pt of text after its 4 pt paddings.
+constexpr double minimumColumnWidth = 44;
+// Left edges of the columns plus the right edge, fitting `width`; narrow columns are
+// widened to the minimum at the expense of the others. Throws if they cannot fit.
+std::vector<double> columnEdges(const Table &, double width);
 struct Paragraph : ParagraphFormat {
     Paragraph(std::uint64_t identifier = 0) : id(identifier) {}
     std::uint64_t id = 0, revision = 0;
@@ -243,6 +262,13 @@ class Editor {
     void tableColumn(bool insert, bool before = false);
     void removeTable();
     bool nextCell(bool backward = false);
+    // Merge the cells spanned by the selection (two different cells of one table).
+    void mergeCells();
+    // Undo the merge holding the caret.
+    void splitCell();
+    // Set the caret column's width in points; the others shrink or grow to fit the page.
+    void setColumnWidth(double points);
+    void distributeColumns();
     // Formatted clipboard support. copySelection returns the selected text runs with
     // their paragraph formatting (no table membership or pictures). insertFragment
     // replaces the selection with such paragraphs as one undoable step; the first

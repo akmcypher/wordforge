@@ -904,7 +904,13 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
     std::function<void(pugi::xml_node)> readTable = [&](pugi::xml_node table) {
         std::vector<std::vector<pugi::xml_node>> rows; // null nodes are cells covered by a span
         std::size_t columns = 0;
-        bool merged = false, shaded = false;
+        bool shaded = false;
+        // Spans: (row, column, columns, vMerge state: 0 none, 1 restart, 2 continue).
+        struct Span {
+            std::size_t row, column, columns;
+            int vertical;
+        };
+        std::vector<Span> spans;
         for (auto row : table.children()) {
             if (row.type() != pugi::node_element || is(row, "tblPr") || is(row, "tblGrid"))
                 continue;
@@ -919,18 +925,18 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                         warn(warnings, "Unsupported table content was omitted: " + local(cell.name()));
                     continue;
                 }
-                cells.push_back(cell);
                 const auto properties = child(cell, "tcPr");
-                if (child(properties, "vMerge"))
-                    merged = true;
                 if (child(properties, "shd"))
                     shaded = true;
                 const auto span = val(child(properties, "gridSpan"));
                 const auto count = span.empty() ? 1.0 : std::clamp(number(span), 1.0, 64.0);
-                for (int extra = 1; extra < static_cast<int>(count); ++extra) {
+                const auto vMerge = child(properties, "vMerge");
+                const auto vMergeValue = attr(vMerge, "val");
+                spans.push_back({rows.size(), cells.size(), static_cast<std::size_t>(count),
+                                 !vMerge ? 0 : vMergeValue == "restart" ? 1 : 2});
+                cells.push_back(cell);
+                for (int extra = 1; extra < static_cast<int>(count); ++extra)
                     cells.emplace_back();
-                    merged = true;
-                }
             }
             columns = std::max(columns, cells.size());
             rows.push_back(std::move(cells));
@@ -945,14 +951,65 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                         readCell(cell, std::nullopt, 0);
             return;
         }
-        if (merged)
-            warn(warnings, "Merged table cells are split into separate cells.");
         if (shaded)
             warn(warnings, "Table cell shading is not preserved.");
         // Two tables in a row need a body paragraph between them.
         if (!document.paragraphs.empty() && document.paragraphs.back().cell)
             document.paragraphs.push_back(emptyParagraph(std::nullopt));
-        const Table created{document.allocateId(), rows.size(), columns};
+        Table created{document.allocateId(), rows.size(), columns};
+        // Merges: gridSpan across, vMerge continuing the cell of the same columns above.
+        std::map<std::size_t, std::size_t> open; // first column -> index in merges
+        std::vector<CellMerge> merges;
+        for (const auto &span : spans) {
+            if (span.column >= columns)
+                continue;
+            const auto width = std::min(span.columns, columns - span.column);
+            if (span.vertical == 2) {
+                const auto found = open.find(span.column);
+                if (found != open.end() && merges[found->second].columns == width &&
+                    merges[found->second].row + merges[found->second].rows == span.row) {
+                    ++merges[found->second].rows;
+                    continue;
+                }
+            }
+            for (auto it = open.begin(); it != open.end();)
+                it = it->first >= span.column && it->first < span.column + width ? open.erase(it)
+                                                                                  : std::next(it);
+            merges.push_back({span.row, span.column, 1, width});
+            if (span.vertical)
+                open[span.column] = merges.size() - 1;
+        }
+        std::vector<bool> covered(rows.size() * columns, false);
+        bool overlapping = false;
+        for (const auto &merge : merges) {
+            if (merge.rows * merge.columns < 2)
+                continue;
+            bool free = true;
+            for (auto r = merge.row; r < merge.row + merge.rows; ++r)
+                for (auto c = merge.column; c < merge.column + merge.columns; ++c)
+                    free = free && !covered[r * columns + c];
+            if (!free) {
+                overlapping = true;
+                continue;
+            }
+            for (auto r = merge.row; r < merge.row + merge.rows; ++r)
+                for (auto c = merge.column; c < merge.column + merge.columns; ++c)
+                    covered[r * columns + c] = true;
+            created.merges.push_back(merge);
+        }
+        if (overlapping)
+            warn(warnings, "Overlapping merged table cells are split into separate cells.");
+        // Column widths from the grid, when it matches.
+        std::vector<double> widths;
+        for (auto column : child(table, "tblGrid").children())
+            if (is(column, "gridCol")) {
+                const auto w = attr(column, "w");
+                widths.push_back(w.empty() ? 0 : number(w) / 20);
+            }
+        if (widths.size() == columns &&
+            std::all_of(widths.begin(), widths.end(),
+                        [](double w) { return std::isfinite(w) && w > 0 && w <= 2880; }))
+            created.widths = std::move(widths);
         document.tables.push_back(created);
         for (std::size_t r = 0; r < rows.size(); ++r)
             for (std::size_t c = 0; c < columns; ++c) {
@@ -1220,7 +1277,8 @@ std::string serializeDocx(const Document &document) {
         tables.emplace(table.id, &table);
     std::optional<TableCell> previousCell;
     pugi::xml_node tableNode, rowNode, cellNode;
-    double cellWidth = 0;
+    std::vector<double> edges;
+    std::map<std::pair<std::size_t, std::size_t>, pugi::xml_node> anchors;
     for (const auto &paragraph : document.paragraphs) {
         auto parent = body;
         if (paragraph.cell) {
@@ -1230,7 +1288,8 @@ std::string serializeDocx(const Document &document) {
                 tableNode = element(body, "tbl");
                 auto properties = element(tableNode, "tblPr");
                 const auto width = (document.page.width - 2 * document.page.margin) * 20;
-                cellWidth = width / table.columns;
+                edges = columnEdges(table, document.page.width - 2 * document.page.margin);
+                anchors.clear();
                 auto tableWidth = element(properties, "tblW");
                 set(tableWidth, "w", width);
                 set(tableWidth, "type", std::string("dxa"));
@@ -1250,20 +1309,47 @@ std::string serializeDocx(const Document &document) {
                 }
                 auto grid = element(tableNode, "tblGrid");
                 for (std::size_t column = 0; column < table.columns; ++column)
-                    set(element(grid, "gridCol"), "w", cellWidth);
+                    set(element(grid, "gridCol"), "w", (edges[column + 1] - edges[column]) * 20);
             }
+            const auto &table = *tables.at(cell.tableId);
+            const auto *merge = table.mergeAt(cell.row, cell.column);
+            const bool anchor = !merge || (merge->row == cell.row && merge->column == cell.column);
             if (previousCell != paragraph.cell) {
                 if (!cell.column) {
                     rowNode = element(tableNode, "tr");
                     element(element(rowNode, "trPr"), "cantSplit");
                 }
-                cellNode = element(rowNode, "tc");
-                auto width = element(element(cellNode, "tcPr"), "tcW");
-                set(width, "w", cellWidth);
-                set(width, "type", std::string("dxa"));
+                // A tc for each anchor and for the first column of a merge's later rows
+                // (a vMerge continuation); cells covered across are spanned by gridSpan.
+                if (anchor || merge->column == cell.column) {
+                    cellNode = element(rowNode, "tc");
+                    auto properties = element(cellNode, "tcPr");
+                    const auto span = merge ? merge->columns : 1;
+                    auto width = element(properties, "tcW");
+                    set(width, "w", (edges[cell.column + span] - edges[cell.column]) * 20);
+                    set(width, "type", std::string("dxa"));
+                    if (span > 1)
+                        property(properties, "gridSpan", static_cast<double>(span));
+                    if (merge && merge->rows > 1) {
+                        auto vertical = element(properties, "vMerge");
+                        if (anchor)
+                            set(vertical, "val", std::string("restart"));
+                    }
+                    if (anchor)
+                        anchors[{cell.row, cell.column}] = cellNode;
+                    else
+                        element(cellNode, "p"); // Word requires a paragraph in every cell
+                }
                 previous = ListKind::None;
             }
-            parent = cellNode;
+            if (!anchor) {
+                // Content typed into a covered cell is shown in, and saved to, the merged cell.
+                previousCell = paragraph.cell;
+                if (paragraph.text().empty())
+                    continue;
+                parent = anchors.at({merge->row, merge->column});
+            } else
+                parent = cellNode;
         } else if (previousCell) {
             previous = ListKind::None;
         }

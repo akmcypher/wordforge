@@ -444,7 +444,8 @@ void MainWindow::buildUi() {
     format->addAction(commands->get("pictureSize"));
     fill(format->addMenu("Table"), {"tableRowAbove", "tableRowBelow", "tableColumnLeft",
                                     "tableColumnRight", "", "tableDeleteRow",
-                                    "tableDeleteColumn", "tableDelete"});
+                                    "tableDeleteColumn", "tableDelete", "", "tableMerge",
+                                    "tableSplit", "tableColumnWidth", "tableDistribute"});
     fill(format->addMenu("Page setup"), {"marginsDefault", "marginsNormal", "marginsModerate",
                                          "marginsNarrow", "",
                                          "portrait", "landscape", "", "paperA4", "paperLetter"});

@@ -20,7 +20,8 @@ docs/WFG_SCHEMA.md (WFG7 at the top). Windows installer: docs/WINDOWS.md → Ins
 2. ~~Headers, footers and page numbers~~ — first slice done 2026-11-16 (branch
    feat/headers-footers; see CURRENT_STATUS.md). Follow-ups: per-section and even/odd
    variants, formatting, in-place editing, more fields.
-3. Table cell merge and column widths.
+3. ~~Table cell merge and column widths~~ — done 2026-11-16 (branch
+   feat/table-merge-widths). Follow-ups: drag column borders, row heights, shading.
 4. Built-in character styles Strong/Emphasis/Code (needs WFG migration rule: add missing
    built-ins on read instead of rejecting).
 5. UI plan steps 3–4 the user approved earlier: floating selection toolbar, `/` commands.

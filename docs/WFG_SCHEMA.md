@@ -5,8 +5,11 @@ the first-page option, so other files keep WFG7 or older. It is WFG7 plus option
 elements `header` and `footer` (at most one each, attributes `left`, `center`, `right`,
 at least one non-empty, no other content) and an optional root attribute
 `differentFirstPage="true"`. Text is at most 500 characters per position without control
-characters; `{PAGE}` and `{NUMPAGES}` are fields. WFG7 and older files with these are
-rejected.
+characters; `{PAGE}` and `{NUMPAGES}` are fields. WFG8 tables may also contain `column`
+children (`width` in points, relative, one per column or none; before any merge) and
+`merge` children (`row`, `column`, `rows`, `columns`; rectangles of at least two cells,
+inside the table, not overlapping). The top-left cell of a merge holds its content;
+covered cells keep their paragraphs. WFG7 and older files with any of these are rejected.
 
 **WFG7 (character styles)** is written only when the document has character styles, so
 other files keep WFG6 or older. It is WFG6 plus root-level `charStyle` elements (`id`,

@@ -504,6 +504,10 @@ TEST(Docx, ImportsWordTablesSplittingMergesAndFlatteningNestedTables) {
         return text;
     };
     const auto first = document.tables[0].id;
+    // gridSpan becomes a merge; the vMerge continuation below has no cell above to join.
+    ASSERT_EQ(document.tables[0].merges.size(), 1u);
+    EXPECT_EQ(document.tables[0].merges[0], (CellMerge{0, 0, 1, 2}));
+    EXPECT_EQ(document.tables[0].widths, (std::vector<double>{150, 150, 150}));
     EXPECT_EQ(cellText(first, 0, 0), u"wide|");
     EXPECT_EQ(cellText(first, 0, 1), u"|"); // covered by the span
     EXPECT_EQ(cellText(first, 0, 2), u"c|");
@@ -521,7 +525,7 @@ TEST(Docx, ImportsWordTablesSplittingMergesAndFlatteningNestedTables) {
         return std::any_of(imported.warnings.begin(), imported.warnings.end(),
                            [&](const auto &warning) { return warning.find(text) != std::string::npos; });
     };
-    EXPECT_TRUE(warned("Merged table cells"));
+    EXPECT_FALSE(warned("Merged table cells"));
     EXPECT_TRUE(warned("Nested tables"));
     EXPECT_FALSE(warned("Unsupported"));
 }
@@ -664,5 +668,46 @@ TEST(Docx, ImportsWordHeadersAndFootersWithComplexFields) {
     EXPECT_TRUE(warned("even-page"));
     EXPECT_TRUE(warned("Pictures and tables in headers"));
     EXPECT_FALSE(warned("Section features"));
+    EXPECT_NO_THROW(validateDocument(imported.document));
+}
+
+TEST(Docx, MergedCellsAndColumnWidthsRoundTrip) {
+    Editor e;
+    e.insertTable(3, 3);
+    e.replace(u"top");
+    auto index = [&](std::size_t row, std::size_t column) {
+        for (std::size_t i = 0; i < e.document.paragraphs.size(); ++i)
+            if (e.document.paragraphs[i].cell == TableCell{e.document.tables[0].id, row, column})
+                return i;
+        return std::size_t{0};
+    };
+    e.selection = {{index(0, 0), 0}, {index(1, 1), 0}};
+    e.mergeCells();
+    e.setColumnWidth(150);
+    // Text typed into a covered cell is saved inside the merged cell.
+    e.selection = {{index(1, 0), 0}, {index(1, 0), 0}};
+    e.replace(u"typed");
+    const auto parts = opc::read(serializeDocx(e.document));
+    pugi::xml_document xml;
+    ASSERT_TRUE(xml.load_string(parts.at("word/document.xml").c_str()));
+    EXPECT_EQ(xml.select_nodes("//w:gridCol").size(), 3u);
+    EXPECT_STREQ(xml.select_node("(//w:gridCol)[1]").node().attribute("w:w").value(), "3000");
+    EXPECT_STREQ(xml.select_node("//w:vMerge[@w:val='restart']/../w:gridSpan").node()
+                     .attribute("w:val").value(), "2");
+    EXPECT_EQ(xml.select_nodes("//w:vMerge[not(@w:val)]").size(), 1u);
+    EXPECT_EQ(xml.select_nodes("//w:tr[1]/w:tc").size(), 2u);
+    EXPECT_EQ(xml.select_nodes("//w:tr[2]/w:tc").size(), 2u);
+    EXPECT_EQ(xml.select_nodes("//w:tr[3]/w:tc").size(), 3u);
+    const auto imported = parseDocx(opc::write(parts));
+    EXPECT_TRUE(imported.warnings.empty());
+    const auto &table = imported.document.tables.at(0);
+    EXPECT_EQ(table.merges, e.document.tables[0].merges);
+    ASSERT_EQ(table.widths.size(), 3u);
+    EXPECT_NEAR(table.widths[0], 150, 0.05);
+    std::u16string merged;
+    for (const auto &p : imported.document.paragraphs)
+        if (p.cell && p.cell->row == 0 && p.cell->column == 0)
+            merged += p.text() + u"|";
+    EXPECT_EQ(merged, u"top|typed|");
     EXPECT_NO_THROW(validateDocument(imported.document));
 }
