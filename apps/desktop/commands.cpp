@@ -3,14 +3,19 @@
 #include "apps/desktop/page_view.hpp"
 #include "apps/desktop/pictures.hpp"
 #include <QAction>
+#include <QCheckBox>
 #include <QColorDialog>
+#include <QGridLayout>
+#include <QLabel>
 #include <QDate>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QInputDialog>
 #include <QLineEdit>
+#include <QHBoxLayout>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QSpinBox>
 #include <QLocale>
 #include <QWidget>
@@ -82,6 +87,79 @@ void insertTableDialog(PageView *view, QWidget *parent) {
     if (dialog.exec() == QDialog::Accepted)
         view->insertTable(static_cast<std::size_t>(rows->value()),
                           static_cast<std::size_t>(columns->value()));
+}
+// Header and footer: left/centre/right text for each, page number fields, first page option.
+void headerFooterDialog(PageView *view, QWidget *parent) {
+    QDialog dialog(parent);
+    dialog.setWindowTitle("Header and footer");
+    dialog.setObjectName("headerFooterDialog");
+    auto *layout = new QGridLayout(&dialog);
+    auto page = view->document().page;
+    const char *columns[] = {"Left", "Centre", "Right"};
+    for (int column = 0; column < 3; ++column)
+        layout->addWidget(new QLabel(columns[column]), 0, column + 1);
+    std::vector<QLineEdit *> edits;
+    QLineEdit *focused = nullptr;
+    int row = 1;
+    for (auto [name, band] : {std::pair{"Header", &page.header}, std::pair{"Footer", &page.footer}}) {
+        layout->addWidget(new QLabel(name), row, 0);
+        const std::u16string *texts[] = {&band->left, &band->center, &band->right};
+        for (int column = 0; column < 3; ++column) {
+            auto *edit = new QLineEdit(QString::fromStdU16String(*texts[column]));
+            edit->setObjectName(QString(name).toLower() + columns[column]);
+            edit->setAccessibleName(QString(name) + " " + QString(columns[column]).toLower());
+            edit->setMaxLength(500);
+            edit->setMinimumWidth(150);
+            layout->addWidget(edit, row, column + 1);
+            edits.push_back(edit);
+            QObject::connect(edit, &QLineEdit::cursorPositionChanged, &dialog,
+                             [&focused, edit] { focused = edit; });
+        }
+        ++row;
+    }
+    // Field buttons insert at the last edited box (the footer centre by default).
+    focused = edits[4];
+    auto *fields = new QHBoxLayout;
+    for (auto [label, token] : {std::pair{"Insert page number", "{PAGE}"},
+                                std::pair{"Insert page count", "{NUMPAGES}"}}) {
+        auto *button = new QPushButton(label);
+        button->setObjectName(token == std::string("{PAGE}") ? "insertPageField"
+                                                              : "insertPageCountField");
+        button->setAutoDefault(false);
+        QObject::connect(button, &QPushButton::clicked, &dialog, [&focused, token] {
+            focused->insert(token);
+            focused->setFocus();
+        });
+        fields->addWidget(button);
+    }
+    fields->addStretch(1);
+    layout->addLayout(fields, row++, 1, 1, 3);
+    auto *hint = new QLabel("{PAGE} becomes the page number and {NUMPAGES} the page count, "
+                            "for example \"Page {PAGE} of {NUMPAGES}\".");
+    hint->setWordWrap(true);
+    layout->addWidget(hint, row++, 1, 1, 3);
+    auto *first = new QCheckBox("No header or footer on the first page");
+    first->setObjectName("differentFirstPage");
+    first->setChecked(page.differentFirstPage);
+    layout->addWidget(first, row++, 1, 1, 3);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons, row, 0, 1, 4);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    std::u16string *targets[] = {&page.header.left, &page.header.center, &page.header.right,
+                                 &page.footer.left, &page.footer.center, &page.footer.right};
+    for (std::size_t i = 0; i < 6; ++i) {
+        auto text = edits[i]->text().toStdU16String();
+        for (auto &character : text)
+            if (character < 0x20 || character == 0x7f || character == 0xfffc)
+                character = u' ';
+        *targets[i] = text.find_first_not_of(u' ') == std::u16string::npos ? u"" : text;
+    }
+    page.differentFirstPage = first->isChecked();
+    if (page != view->document().page)
+        view->setPage(page);
 }
 } // namespace
 QString Commands::label(const QAction *action) {
@@ -257,6 +335,10 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
           std::tuple{"tableDelete", "Delete table", "Delete table",
                      std::function<void(PageView *)>([](PageView *v) { v->removeTable(); })}})
         create(id, text, "Table", [view, command] { command(view); })->setIconText(short_);
+
+    create("headerFooter", "Header and footer…", "Insert",
+           [this, view] { headerFooterDialog(view, window_); })
+        ->setIconText("Header & footer");
 
     // Page setup.
     auto page = [view](const std::function<void(PageStyle &)> &change) {

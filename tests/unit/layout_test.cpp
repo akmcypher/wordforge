@@ -212,3 +212,69 @@ TEST(Layout, NumberedListsInsideCellsRestartAtOnePerCell) {
     EXPECT_EQ(markers[1], u"2.");
     EXPECT_EQ(markers[2], u"1.");
 }
+
+namespace {
+Editor threePages() {
+    Editor editor;
+    editor.replace(u"one");
+    editor.insertPageBreak();
+    editor.replace(u"two");
+    editor.insertPageBreak();
+    editor.replace(u"three");
+    return editor;
+}
+} // namespace
+TEST(Layout, HeadersAndFootersRepeatInTheMarginsWithPageNumbers) {
+    EXPECT_EQ(bandText(u"Page {PAGE} of {NUMPAGES}", 2, 3), u"Page 2 of 3");
+    EXPECT_EQ(bandText(u"{PAGE", 2, 3), u"{PAGE");
+    auto editor = threePages();
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    const auto plain = engine.compose(editor.document);
+    ASSERT_EQ(plain.pageCount, 3u);
+    EXPECT_TRUE(plain.furniture.empty());
+    auto page = editor.document.page;
+    page.header = {u"Report", u"", u"Draft"};
+    page.footer = {u"", u"Page {PAGE} of {NUMPAGES}", u""};
+    editor.setPage(page);
+    const auto layout = engine.compose(editor.document);
+    ASSERT_EQ(layout.furniture.size(), 9u); // three pieces on each of three pages
+    for (std::size_t i = 0; i < layout.furniture.size(); ++i) {
+        const auto &line = layout.furniture[i];
+        EXPECT_EQ(line.page, i / 3);
+        const double top = line.baseline - line.shaped.ascent;
+        if (i % 3 < 2) { // header: left at the margin, right ending at the margin
+            EXPECT_GT(top, 0);
+            EXPECT_LT(line.baseline, page.margin);
+            EXPECT_NEAR(i % 3 == 0 ? line.x : line.x + line.shaped.width,
+                        i % 3 == 0 ? page.margin : page.width - page.margin, 0.01);
+        } else { // footer, centred
+            EXPECT_GT(top, page.height - page.margin);
+            EXPECT_LT(line.baseline, page.height);
+            EXPECT_NEAR(line.x + line.shaped.width / 2, page.width / 2, 0.01);
+        }
+    }
+    // The body does not move.
+    ASSERT_EQ(layout.lines.size(), plain.lines.size());
+    for (std::size_t i = 0; i < layout.lines.size(); ++i)
+        EXPECT_EQ(layout.lines[i].baseline, plain.lines[i].baseline);
+
+    page.differentFirstPage = true;
+    editor.setPage(page);
+    const auto skipped = engine.compose(editor.document);
+    ASSERT_EQ(skipped.furniture.size(), 6u);
+    EXPECT_EQ(skipped.furniture.front().page, 1u);
+
+    page.margin = 20; // no room
+    editor.setPage(page);
+    EXPECT_TRUE(engine.compose(editor.document).furniture.empty());
+}
+TEST(Layout, HeaderTextIsValidated) {
+    PageStyle page;
+    page.footer.center = u"a\nb";
+    EXPECT_THROW(validatePage(page), std::invalid_argument);
+    page.footer.center = std::u16string(501, u'x');
+    EXPECT_THROW(validatePage(page), std::invalid_argument);
+    page.footer.center = u"Page {PAGE}";
+    EXPECT_NO_THROW(validatePage(page));
+}

@@ -418,7 +418,7 @@ void MainWindow::buildUi() {
         named(edit->addAction("&Replace…", QKeySequence::Replace), "replace"), "Edit");
 
     auto *insert = new QMenu("&Insert", this);
-    fill(insert, {"pageBreak", "picture", "table", "date"});
+    fill(insert, {"pageBreak", "picture", "table", "date", "", "headerFooter"});
     auto *symbols = insert->addMenu("Symbol");
     for (int index = 0; index < 7; ++index)
         symbols->addAction(commands->get("symbol" + QString::number(index)));

@@ -20,12 +20,12 @@
 #endif
 namespace wf {
 namespace {
-std::span<const Line> pageLines(const Layout &layout, std::size_t page) {
+std::span<const Line> pageLines(const std::vector<Line> &lines, std::size_t page) {
     auto first =
-        std::lower_bound(layout.lines.begin(), layout.lines.end(), page,
+        std::lower_bound(lines.begin(), lines.end(), page,
                          [](const Line &line, std::size_t index) { return line.page < index; });
     auto last =
-        std::upper_bound(first, layout.lines.end(), page,
+        std::upper_bound(first, lines.end(), page,
                          [](std::size_t index, const Line &line) { return index < line.page; });
     return {first, last};
 }
@@ -50,7 +50,8 @@ std::string pageKey(const Layout &layout, std::size_t page) {
         keyValue(key, cell.width);
         keyValue(key, cell.height);
     }
-    for (const auto &line : pageLines(layout, page)) {
+    for (const auto *source : {&layout.lines, &layout.furniture})
+    for (const auto &line : pageLines(*source, page)) {
         keyValue(key, line.x);
         keyValue(key, line.baseline);
         paintRuns(line, [&](const GlyphRun &run, double x) {
@@ -168,7 +169,8 @@ std::size_t PageRenderer::synchronize(const Layout &layout) {
         for (const auto &cell : layout.cells)
             if (cell.page == page)
                 canvas->drawRect(SkRect::MakeXYWH(cell.x, cell.y, cell.width, cell.height), border);
-        for (const auto &line : pageLines(layout, page)) {
+        for (const auto *source : {&layout.lines, &layout.furniture})
+        for (const auto &line : pageLines(*source, page)) {
             paintRuns(line, [&](const GlyphRun &run, double x) {
                 if (run.style.highlight) {
                     SkPaint background;

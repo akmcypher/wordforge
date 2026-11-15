@@ -5,6 +5,7 @@
 #include "apps/desktop/spelling.hpp"
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
 #include <QClipboard>
 #include <QComboBox>
 #include <QDialog>
@@ -736,6 +737,43 @@ class DesktopTest : public QObject {
         QCOMPARE(pages("range.pdf", 2, 3), 2);
         QVERIFY(window.findChild<QAction *>("printAction"));
         QCOMPARE(window.findChild<QAction *>("printAction")->shortcut(), QKeySequence(QKeySequence::Print));
+    }
+    void headerFooterDialogSetsBandsAndUndoes() {
+        wf::MainWindow window;
+        window.show();
+        auto *view = window.pageView();
+        view->setDocument({});
+        auto *action = window.findChild<QAction *>("headerFooterAction");
+        QVERIFY(action);
+        bool edited = false;
+        QTimer::singleShot(0, &window, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            if (!dialog)
+                return;
+            auto *left = dialog->findChild<QLineEdit *>("headerLeft");
+            auto *centre = dialog->findChild<QLineEdit *>("footerCentre");
+            auto *pageField = dialog->findChild<QPushButton *>("insertPageField");
+            auto *first = dialog->findChild<QCheckBox *>("differentFirstPage");
+            if (left && centre && pageField && first) {
+                left->setText("Minutes");
+                centre->setText("Page ");
+                centre->setCursorPosition(5);
+                pageField->click();
+                first->setChecked(true);
+                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+                edited = true;
+            } else
+                dialog->reject();
+        });
+        action->trigger();
+        QVERIFY(edited);
+        const auto &page = view->document().page;
+        QCOMPARE(QString::fromStdU16String(page.header.left), QString("Minutes"));
+        QCOMPARE(QString::fromStdU16String(page.footer.center), QString("Page {PAGE}"));
+        QVERIFY(page.differentFirstPage);
+        window.findChild<QAction *>("undoAction")->trigger();
+        QVERIFY(view->document().page.header.empty());
+        QVERIFY(view->document().page.footer.empty());
     }
     void tableDialogEditingStructureAndFileWorkflow() {
         wf::MainWindow window;

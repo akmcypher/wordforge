@@ -17,7 +17,9 @@ docs/WFG_SCHEMA.md (WFG7 at the top). Windows installer: docs/WINDOWS.md → Ins
 **Recommended next work, in order** (user agreed with this ranking 2026-11-15):
 1. ~~DOCX table and picture import~~ — done 2026-11-16 (branch feat/docx-table-picture-import;
    see CURRENT_STATUS.md). Next would be checking it on real Word files.
-2. **Headers, footers and page numbers** (Phase 5).
+2. ~~Headers, footers and page numbers~~ — first slice done 2026-11-16 (branch
+   feat/headers-footers; see CURRENT_STATUS.md). Follow-ups: per-section and even/odd
+   variants, formatting, in-place editing, more fields.
 3. Table cell merge and column widths.
 4. Built-in character styles Strong/Emphasis/Code (needs WFG migration rule: add missing
    built-ins on read instead of rejecting).

@@ -127,6 +127,64 @@ void property(pugi::xml_node parent, const char *name, const std::string &value)
 void property(pugi::xml_node parent, const char *name, double value) {
     set(element(parent, name), "val", value);
 }
+// A header or footer part: one paragraph with centre and right tab stops at the text
+// edge, "{PAGE}" and "{NUMPAGES}" written as Word fields.
+std::string bandPart(bool header, const PageBand &band, double width) {
+    pugi::xml_document part;
+    auto root = part.append_child(header ? "w:hdr" : "w:ftr");
+    root.append_attribute("xmlns:w") = wordNs;
+    auto p = element(root, "p");
+    auto ppr = element(p, "pPr");
+    auto tabs = element(ppr, "tabs");
+    for (auto [kind, position] : {std::pair{"center", width / 2}, std::pair{"right", width}}) {
+        auto tab = element(tabs, "tab");
+        set(tab, "val", std::string(kind));
+        set(tab, "pos", position * 20);
+    }
+    set(element(ppr, "spacing"), "after", 0.0);
+    auto run = [&](pugi::xml_node parent) {
+        auto r = element(parent, "r");
+        auto rpr = element(r, "rPr");
+        property(rpr, "color", std::string("5F6673"));
+        property(rpr, "sz", 20.0);
+        return r;
+    };
+    auto text = [&](const std::u16string &value) {
+        if (value.empty())
+            return;
+        auto t = element(run(p), "t");
+        t.append_attribute("xml:space") = "preserve";
+        t.text().set(utf8(value).c_str());
+    };
+    auto segment = [&](const std::u16string &value) {
+        std::size_t start = 0;
+        for (std::size_t i = 0; i < value.size();) {
+            const bool page = value.compare(i, 6, u"{PAGE}") == 0;
+            const bool count = value.compare(i, 10, u"{NUMPAGES}") == 0;
+            if (!page && !count) {
+                ++i;
+                continue;
+            }
+            text(value.substr(start, i - start));
+            auto field = element(p, "fldSimple");
+            set(field, "instr", std::string(page ? " PAGE " : " NUMPAGES "));
+            element(run(field), "t").text().set("1");
+            i += page ? 6 : 10;
+            start = i;
+        }
+        text(value.substr(start));
+    };
+    segment(band.left);
+    if (!band.center.empty() || !band.right.empty()) {
+        element(run(p), "tab");
+        segment(band.center);
+    }
+    if (!band.right.empty()) {
+        element(run(p), "tab");
+        segment(band.right);
+    }
+    return saved(part);
+}
 void runProperties(pugi::xml_node properties, CharacterStyle &style,
                    std::vector<std::string> &warnings, bool styleDefinition = false) {
     auto toggle = [styleDefinition](bool previous, pugi::xml_node node) {
@@ -906,6 +964,142 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                     document.paragraphs.push_back(emptyParagraph(cell));
             }
     };
+    // Headers and footers: the default one of each, as left/centre/right text split at
+    // tabs, with PAGE and NUMPAGES fields kept. Everything else is simplified with a warning.
+    auto readBand = [&](const std::string &id, bool header) {
+        PageBand band;
+        const auto path = relationship(parts, main, header ? "header" : "footer", id);
+        if (path.empty() || !parts.contains(path)) {
+            warn(warnings, "A missing header or footer part was ignored.");
+            return band;
+        }
+        auto part = xml(parts.at(path));
+        std::vector<std::u16string> segments{u""};
+        std::optional<Alignment> alignment;
+        bool joined = false, omitted = false, skipResult = false;
+        std::string instruction;
+        int fieldState = 0; // 0 outside a complex field, 1 in its code, 2 in its result
+        auto field = [&](const std::string &code) {
+            std::istringstream words(code);
+            std::string word;
+            words >> word;
+            if (word == "PAGE")
+                segments.back() += u"{PAGE}";
+            else if (word == "NUMPAGES")
+                segments.back() += u"{NUMPAGES}";
+            else
+                return false;
+            return true;
+        };
+        std::function<void(pugi::xml_node)> walk = [&](pugi::xml_node node) {
+            for (auto item : node.children()) {
+                if (item.type() != pugi::node_element)
+                    continue;
+                if (is(item, "p")) {
+                    if (segments.size() > 1 || !segments.back().empty()) {
+                        // A further paragraph continues the current segment.
+                        const auto count = segments.size();
+                        const auto size = segments.back().size();
+                        segments.back() += u"  ";
+                        walk(item);
+                        if (segments.size() == count && segments.back().size() == size + 2)
+                            segments.back().resize(size);
+                        else
+                            joined = true;
+                    } else {
+                        const auto jc = val(child(child(item, "pPr"), "jc"));
+                        alignment = jc == "center"                 ? Alignment::Center
+                                    : jc == "right" || jc == "end" ? Alignment::Right
+                                                                   : Alignment::Left;
+                        walk(item);
+                    }
+                } else if (is(item, "fldSimple")) {
+                    if (!field(attr(item, "instr")))
+                        walk(item);
+                } else if (is(item, "fldChar")) {
+                    const auto type = attr(item, "fldCharType");
+                    if (type == "begin") {
+                        fieldState = 1;
+                        instruction.clear();
+                    } else if (type == "separate") {
+                        fieldState = 2;
+                        skipResult = field(instruction);
+                    } else if (type == "end") {
+                        if (fieldState == 1)
+                            field(instruction);
+                        fieldState = 0;
+                        skipResult = false;
+                    }
+                } else if (is(item, "instrText")) {
+                    if (fieldState == 1)
+                        instruction += item.text().get();
+                } else if (is(item, "t")) {
+                    if (!(fieldState == 2 && skipResult))
+                        segments.back() += utf16(item.text().get());
+                } else if (is(item, "tab")) {
+                    segments.emplace_back();
+                } else if (is(item, "r") || is(item, "hyperlink") || is(item, "smartTag") ||
+                           is(item, "sdt") || is(item, "sdtContent") || is(item, "ins")) {
+                    walk(item);
+                } else if (is(item, "drawing") || is(item, "pict") || is(item, "tbl") ||
+                           is(item, "object")) {
+                    omitted = true;
+                }
+            }
+        };
+        walk(part.document_element());
+        if (joined)
+            warn(warnings, "Header and footer paragraphs are joined into one line.");
+        if (omitted)
+            warn(warnings, "Pictures and tables in headers and footers are omitted.");
+        for (auto &segment : segments) {
+            for (auto &c : segment)
+                if (c < 0x20 || c == 0x7f || c == 0xfffc)
+                    c = u' ';
+            if (segment.size() > 500)
+                segment.resize(500);
+        }
+        if (segments.size() == 1) {
+            const auto where = alignment.value_or(Alignment::Left);
+            (where == Alignment::Center  ? band.center
+             : where == Alignment::Right ? band.right
+                                         : band.left) = segments[0];
+        } else {
+            band.left = segments[0];
+            band.center = segments[1];
+            for (std::size_t i = 2; i < segments.size(); ++i)
+                band.right += (i > 2 ? u" " : u"") + segments[i];
+            if (band.right.size() > 500)
+                band.right.resize(500);
+        }
+        // Whitespace-only text shows nothing.
+        for (auto *text : {&band.left, &band.center, &band.right})
+            if (text->find_first_not_of(u' ') == std::u16string::npos)
+                text->clear();
+        return band;
+    };
+    auto readBands = [&](pugi::xml_node section) {
+        const auto titlePage = child(section, "titlePg");
+        document.page.differentFirstPage = titlePage && enabled(titlePage);
+        for (auto reference : section.children()) {
+            const bool header = is(reference, "headerReference");
+            if (!header && !is(reference, "footerReference"))
+                continue;
+            const auto type = attr(reference, "type");
+            const auto id = attrIn(reference, "id", relationshipsNs);
+            if (type == "even") {
+                warn(warnings, "Separate even-page headers and footers are not preserved.");
+                continue;
+            }
+            if (type == "first") {
+                if (document.page.differentFirstPage && !readBand(id, header).empty())
+                    warn(warnings, "A first-page header or footer is not preserved; the first "
+                                   "page shows none.");
+                continue;
+            }
+            (header ? document.page.header : document.page.footer) = readBand(id, header);
+        }
+    };
     for (auto node : body.children()) {
         if (node.type() != pugi::node_element)
             continue;
@@ -921,9 +1115,11 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                     if (number(attr(margin, side)) / 20 != top)
                         warn(warnings, "Unequal page margins are approximated by the top margin.");
             }
+            readBands(node);
             for (auto propertyNode : node.children())
                 if (propertyNode.type() == pugi::node_element && !is(propertyNode, "pgSz") &&
-                    !is(propertyNode, "pgMar"))
+                    !is(propertyNode, "pgMar") && !is(propertyNode, "headerReference") &&
+                    !is(propertyNode, "footerReference") && !is(propertyNode, "titlePg"))
                     warn(warnings,
                          "Section features are not preserved: " + local(propertyNode.name()));
             continue;
@@ -1192,6 +1388,24 @@ std::string serializeDocx(const Document &document) {
         }
     }
     auto section = element(body, "sectPr");
+    // Header and footer references come first in sectPr.
+    std::vector<std::pair<std::string, std::string>> bandParts; // name, XML
+    if (!document.page.header.empty() || !document.page.footer.empty()) {
+        const double textWidth = document.page.width - 2 * document.page.margin;
+        auto reference = [&](bool header, bool first, const PageBand &band) {
+            const auto name = std::string(header ? "header" : "footer") + (first ? "First" : "");
+            auto node = element(section, header ? "headerReference" : "footerReference");
+            set(node, "type", std::string(first ? "first" : "default"));
+            node.append_attribute("r:id") = name.c_str();
+            bandParts.emplace_back(name, bandPart(header, band, textWidth));
+        };
+        reference(true, false, document.page.header);
+        reference(false, false, document.page.footer);
+        if (document.page.differentFirstPage) {
+            reference(true, true, {});
+            reference(false, true, {});
+        }
+    }
     auto size = element(section, "pgSz");
     set(size, "w", document.page.width * 20);
     set(size, "h", document.page.height * 20);
@@ -1200,6 +1414,10 @@ std::string serializeDocx(const Document &document) {
     auto margin = element(section, "pgMar");
     for (auto side : {"top", "bottom", "left", "right"})
         set(margin, side, document.page.margin * 20);
+    for (auto side : {"header", "footer"}) // where Wordforge draws them: mid-margin
+        set(margin, side, document.page.margin * 10);
+    if (document.page.differentFirstPage)
+        element(section, "titlePg");
     pugi::xml_document styles;
     auto styleRoot = styles.append_child("w:styles");
     styleRoot.append_attribute("xmlns:w") = wordNs;
@@ -1316,6 +1534,28 @@ std::string serializeDocx(const Document &document) {
             relation.append_attribute("Type") =
                 "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
             relation.append_attribute("Target") = ("media/" + filename).c_str();
+        }
+        parts["[Content_Types].xml"] = saved(types);
+        parts["word/_rels/document.xml.rels"] = saved(relationships);
+    }
+    if (!bandParts.empty()) {
+        pugi::xml_document types, relationships;
+        types.load_string(parts.at("[Content_Types].xml").c_str());
+        relationships.load_string(parts.at("word/_rels/document.xml.rels").c_str());
+        for (auto &[name, xmlText] : bandParts) {
+            const bool header = name.starts_with("header");
+            auto entry = types.document_element().append_child("Override");
+            entry.append_attribute("PartName") = ("/word/" + name + ".xml").c_str();
+            entry.append_attribute("ContentType") =
+                header ? "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"
+                       : "application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml";
+            auto relation = relationships.document_element().append_child("Relationship");
+            relation.append_attribute("Id") = name.c_str();
+            relation.append_attribute("Type") =
+                header ? "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header"
+                       : "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer";
+            relation.append_attribute("Target") = (name + ".xml").c_str();
+            parts.emplace("word/" + name + ".xml", std::move(xmlText));
         }
         parts["[Content_Types].xml"] = saved(types);
         parts["word/_rels/document.xml.rels"] = saved(relationships);

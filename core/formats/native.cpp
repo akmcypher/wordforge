@@ -199,7 +199,11 @@ std::string serializeNative(const Document &document) {
     const bool styled = document.styles != builtinStyles();
     // WFG7 only when character styles exist, so other styled files stay readable by 0.6.2.
     const bool characterStyled = !document.styles.characterStyles.empty();
-    root.append_attribute("version") = characterStyled              ? "7"
+    // WFG8 only when a header or footer exists, so other files stay readable by 0.6.3.
+    const bool banded = !document.page.header.empty() || !document.page.footer.empty() ||
+                        document.page.differentFirstPage;
+    root.append_attribute("version") = banded                       ? "8"
+                                       : characterStyled            ? "7"
                                        : styled                     ? "6"
                                        : tables                     ? "5"
                                        : packaged                   ? "4"
@@ -220,7 +224,19 @@ std::string serializeNative(const Document &document) {
     root.append_attribute("width") = document.page.width;
     root.append_attribute("height") = document.page.height;
     root.append_attribute("margin") = document.page.margin;
-    if (styled)
+    if (document.page.differentFirstPage)
+        root.append_attribute("differentFirstPage") = "true";
+    for (auto [name, band] : {std::pair{"header", &document.page.header},
+                              std::pair{"footer", &document.page.footer}}) {
+        if (band->empty())
+            continue;
+        auto node = root.append_child(name);
+        for (auto [key, text] : {std::pair{"left", &band->left}, std::pair{"center", &band->center},
+                                 std::pair{"right", &band->right}})
+            if (!text->empty())
+                node.append_attribute(key) = utf8(*text).c_str();
+    }
+    if (styled || banded) // WFG6 and later always list the paragraph styles
         for (const auto &style : document.styles.paragraphStyles)
             writeStyle(root, style);
     for (const auto &style : document.styles.characterStyles) {
@@ -341,15 +357,18 @@ Document parseNative(const std::string &input) {
     const std::string_view version = root.attribute("version").value();
     if (std::string_view(root.name()) != "wordforge" ||
         (version != "1" && version != "2" && version != "3" && version != "4" && version != "5" &&
-         version != "6" && version != "7"))
+         version != "6" && version != "7" && version != "8"))
         throw std::runtime_error("Unsupported native document version");
-    // WFG7 is WFG6 plus character styles.
-    const bool v7 = version == "7";
+    // WFG7 is WFG6 plus character styles; WFG8 adds headers and footers.
+    const bool v8 = version == "8";
+    const bool v7 = version == "7" || v8;
     const bool v6 = version == "6" || v7;
     if (!v6 && packaged != (version == "4" || version == "5"))
         throw std::runtime_error("WFG4/5 require ZIP transport; legacy versions require XML");
     if (version == "1")
         attributes(root, {"version", "width", "height", "margin"});
+    else if (v8)
+        attributes(root, {"version", "width", "height", "margin", "nextId", "differentFirstPage"});
     else
         attributes(root, {"version", "width", "height", "margin", "nextId"});
     Document document;
@@ -361,9 +380,26 @@ Document parseNative(const std::string &input) {
                      number(root, "height", 841.89, 72, 2880),
                      number(root, "margin", 56.7, 0, 1400)};
     pageGeometry(document.page);
+    if (v8)
+        document.page.differentFirstPage = boolean(root, "differentFirstPage");
     for (auto p : root.children()) {
         if (indentation(p))
             continue;
+        if (v8 && (std::string_view(p.name()) == "header" || std::string_view(p.name()) == "footer")) {
+            attributes(p, {"left", "center", "right"});
+            for (auto nested : p.children())
+                if (!indentation(nested))
+                    throw std::runtime_error("Unexpected header or footer content");
+            auto &band =
+                std::string_view(p.name()) == "header" ? document.page.header : document.page.footer;
+            if (!band.empty())
+                throw std::runtime_error("Duplicate native header or footer");
+            band = {utf16(p.attribute("left").value()), utf16(p.attribute("center").value()),
+                    utf16(p.attribute("right").value())};
+            if (band.empty())
+                throw std::runtime_error("Empty native header or footer");
+            continue;
+        }
         if (v6 && std::string_view(p.name()) == "style") {
             document.styles.paragraphStyles.push_back(readStyle(p));
             continue;
@@ -518,6 +554,7 @@ Document parseNative(const std::string &input) {
     }
     if (document.paragraphs.empty())
         throw std::runtime_error("Native document has no paragraphs");
+    pageGeometry(document.page); // header and footer text
     if (version == "5" && document.tables.empty())
         throw std::runtime_error("WFG5 requires table metadata");
     try {

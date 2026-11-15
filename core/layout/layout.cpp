@@ -254,6 +254,40 @@ Layout LayoutEngine::compose(const Document &document) {
     }
     std::erase_if(cache_, [&](const auto &entry) { return !liveIds.contains(entry.first); });
     result.pageCount = pageIndex + 1;
+    // Headers and footers sit centred in the top and bottom margins (when there is room).
+    if (page.margin >= 24 && (!page.header.empty() || !page.footer.empty())) {
+        auto style = resolveStyle(document.styles, "Normal").character;
+        style.size = 10;
+        style.bold = style.italic = style.underline = style.strike = false;
+        style.highlight = 0;
+        style.color = 0xff5f6673;
+        for (std::size_t number = 0; number < result.pageCount; ++number) {
+            if (number == 0 && page.differentFirstPage)
+                continue;
+            for (const bool top : {true, false}) {
+                const auto &band = top ? page.header : page.footer;
+                const std::u16string *texts[] = {&band.left, &band.center, &band.right};
+                for (int position = 0; position < 3; ++position) {
+                    if (texts[position]->empty())
+                        continue;
+                    Paragraph label;
+                    label.runs = {{bandText(*texts[position], number + 1, result.pageCount), style}};
+                    Line line;
+                    line.page = number;
+                    line.end = label.runs.front().text().size();
+                    line.shaped = shaper_.shape(label, 0, line.end);
+                    line.height = line.shaped.ascent + line.shaped.descent;
+                    const double remaining = std::max(0.0, width - line.shaped.width);
+                    line.x = page.margin + (position == 1   ? remaining / 2
+                                            : position == 2 ? remaining
+                                                            : 0);
+                    const double middle = top ? page.margin / 2 : page.height - page.margin / 2;
+                    line.baseline = middle - line.height / 2 + line.shaped.ascent;
+                    result.furniture.push_back(std::move(line));
+                }
+            }
+        }
+    }
     return result;
 }
 Position Layout::hitTest(double x, double y, std::size_t pageIndex) const {

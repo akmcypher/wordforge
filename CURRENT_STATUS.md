@@ -1,5 +1,18 @@
 # Current status
 
+2026-11-16 — Headers, footers and page numbers (Phase 5D, first slice). Insert → Header
+and footer… (also in the format panel's Page section) sets left/centre/right text for the
+header and the footer; "{PAGE}" and "{NUMPAGES}" become the page number and count, and
+"No header or footer on the first page" skips page 1. They are drawn in grey 10 pt,
+centred in the top and bottom margins (only when the margin is at least 24 pt), on screen,
+in PDF export and in print. Undoable. Saved as WFG8 (only when used). DOCX exports
+header/footer parts with PAGE/NUMPAGES fields, centre/right tab stops and titlePg; import
+reads the default header and footer (simple and complex fields, tab-separated parts,
+alignment) and warns about even-page and first-page variants, pictures and tables, and
+multi-paragraph bands. Not yet: per-section headers, formatting inside them, editing in
+place on the page, other fields (date, title), screen-reader exposure. Windows ARM64: all
+6 suites pass; Ubuntu by CI. Not opened in Microsoft Word yet.
+
 2026-11-16 — DOCX table and picture import. Word tables (up to 10 columns, 1000 rows)
 open as real Wordforge tables: merged cells (gridSpan/vMerge) are split into separate
 cells, nested tables are flattened into their cell, short rows are padded, and adjacent

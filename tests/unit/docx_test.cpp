@@ -585,3 +585,84 @@ TEST(Docx, ImportsPicturesConvertingOtherFormatsAndFittingThePage) {
     EXPECT_EQ(last.image()->width, 72); // one inch, fits
     EXPECT_NO_THROW(validateDocument(converted.document));
 }
+
+TEST(Docx, HeadersAndFootersRoundTripWithPageFields) {
+    Document document;
+    document.page.header = {u"Report", u"", u"Draft"};
+    document.page.footer = {u"", u"Page {PAGE} of {NUMPAGES}", u""};
+    document.page.differentFirstPage = true;
+    const auto parts = opc::read(serializeDocx(document));
+    ASSERT_TRUE(parts.contains("word/header.xml"));
+    ASSERT_TRUE(parts.contains("word/footer.xml"));
+    ASSERT_TRUE(parts.contains("word/footerFirst.xml"));
+    EXPECT_NE(parts.at("word/footer.xml").find("instr=\" PAGE \""), std::string::npos);
+    EXPECT_NE(parts.at("word/footer.xml").find("instr=\" NUMPAGES \""), std::string::npos);
+    EXPECT_NE(parts.at("[Content_Types].xml").find("wordprocessingml.footer+xml"),
+              std::string::npos);
+    pugi::xml_document xml;
+    ASSERT_TRUE(xml.load_string(parts.at("word/document.xml").c_str()));
+    const auto section = xml.select_node("//w:sectPr").node();
+    EXPECT_STREQ(section.first_child().name(), "w:headerReference"); // schema order
+    EXPECT_TRUE(section.child("w:titlePg"));
+    const auto imported = parseDocx(opc::write(parts));
+    EXPECT_TRUE(imported.warnings.empty());
+    const auto &page = imported.document.page; // geometry is rounded to twips
+    EXPECT_EQ(page.header, document.page.header);
+    EXPECT_EQ(page.footer, document.page.footer);
+    EXPECT_TRUE(page.differentFirstPage);
+}
+TEST(Docx, ImportsWordHeadersAndFootersWithComplexFields) {
+    const std::string rels =
+        "<Relationship Id='rH' Type='http://schemas.openxmlformats.org/officeDocument/2006/"
+        "relationships/header' Target='header1.xml'/>"
+        "<Relationship Id='rF' Type='http://schemas.openxmlformats.org/officeDocument/2006/"
+        "relationships/footer' Target='footer1.xml'/>"
+        "<Relationship Id='rE' Type='http://schemas.openxmlformats.org/officeDocument/2006/"
+        "relationships/header' Target='header2.xml'/>";
+    auto parts = wordDocument(
+        "<w:p><w:r><w:t>body</w:t></w:r></w:p><w:sectPr>"
+        "<w:headerReference w:type='default' r:id='rH'/>"
+        "<w:headerReference w:type='even' r:id='rE'/>"
+        "<w:footerReference w:type='default' r:id='rF'/>"
+        "<w:pgSz w:w='12240' w:h='15840'/><w:pgMar w:top='1440' w:bottom='1440' "
+        "w:left='1440' w:right='1440' w:header='720' w:footer='720'/></w:sectPr>",
+        rels);
+    const std::string ns =
+        " xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'";
+    // Header: "Title<tab><tab>Confidential" with a picture that is dropped.
+    parts["word/header1.xml"] = "<w:hdr" + ns +
+                                "><w:p><w:r><w:t>Title</w:t></w:r><w:r><w:tab/></w:r><w:r><w:tab/>"
+                                "<w:t>Confidential</w:t></w:r><w:r><w:drawing/></w:r></w:p></w:hdr>";
+    parts["word/header2.xml"] = "<w:hdr" + ns + "><w:p/></w:hdr>";
+    // Footer: centred "Page N of M" with Word's complex fields and stale results.
+    auto complex = [](const char *code, const char *result) {
+        return std::string("<w:r><w:fldChar w:fldCharType='begin'/></w:r><w:r><w:instrText "
+                           "xml:space='preserve'> ") +
+               code +
+               " \\* MERGEFORMAT </w:instrText></w:r><w:r><w:fldChar w:fldCharType='separate'/>"
+               "</w:r><w:r><w:t>" +
+               result + "</w:t></w:r><w:r><w:fldChar w:fldCharType='end'/></w:r>";
+    };
+    parts["word/footer1.xml"] = "<w:ftr" + ns +
+                                "><w:p><w:pPr><w:jc w:val='center'/></w:pPr><w:r><w:t "
+                                "xml:space='preserve'>Page </w:t></w:r>" +
+                                complex("PAGE", "7") +
+                                "<w:r><w:t xml:space='preserve'> of </w:t></w:r>" +
+                                complex("NUMPAGES", "9") + "</w:p></w:ftr>";
+    const auto imported = parseDocx(opc::write(parts));
+    const auto &page = imported.document.page;
+    EXPECT_EQ(page.header.left, u"Title");
+    EXPECT_EQ(page.header.center, u"");
+    EXPECT_EQ(page.header.right, u"Confidential");
+    EXPECT_EQ(page.footer.center, u"Page {PAGE} of {NUMPAGES}");
+    EXPECT_EQ(page.footer.left, u"");
+    EXPECT_FALSE(page.differentFirstPage);
+    auto warned = [&](const char *text) {
+        return std::any_of(imported.warnings.begin(), imported.warnings.end(),
+                           [&](const auto &warning) { return warning.find(text) != std::string::npos; });
+    };
+    EXPECT_TRUE(warned("even-page"));
+    EXPECT_TRUE(warned("Pictures and tables in headers"));
+    EXPECT_FALSE(warned("Section features"));
+    EXPECT_NO_THROW(validateDocument(imported.document));
+}

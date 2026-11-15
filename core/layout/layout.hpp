@@ -18,6 +18,8 @@ struct CellRectangle {
 struct Layout {
     std::vector<Line> lines;
     std::vector<CellRectangle> cells;
+    // Header and footer lines, sorted by page; not editable, so not hit-tested.
+    std::vector<Line> furniture;
     std::size_t pageCount = 1, measuredParagraphs = 0;
     PageStyle page;
     ImageResources images;

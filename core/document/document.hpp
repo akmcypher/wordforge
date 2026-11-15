@@ -87,10 +87,23 @@ struct Paragraph : ParagraphFormat {
     std::vector<std::size_t> boundaries() const;
     bool operator==(const Paragraph &) const = default;
 };
+// Text repeated at the top or bottom of every page, in three tab-like positions.
+// "{PAGE}" and "{NUMPAGES}" are replaced by the page number and the page count.
+struct PageBand {
+    std::u16string left, center, right;
+    bool empty() const {
+        return left.empty() && center.empty() && right.empty();
+    }
+    bool operator==(const PageBand &) const = default;
+};
 struct PageStyle {
     double width = 595.28, height = 841.89, margin = 56.7;
+    PageBand header, footer;
+    bool differentFirstPage = false; // no header or footer on the first page
     bool operator==(const PageStyle &) const = default;
 };
+// The band's text on page `number` (1-based) of `count`, fields substituted.
+std::u16string bandText(const std::u16string &, std::size_t number, std::size_t count);
 void validatePage(const PageStyle &);
 struct Position {
     std::size_t paragraph = 0, offset = 0;

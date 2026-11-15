@@ -4,6 +4,36 @@
 #include <gtest/gtest.h>
 #include <include/core/SkSurface.h>
 using namespace wf;
+TEST(Rendering, HeadersAndFootersArePaintedAndInvalidatePages) {
+    Editor editor;
+    editor.replace(u"body");
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    PageRenderer renderer;
+    auto inked = [&](double top, double bottom) {
+        auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(600, 850));
+        renderer.drawPage(*surface->getCanvas(), 0);
+        SkPixmap pixels;
+        surface->peekPixels(&pixels);
+        int count = 0;
+        for (int y = static_cast<int>(top); y < static_cast<int>(bottom); ++y)
+            for (int x = 0; x < 595; ++x)
+                if ((pixels.getColor(x, y) & 0xffffff) != 0xffffff)
+                    ++count;
+        return count;
+    };
+    renderer.synchronize(engine.compose(editor.document));
+    const double margin = editor.document.page.margin, height = editor.document.page.height;
+    EXPECT_EQ(inked(0, margin - 2), 0);
+    EXPECT_EQ(inked(height - margin + 2, height), 0);
+    auto page = editor.document.page;
+    page.header.left = u"Header text";
+    page.footer.right = u"Page {PAGE}";
+    editor.setPage(page);
+    EXPECT_EQ(renderer.synchronize(engine.compose(editor.document)), 1u);
+    EXPECT_GT(inked(0, margin - 2), 20);
+    EXPECT_GT(inked(height - margin + 2, height), 20);
+}
 TEST(Rendering, InlinePicturesUseResourcesAndProduceActualPixels) {
     std::ifstream file(std::filesystem::path(__FILE__).parent_path().parent_path() /
                            "fixtures/red-blue.png",

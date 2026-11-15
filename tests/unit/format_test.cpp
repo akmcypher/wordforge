@@ -306,3 +306,41 @@ TEST(NativeFormat, OmitsUnreferencedImageResourcesFromSavedDocuments) {
     EXPECT_FALSE(bookmarked.starts_with("PK"));
     EXPECT_EQ(parseNative(bookmarked).bookmarks, document.bookmarks);
 }
+
+TEST(NativeFormat, HeadersAndFootersRoundTripInV8Only) {
+    Document document;
+    EXPECT_EQ(serializeNative(document).find("version=\"8\""), std::string::npos);
+    document.page.header = {u"Left & <left>", u"", u"Draft"};
+    document.page.footer = {u"", u"Page {PAGE} of {NUMPAGES}", u""};
+    document.page.differentFirstPage = true;
+    const auto bytes = serializeNative(document);
+    EXPECT_NE(bytes.find("version=\"8\""), std::string::npos);
+    const auto restored = parseNative(bytes);
+    EXPECT_EQ(restored.page, document.page);
+    // Only the first-page option still needs WFG8.
+    Document firstOnly;
+    firstOnly.page.differentFirstPage = true;
+    EXPECT_TRUE(parseNative(serializeNative(firstOnly)).page.differentFirstPage);
+
+    // Malformed variants of a valid file.
+    Document simple;
+    simple.page.footer.center = u"{PAGE}";
+    const auto valid = serializeNative(simple);
+    const auto start = valid.find("<footer");
+    ASSERT_NE(start, std::string::npos);
+    const auto footer = valid.substr(start, valid.find("/>", start) + 2 - start);
+    auto variant = [&](const std::string &from, const std::string &to) {
+        auto text = valid;
+        text.replace(text.find(from), from.size(), to);
+        return text;
+    };
+    EXPECT_NO_THROW(parseNative(valid));
+    EXPECT_THROW(parseNative(variant("version=\"8\"", "version=\"7\"")), std::exception);
+    for (const auto *bad :
+         {"<footer middle='x'/>", "<footer/>", "<footer left='a'/><footer left='b'/>",
+          "<footer left='a&#10;b'/>", "<footer left='a'><x/></footer>",
+          "<footer left='a' differentFirstPage='true'/>"})
+        EXPECT_THROW(parseNative(variant(footer, bad)), std::exception) << bad;
+    EXPECT_THROW(parseNative(variant("version=\"8\"", "version=\"8\" differentFirstPage=\"x\"")),
+                 std::exception);
+}

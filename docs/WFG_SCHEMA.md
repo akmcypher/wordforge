@@ -1,5 +1,13 @@
 # Native WFG schema and migration
 
+**WFG8 (headers and footers)** is written only when the page has a header, a footer or
+the first-page option, so other files keep WFG7 or older. It is WFG7 plus optional root
+elements `header` and `footer` (at most one each, attributes `left`, `center`, `right`,
+at least one non-empty, no other content) and an optional root attribute
+`differentFirstPage="true"`. Text is at most 500 characters per position without control
+characters; `{PAGE}` and `{NUMPAGES}` are fields. WFG7 and older files with these are
+rejected.
+
 **WFG7 (character styles)** is written only when the document has character styles, so
 other files keep WFG6 or older. It is WFG6 plus root-level `charStyle` elements (`id`,
 `name`, optional `basedOn` naming another character style, and only the character

@@ -98,6 +98,28 @@ void validatePage(const PageStyle &page) {
         page.width < 72 || page.width > 2880 || page.height < 72 || page.height > 2880 ||
         page.margin < 0 || page.width - 2 * page.margin < 36 || page.height - 2 * page.margin < 36)
         throw std::invalid_argument("Invalid page geometry");
+    for (const auto *band : {&page.header, &page.footer})
+        for (const auto *text : {&band->left, &band->center, &band->right}) {
+            if (text->size() > 500)
+                throw std::invalid_argument("Header or footer text is too long");
+            for (auto c : *text)
+                if (c < 0x20 || c == 0x7f || c == 0xfffc)
+                    throw std::invalid_argument("Header or footer text has control characters");
+        }
+}
+std::u16string bandText(const std::u16string &text, std::size_t number, std::size_t count) {
+    std::u16string result;
+    for (std::size_t i = 0; i < text.size();) {
+        if (text.compare(i, 6, u"{PAGE}") == 0) {
+            result += utf16(std::to_string(number));
+            i += 6;
+        } else if (text.compare(i, 10, u"{NUMPAGES}") == 0) {
+            result += utf16(std::to_string(count));
+            i += 10;
+        } else
+            result += text[i++];
+    }
+    return result;
 }
 void Editor::setPage(PageStyle page) {
     validatePage(page);

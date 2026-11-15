@@ -304,6 +304,10 @@ FormatPanel::FormatPanel(PageView *view, Commands &commands, QWidget *parent)
                               {{"Portrait", "portrait"}, {"Landscape", "landscape"}});
     auto *paper = combo("panelPaper", "Paper size",
                         {{"A4 · 210 × 297 mm", "paperA4"}, {"Letter · 8.5 × 11 in", "paperLetter"}});
+    auto *bands = actionButton("headerFooter");
+    bands->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    bands->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    pageForm->addRow(bands);
     column->addStretch(1);
 
     auto sync = [=] {
