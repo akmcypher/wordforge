@@ -1,5 +1,8 @@
 # Current status
 
+2026-11-16 — v0.6.4 prepared: DOCX table and picture import, headers/footers/page numbers,
+merged table cells and column widths (entries below). Notes: docs/releases/v0.6.4.md.
+
 2026-11-16 — Merged table cells and column widths. Format → Table (and the format panel):
 Merge cells (select from one cell into another), Split merged cell, Column width… (cm;
 the other columns adjust so the table fits the page) and Distribute columns evenly.
