@@ -200,6 +200,11 @@ std::string serializeNative(const Document &document) {
     const bool noted = !document.footnotes.empty() || !document.comments.empty();
     // WFG10 only for tracked changes, so other files stay readable by 0.6.5.
     const bool reviewed = document.trackChanges || !document.revisions.empty();
+    // WFG11 only for table borders or cell shading, so other files stay readable by 0.6.6.
+    const bool decorated =
+        std::any_of(document.tables.begin(), document.tables.end(), [](const Table &t) {
+            return t.border != TableBorder{} || !t.shading.empty();
+        });
     const bool packaged = tables || !imageIds.empty() || preserving;
     // WFG6 only when styles were customized; built-in styles keep files readable by 0.6.0.
     const bool styled = document.styles != builtinStyles();
@@ -213,8 +218,9 @@ std::string serializeNative(const Document &document) {
         std::any_of(document.tables.begin(), document.tables.end(),
                     [](const Table &t) { return !t.widths.empty() || !t.merges.empty(); });
     // WFG6 and later store paragraph style names and direct-formatting masks.
-    const bool semantic = styled || banded || preserving || noted || reviewed;
-    root.append_attribute("version") = reviewed                     ? "10"
+    const bool semantic = styled || banded || preserving || noted || reviewed || decorated;
+    root.append_attribute("version") = decorated                    ? "11"
+                                       : reviewed                   ? "10"
                                        : preserving || noted        ? "9"
                                        : banded                     ? "8"
                                        : characterStyled            ? "7"
@@ -313,8 +319,19 @@ std::string serializeNative(const Document &document) {
         node.append_attribute("id") = static_cast<unsigned long long>(table.id);
         node.append_attribute("rows") = static_cast<unsigned long long>(table.rows);
         node.append_attribute("columns") = static_cast<unsigned long long>(table.columns);
+        if (table.border != TableBorder{}) {
+            node.append_attribute("borderWidth") = table.border.width;
+            node.append_attribute("borderColor") =
+                static_cast<unsigned long long>(table.border.color);
+        }
         for (const auto width : table.widths)
             node.append_child("column").append_attribute("width") = width;
+        for (const auto &shade : table.shading) {
+            auto item = node.append_child("shade");
+            item.append_attribute("row") = static_cast<unsigned long long>(shade.row);
+            item.append_attribute("column") = static_cast<unsigned long long>(shade.column);
+            item.append_attribute("color") = static_cast<unsigned long long>(shade.color);
+        }
         for (const auto &merge : table.merges) {
             auto item = node.append_child("merge");
             item.append_attribute("row") = static_cast<unsigned long long>(merge.row);
@@ -434,11 +451,12 @@ Document parseNative(const std::string &input) {
     if (std::string_view(root.name()) != "wordforge" ||
         (version != "1" && version != "2" && version != "3" && version != "4" && version != "5" &&
          version != "6" && version != "7" && version != "8" && version != "9" &&
-         version != "10"))
+         version != "10" && version != "11"))
         throw std::runtime_error("Unsupported native document version");
     // WFG7 is WFG6 plus character styles; WFG8 adds headers and footers.
     // WFG9 adds DOCX package parts kept from an imported file.
-    const bool v10 = version == "10";
+    const bool v11 = version == "11";
+    const bool v10 = version == "10" || v11;
     const bool v9 = version == "9" || v10;
     const bool v8 = version == "8" || v9;
     const bool v7 = version == "7" || v8;
@@ -562,13 +580,29 @@ Document parseNative(const std::string &input) {
             continue;
         }
         if ((version == "5" || v6) && std::string_view(p.name()) == "table") {
-            attributes(p, {"id", "rows", "columns"});
+            if (v11)
+                attributes(p, {"id", "rows", "columns", "borderWidth", "borderColor"});
+            else
+                attributes(p, {"id", "rows", "columns"});
             Table table{identifier(p, "id"), index(p, "rows"), index(p, "columns")};
+            if (p.attribute("borderWidth") || p.attribute("borderColor")) {
+                table.border.width = number(p, "borderWidth", 0.5, 0, 6);
+                table.border.color = static_cast<std::uint32_t>(
+                    number(p, "borderColor", 0xff805a3b, 0, 4294967295.0));
+            }
             for (auto nested : p.children()) {
                 if (indentation(nested))
                     continue;
                 const std::string_view name = nested.name();
-                if (v8 && name == "column" && table.merges.empty()) {
+                if (v11 && name == "shade") {
+                    attributes(nested, {"row", "column", "color"});
+                    if (nested.first_child() || table.shading.size() >= 10000)
+                        throw std::runtime_error("Invalid native table shading");
+                    table.shading.push_back(
+                        {index(nested, "row", true), index(nested, "column", true),
+                         static_cast<std::uint32_t>(number(nested, "color", 0, 0, 4294967295.0))});
+                } else if (v8 && name == "column" && table.merges.empty() &&
+                           table.shading.empty()) {
                     attributes(nested, {"width"});
                     if (!nested.attribute("width") || nested.first_child())
                         throw std::runtime_error("Invalid native table column");

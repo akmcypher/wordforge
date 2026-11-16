@@ -46,6 +46,12 @@ std::vector<double> columnEdges(const Table &table, double width) {
     edges.back() = width;
     return edges;
 }
+std::uint32_t Table::fillAt(std::size_t row, std::size_t column) const {
+    for (const auto &shade : shading)
+        if (shade.row == row && shade.column == column)
+            return shade.color;
+    return 0;
+}
 void validateTables(const Document &document) {
     std::map<std::uint64_t, std::vector<std::size_t>> members;
     for (std::size_t i = 0; i < document.paragraphs.size(); ++i)
@@ -59,6 +65,18 @@ void validateTables(const Document &document) {
              std::any_of(table.widths.begin(), table.widths.end(),
                          [](double w) { return !std::isfinite(w) || w <= 0 || w > 2880; })))
             throw std::invalid_argument("Invalid table column widths");
+        if (!std::isfinite(table.border.width) || table.border.width < 0 ||
+            table.border.width > 6 || (table.border.color >> 24) != 0xff)
+            throw std::invalid_argument("Invalid table border");
+        if (table.shading.size() > table.rows * table.columns)
+            throw std::invalid_argument("Too many shaded table cells");
+        std::vector<bool> shaded(table.rows * table.columns, false);
+        for (const auto &shade : table.shading) {
+            if (shade.row >= table.rows || shade.column >= table.columns ||
+                (shade.color >> 24) != 0xff || shaded[shade.row * table.columns + shade.column])
+                throw std::invalid_argument("Invalid table cell shading");
+            shaded[shade.row * table.columns + shade.column] = true;
+        }
         if (table.merges.size() > table.rows * table.columns)
             throw std::invalid_argument("Too many merged table cells");
         std::vector<bool> covered(table.rows * table.columns, false);
@@ -190,6 +208,20 @@ void reshape(Editor &editor, bool row, bool insert, bool before) {
             merges.push_back(merge);
     }
     table.merges = std::move(merges);
+    // Shading moves with its cell; a deleted row or column takes its shading along.
+    std::vector<CellShading> shading;
+    for (auto shade : table.shading) {
+        auto &at = row ? shade.row : shade.column;
+        if (insert) {
+            if (at >= pivot)
+                ++at;
+        } else if (at == pivot)
+            continue;
+        else if (at > pivot)
+            --at;
+        shading.push_back(shade);
+    }
+    table.shading = std::move(shading);
     if (!row && !table.widths.empty()) {
         if (insert)
             table.widths.insert(table.widths.begin() + static_cast<std::ptrdiff_t>(pivot),
@@ -400,6 +432,17 @@ void Editor::mergeCells() {
             return merged.contains(m.row, m.column);
         });
         table.merges.push_back(merged);
+        // The merged cell keeps the top-left cell's fill, or else the first one inside it.
+        if (!table.fillAt(r0, c0))
+            for (const auto &shade : table.shading)
+                if (merged.contains(shade.row, shade.column)) {
+                    table.shading.push_back({r0, c0, shade.color});
+                    break;
+                }
+        std::erase_if(table.shading, [&](const CellShading &shade) {
+            return merged.contains(shade.row, shade.column) &&
+                   (shade.row != r0 || shade.column != c0);
+        });
         // Content moves into the top-left cell, as in Word; covered cells keep one empty
         // paragraph.
         auto hasContent = [](const std::vector<Paragraph> &cell) {
@@ -468,6 +511,42 @@ void Editor::setColumnWidth(double points) {
                                  ? points
                                  : (edges[c + 1] - edges[c]) * (width - points) / others);
         table.widths = std::move(widths);
+    });
+}
+void Editor::setTableBorder(TableBorder border) {
+    run(*this, inTransaction_, [border](Editor &e) {
+        const auto cell = e.selectedCell();
+        if (!cell)
+            throw std::invalid_argument("Place the caret in a table first");
+        if (!std::isfinite(border.width) || border.width < 0 || border.width > 6)
+            throw std::invalid_argument("Border width must be between 0 and 6 pt");
+        auto &target = grid(e.document, cell->tableId).table->border;
+        target = border;
+        target.color |= 0xff000000;
+    });
+}
+void Editor::shadeCells(std::uint32_t color) {
+    run(*this, inTransaction_, [color](Editor &e) {
+        const auto &paragraphs = e.document.paragraphs;
+        const auto a = paragraphs[e.selection.anchor.paragraph].cell;
+        auto b = paragraphs[e.selection.focus.paragraph].cell;
+        if (!a)
+            throw std::invalid_argument("Place the caret in a table first");
+        if (!b || b->tableId != a->tableId)
+            b = a;
+        auto &table = *grid(e.document, a->tableId).table;
+        const auto r0 = std::min(a->row, b->row), r1 = std::max(a->row, b->row);
+        const auto c0 = std::min(a->column, b->column), c1 = std::max(a->column, b->column);
+        for (auto r = r0; r <= r1; ++r)
+            for (auto c = c0; c <= c1; ++c) {
+                const auto *merge = table.mergeAt(r, c);
+                const auto row = merge ? merge->row : r, column = merge ? merge->column : c;
+                std::erase_if(table.shading, [&](const CellShading &shade) {
+                    return shade.row == row && shade.column == column;
+                });
+                if (color)
+                    table.shading.push_back({row, column, color | 0xff000000});
+            }
     });
 }
 void Editor::distributeColumns() {

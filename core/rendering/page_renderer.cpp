@@ -52,6 +52,9 @@ std::string pageKey(const Layout &layout, std::size_t page) {
         keyValue(key, cell.y);
         keyValue(key, cell.width);
         keyValue(key, cell.height);
+        keyValue(key, cell.fill);
+        keyValue(key, cell.border.width);
+        keyValue(key, cell.border.color);
     }
     for (const auto *source : {&layout.lines, &layout.furniture})
     for (const auto &line : pageLines(*source, page)) {
@@ -164,14 +167,22 @@ std::size_t PageRenderer::synchronize(const Layout &layout) {
         auto *canvas = recorder.beginRecording(static_cast<float>(layout.page.width),
                                                static_cast<float>(layout.page.height));
         canvas->clear(SK_ColorWHITE);
-        SkPaint border;
-        border.setAntiAlias(true);
-        border.setColor(0xff987a60);
-        border.setStyle(SkPaint::kStroke_Style);
-        border.setStrokeWidth(0.7f);
+        // Cell fills first, then every border over them.
         for (const auto &cell : layout.cells)
-            if (cell.page == page)
+            if (cell.page == page && cell.fill) {
+                SkPaint fill;
+                fill.setColor(cell.fill);
+                canvas->drawRect(SkRect::MakeXYWH(cell.x, cell.y, cell.width, cell.height), fill);
+            }
+        for (const auto &cell : layout.cells)
+            if (cell.page == page && cell.border.width > 0) {
+                SkPaint border;
+                border.setAntiAlias(true);
+                border.setColor(cell.border.color);
+                border.setStyle(SkPaint::kStroke_Style);
+                border.setStrokeWidth(static_cast<float>(cell.border.width));
                 canvas->drawRect(SkRect::MakeXYWH(cell.x, cell.y, cell.width, cell.height), border);
+            }
         for (const auto &[notePage, noteY] : layout.noteSeparators)
             if (notePage == page) {
                 SkPaint rule;

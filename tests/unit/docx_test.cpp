@@ -1053,3 +1053,52 @@ TEST(Docx, TrackChangesSwitchFollowsKeptSettings) {
     EXPECT_LT(on.find("zoom"), on.find("trackRevisions"));
     EXPECT_LT(on.find("trackRevisions"), on.find("defaultTabStop"));
 }
+
+TEST(Docx, TableBordersAndShadingBothWays) {
+    Editor e;
+    e.insertTable(2, 2);
+    e.setTableBorder({1.5, 0xff336699});
+    e.shadeCells(0xffffeecc);
+    auto parts = opc::read(serializeDocx(e.document));
+    pugi::xml_document body;
+    ASSERT_TRUE(body.load_string(parts.at("word/document.xml").c_str()));
+    const auto top = body.select_node("//w:tblBorders/w:top").node();
+    EXPECT_STREQ(top.attribute("w:sz").value(), "12");
+    EXPECT_STREQ(top.attribute("w:color").value(), "336699");
+    EXPECT_EQ(body.select_nodes("//w:tcPr/w:shd").size(), 1u);
+    EXPECT_STREQ(body.select_node("//w:tcPr/w:shd").node().attribute("w:fill").value(), "FFEECC");
+    const auto imported = parseDocx(opc::write(parts));
+    EXPECT_TRUE(imported.warnings.empty());
+    ASSERT_EQ(imported.document.tables.size(), 1u);
+    EXPECT_EQ(imported.document.tables[0].border, (TableBorder{1.5, 0xff336699}));
+    EXPECT_EQ(imported.document.tables[0].shading, e.document.tables[0].shading);
+
+    // No borders round-trips as "nil".
+    e.setTableBorder({0, 0xff000000});
+    const auto none = parseDocx(serializeDocx(e.document));
+    EXPECT_EQ(none.document.tables[0].border.width, 0);
+
+    // Word: a merged cell shaded on every row, dashed borders and a cell's own borders.
+    const auto word = wordDocument(
+        "<w:tbl><w:tblPr><w:tblBorders><w:top w:val='dashed' w:sz='8' w:color='auto'/>"
+        "<w:insideH w:val='dashed' w:sz='8'/></w:tblBorders></w:tblPr>"
+        "<w:tr><w:tc><w:tcPr><w:vMerge w:val='restart'/><w:shd w:val='clear' w:fill='00FF00'/>"
+        "</w:tcPr><w:p><w:r><w:t>a</w:t></w:r></w:p></w:tc>"
+        "<w:tc><w:tcPr><w:tcBorders><w:top w:val='single'/></w:tcBorders></w:tcPr><w:p/></w:tc></w:tr>"
+        "<w:tr><w:tc><w:tcPr><w:vMerge/><w:shd w:val='clear' w:fill='00FF00'/></w:tcPr><w:p/>"
+        "</w:tc><w:tc><w:tcPr><w:shd w:val='clear' w:fill='auto'/></w:tcPr><w:p/></w:tc></w:tr>"
+        "</w:tbl><w:p/>");
+    const auto fromWord = parseDocx(opc::write(word));
+    ASSERT_EQ(fromWord.document.tables.size(), 1u);
+    const auto &table = fromWord.document.tables[0];
+    EXPECT_EQ(table.border, (TableBorder{1, 0xff000000}));
+    ASSERT_EQ(table.shading.size(), 1u);
+    EXPECT_EQ(table.shading[0], (CellShading{0, 0, 0xff00ff00}));
+    auto warned = [&](const char *text) {
+        return std::any_of(fromWord.warnings.begin(), fromWord.warnings.end(),
+                           [&](const auto &warning) { return warning.find(text) != std::string::npos; });
+    };
+    EXPECT_TRUE(warned("single lines"));
+    EXPECT_TRUE(warned("single cells"));
+    EXPECT_FALSE(warned("shading"));
+}

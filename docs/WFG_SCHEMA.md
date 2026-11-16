@@ -1,5 +1,10 @@
 # Native WFG schema and migration
 
+**WFG11 (table borders and shading)** is written only when a table has non-default borders
+or shaded cells. `table` may carry `borderWidth` (0–6 points; 0 = no borders) and
+`borderColor` (opaque ARGB); children `shade` (`row`, `column`, `color`: opaque ARGB) fill
+one cell each (a merged cell's top-left), at most once per cell.
+
 **WFG10 (tracked changes)** is written only when Track Changes is on or the document holds
 tracked changes; other documents keep their earlier version. The root may carry
 `trackChanges="true"`. Root elements `revision` (`id`, `author`: at most 256 bytes without

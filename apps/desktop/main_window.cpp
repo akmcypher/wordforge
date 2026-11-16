@@ -446,7 +446,8 @@ void MainWindow::buildUi() {
     fill(format->addMenu("Table"), {"tableRowAbove", "tableRowBelow", "tableColumnLeft",
                                     "tableColumnRight", "", "tableDeleteRow",
                                     "tableDeleteColumn", "tableDelete", "", "tableMerge",
-                                    "tableSplit", "tableColumnWidth", "tableDistribute"});
+                                    "tableSplit", "tableColumnWidth", "tableDistribute", "",
+                                    "tableBorders", "tableShading", "tableNoShading"});
     fill(format->addMenu("Page setup"), {"marginsDefault", "marginsNormal", "marginsModerate",
                                          "marginsNarrow", "",
                                          "portrait", "landscape", "", "paperA4", "paperLetter"});

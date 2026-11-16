@@ -16,6 +16,8 @@ struct Line {
 struct CellRectangle {
     double x, y, width, height;
     std::size_t page, firstParagraph, lastParagraph;
+    std::uint32_t fill = 0; // background, 0 for none
+    TableBorder border;
 };
 struct Layout {
     std::vector<Line> lines;

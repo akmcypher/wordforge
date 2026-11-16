@@ -95,12 +95,28 @@ struct CellMerge {
     }
     bool operator==(const CellMerge &) const = default;
 };
+// The lines around and between a table's cells, all alike. Width 0: no borders.
+struct TableBorder {
+    double width = 0.5; // points, at most 6
+    std::uint32_t color = 0xff805a3b; // opaque ARGB
+    bool operator==(const TableBorder &) const = default;
+};
+// A cell's background colour (for a merged cell, set on its top-left cell).
+struct CellShading {
+    std::size_t row = 0, column = 0;
+    std::uint32_t color = 0; // opaque ARGB
+    bool operator==(const CellShading &) const = default;
+};
 struct Table {
     std::uint64_t id = 0;
     std::size_t rows = 0, columns = 0;
+    // The background of the cell at (row, column), 0 for none.
+    std::uint32_t fillAt(std::size_t row, std::size_t column) const;
     // Relative column widths in points (scaled to the text width); empty = equal.
     std::vector<double> widths;
     std::vector<CellMerge> merges;
+    TableBorder border;
+    std::vector<CellShading> shading;
     // The merge covering (row, column), if any.
     const CellMerge *mergeAt(std::size_t row, std::size_t column) const;
     bool operator==(const Table &) const = default;
@@ -375,6 +391,10 @@ class Editor {
     // Set the caret column's width in points; the others shrink or grow to fit the page.
     void setColumnWidth(double points);
     void distributeColumns();
+    // Borders of the caret's table.
+    void setTableBorder(TableBorder);
+    // Fills the selected cells (or the caret's cell) with `color`; 0 removes the fill.
+    void shadeCells(std::uint32_t color);
     // Formatted clipboard support. copySelection returns the selected text runs with
     // their paragraph formatting (no table membership or pictures). insertFragment
     // replaces the selection with such paragraphs as one undoable step; the first

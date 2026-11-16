@@ -184,6 +184,78 @@ void columnWidthDialog(PageView *view, QWidget *parent) {
     if (dialog.exec() == QDialog::Accepted)
         view->setColumnWidth(value->value() * pointsPerCm);
 }
+const Table *caretTable(PageView *view) {
+    const auto cell = view->selectedCell();
+    if (!cell)
+        return nullptr;
+    for (const auto &table : view->document().tables)
+        if (table.id == cell->tableId)
+            return &table;
+    return nullptr;
+}
+// Table borders: one width (0 for none) and colour for every line of the table.
+void tableBorderDialog(PageView *view, QWidget *parent) {
+    const auto *table = caretTable(view);
+    if (!table)
+        return;
+    auto border = table->border;
+    QDialog dialog(parent);
+    dialog.setWindowTitle("Table borders");
+    dialog.setObjectName("tableBorderDialog");
+    auto *form = new QFormLayout(&dialog);
+    auto *width = new QDoubleSpinBox;
+    width->setObjectName("borderWidth");
+    width->setAccessibleName("Border width");
+    width->setSuffix(" pt");
+    width->setDecimals(2);
+    width->setSingleStep(0.25);
+    width->setRange(0, 6);
+    width->setSpecialValueText("No borders");
+    width->setValue(border.width);
+    form->addRow("Width", width);
+    auto *colour = new QPushButton;
+    colour->setObjectName("borderColor");
+    colour->setAccessibleName("Border colour");
+    auto paint = [colour, &border] {
+        colour->setText(QColor::fromRgba(border.color).name());
+        colour->setStyleSheet("QPushButton { border-left: 18px solid " +
+                              QColor::fromRgba(border.color).name() + "; }");
+    };
+    paint();
+    QObject::connect(colour, &QPushButton::clicked, &dialog, [&] {
+        const auto chosen =
+            QColorDialog::getColor(QColor::fromRgba(border.color), &dialog, "Border colour");
+        if (chosen.isValid()) {
+            border.color = chosen.rgb();
+            paint();
+        }
+    });
+    form->addRow("Colour", colour);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    form->addRow(buttons);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    border.width = width->value();
+    view->setTableBorder(border);
+}
+// Cell shading: a colour for the selected cells.
+void cellShadingDialog(PageView *view, QWidget *parent) {
+    const auto *table = caretTable(view);
+    const auto cell = view->selectedCell();
+    if (!table || !cell)
+        return;
+    QColorDialog dialog(parent);
+    dialog.setObjectName("cellShadingDialog");
+    dialog.setWindowTitle("Cell shading");
+    const auto *merge = table->mergeAt(cell->row, cell->column);
+    const auto current = merge ? table->fillAt(merge->row, merge->column)
+                               : table->fillAt(cell->row, cell->column);
+    dialog.setCurrentColor(current ? QColor::fromRgba(current) : QColor(0xf2, 0xe6, 0xd0));
+    if (dialog.exec() == QDialog::Accepted && dialog.selectedColor().isValid())
+        view->shadeCells(dialog.selectedColor().rgb());
+}
 // Header and footer: left/centre/right text for each, page number fields, first page option.
 void headerFooterDialog(PageView *view, QWidget *parent) {
     QDialog dialog(parent);
@@ -438,6 +510,13 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
     create("tableColumnWidth", "Column width…", "Table",
            [this, view] { columnWidthDialog(view, window_); })
         ->setIconText("Width");
+    create("tableBorders", "Borders…", "Table", [this, view] { tableBorderDialog(view, window_); })
+        ->setIconText("Borders");
+    create("tableShading", "Cell shading…", "Table",
+           [this, view] { cellShadingDialog(view, window_); })
+        ->setIconText("Shading");
+    create("tableNoShading", "No cell shading", "Table", [view] { view->shadeCells(0); })
+        ->setIconText("No shading");
     create("tableDistribute", "Distribute columns evenly", "Table",
            [view] { view->distributeColumns(); })
         ->setIconText("Even widths");
@@ -618,5 +697,8 @@ void Commands::sync() {
     get("tableSplit")->setEnabled(table && table->mergeAt(cell->row, cell->column));
     get("tableColumnWidth")->setEnabled(table && table->columns > 1);
     get("tableDistribute")->setEnabled(table && table->columns > 1 && !table->widths.empty());
+    get("tableBorders")->setEnabled(table != nullptr);
+    get("tableShading")->setEnabled(table != nullptr);
+    get("tableNoShading")->setEnabled(table && !table->shading.empty());
 }
 } // namespace wf
