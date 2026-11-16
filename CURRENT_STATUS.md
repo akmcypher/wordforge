@@ -1,5 +1,7 @@
 # Current status
 
+2026-11-16 — v0.6.6 prepared: tracked changes (entry below). Notes: docs/releases/v0.6.6.md.
+
 2026-11-16 — Tracked changes (P1, first slice). Review → Track changes (Ctrl+Shift+E)
 records typing and deleting under the user's name, to the minute: inserted text is
 underlined and deleted text struck through, both in red; deleted text stays until

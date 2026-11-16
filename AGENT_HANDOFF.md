@@ -9,7 +9,7 @@
 - `main` = v0.6.5 plus docs only. No open PRs, no uncommitted work.
 
 **In 0.6.5:** DOCX package-part preservation (#22, WFG9), footnotes (#23), comments
-(#24). Tracked changes (branch feat/tracked-changes, WFG10). Next: the P1 list
+(#24). Tracked changes (#27, WFG10, in 0.6.6). Next: the P1 list
 (incremental pagination, navigation pane,
 accessibility).
 
