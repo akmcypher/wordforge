@@ -2,12 +2,14 @@
 
 ## Current state (2026-11-16) — authoritative; everything below this section is history
 
-**Released and live.** v0.6.3 (tag `v0.6.3`, commit 41ee309):
-- Windows: <https://github.com/akmcypher/wordforge/releases/tag/v0.6.3> — x64/ARM64
+**Released and live.** v0.6.4 (tag `v0.6.4`, commit c705aa8):
+- Windows: <https://github.com/akmcypher/wordforge/releases/tag/v0.6.4> — x64/ARM64
   `-setup.exe` (Inno Setup, per-user, unsigned) and portable ZIPs + `SHA256SUMS.txt`.
-- Snap: `latest/stable` = 0.6.3 (amd64 rev 17, arm64 rev 16); edge follows `main`.
-- `main` = v0.6.3 plus docs only. No open PRs, no unmerged branches, no uncommitted work
-  (audited 2026-11-16, including WSL). Nothing is half-finished.
+- Snap: `latest/stable` = 0.6.4 (amd64 rev 26, arm64 rev 27); edge follows `main`.
+- `main` = v0.6.4 plus docs only. No open PRs, no uncommitted work.
+
+**In 0.6.4:** DOCX table and picture import (#17), headers/footers/page numbers (#18,
+WFG8), merged table cells and column widths (#19). See CURRENT_STATUS.md.
 
 **Delivered recently (Phase 1C styles, all in 0.6.3):** custom paragraph styles
 (create/rename/delete), DOCX export+import of paragraph and character styles, and

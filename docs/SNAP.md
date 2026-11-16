@@ -2,7 +2,7 @@
 
 Wordforge is a developer preview, not a stable replacement for Microsoft Word.
 The snap `wordforge` is published on the Snap Store (`latest/stable` since
-2026-11-13; see Publication record): `sudo snap install wordforge`.
+2026-11-13; 0.6.4 since 2026-11-16; see Publication record): `sudo snap install wordforge`.
 
 ## Build
 
@@ -113,6 +113,9 @@ tables/images, broader desktop testing and recovery across upgrades remain open.
   login exported as `SNAPCRAFT_STORE_CREDENTIALS`): `snapcraft release wordforge 17
   stable` and `... 16 stable`; `snapcraft status wordforge` confirmed. Store metrics on
   2026-11-14: about 2 real installs (Germany, Russia) plus Store-internal ones.
+* 2026-11-16: 0.6.4-preview promoted to `latest/stable` on the user's approval: amd64
+  revision 26 and arm64 revision 27 (edge builds of c705aa8, the v0.6.4 tag), both having
+  passed the CI strict-confinement self-test.
 * Store listing live at <https://snapcraft.io/wordforge>: title "Wordforge - Word
   Processor", summary, description, icon, two screenshots, categories Productivity
   and Utilities. Snap Store search for "wordforge" ranks it #1 and "word processor"

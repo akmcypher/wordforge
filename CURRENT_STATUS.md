@@ -1,6 +1,7 @@
 # Current status
 
-2026-11-16 — v0.6.4 prepared: DOCX table and picture import, headers/footers/page numbers,
+2026-11-16 — v0.6.4 released: Windows installers/ZIPs on GitHub, Snap `latest/stable` 0.6.4
+(amd64 rev 26, arm64 rev 27). Contains DOCX table and picture import, headers/footers/page numbers,
 merged table cells and column widths (entries below). Notes: docs/releases/v0.6.4.md.
 
 2026-11-16 — Merged table cells and column widths. Format → Table (and the format panel):
