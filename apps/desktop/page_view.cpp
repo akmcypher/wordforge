@@ -3,6 +3,7 @@
 #include "apps/desktop/spelling.hpp"
 #include <QApplication>
 #include <QDateTime>
+#include <QTime>
 #include <QBuffer>
 #include <QClipboard>
 #include <QContextMenuEvent>
@@ -116,10 +117,20 @@ void PageView::present(bool content) {
     if (auto *input = QApplication::inputMethod())
         input->update(Qt::ImQueryAll);
 }
+namespace {
+QString userName() {
+    return qEnvironmentVariable("USERNAME", qEnvironmentVariable("USER", "Author")).left(80);
+}
+} // namespace
 bool PageView::change(const std::function<void(Editor &)> &command) {
     try {
         const auto revision = editor_.document.revision;
         Editor candidate = editor_;
+        // Tracked changes record who edited, to the minute (as Word does).
+        candidate.reviewer = userName().toStdString();
+        auto now = QDateTime::currentDateTimeUtc();
+        now.setTime(QTime(now.time().hour(), now.time().minute()));
+        candidate.reviewDate = now.toString(Qt::ISODate).toStdString();
         command(candidate);
         if (candidate.document.revision == revision && preedit_.isEmpty()) {
             editor_ = std::move(candidate);
@@ -269,11 +280,34 @@ bool PageView::removeTable() {
     return change([](Editor &candidate) { candidate.removeTable(); });
 }
 bool PageView::addComment(const std::u16string &text) {
-    const auto author = qEnvironmentVariable("USERNAME", qEnvironmentVariable("USER", "Author"));
     const auto date = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     return change([&](Editor &candidate) {
-        candidate.addComment(text, author.left(80).toStdString(), date.toStdString());
+        candidate.addComment(text, userName().toStdString(), date.toStdString());
     });
+}
+bool PageView::setTrackChanges(bool on) {
+    return change([on](Editor &candidate) { candidate.setTrackChanges(on); });
+}
+bool PageView::acceptChanges() {
+    bool found = false;
+    change([&](Editor &candidate) { found = candidate.acceptChanges(); });
+    return found;
+}
+bool PageView::rejectChanges() {
+    bool found = false;
+    change([&](Editor &candidate) { found = candidate.rejectChanges(); });
+    return found;
+}
+bool PageView::acceptAllChanges() {
+    return change([](Editor &candidate) { candidate.acceptAllChanges(); });
+}
+bool PageView::rejectAllChanges() {
+    return change([](Editor &candidate) { candidate.rejectAllChanges(); });
+}
+bool PageView::nextChange() {
+    bool found = false;
+    change([&](Editor &candidate) { found = candidate.nextChange(); });
+    return found;
 }
 bool PageView::setCommentText(std::uint64_t id, const std::u16string &text) {
     return change([&](Editor &candidate) { candidate.setCommentText(id, text); });

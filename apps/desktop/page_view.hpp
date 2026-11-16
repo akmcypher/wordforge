@@ -69,6 +69,16 @@ class PageView : public QAbstractScrollArea {
     }
     bool insertFootnote(const std::u16string &text);
     bool addComment(const std::u16string &text);
+    // Tracked changes, recorded under the user's name.
+    bool setTrackChanges(bool on);
+    bool acceptChanges();
+    bool rejectChanges();
+    bool acceptAllChanges();
+    bool rejectAllChanges();
+    bool nextChange();
+    bool selectionHasChanges() const {
+        return editor_.selectionHasChanges();
+    }
     bool setCommentText(std::uint64_t id, const std::u16string &text);
     bool deleteComment(std::uint64_t id);
     // The comment whose range holds the caret (the innermost, latest one), if any.

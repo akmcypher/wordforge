@@ -475,3 +475,35 @@ TEST(NativeFormat, CommentsRoundTripInV9) {
     EXPECT_THROW(parseNative(variant("startOffset=\"2\"", "startOffset=\"99\"")), std::exception);
     EXPECT_THROW(parseNative(variant("<comment ", "<comment color=\"red\" ")), std::exception);
 }
+
+TEST(NativeFormat, TrackedChangesRoundTripInV10) {
+    Editor e;
+    e.replace(u"keep old text");
+    e.reviewer = "Ana Lima";
+    e.reviewDate = "2026-11-16T11:00:00Z";
+    e.setTrackChanges(true);
+    e.selection = {{0, 5}, {0, 8}};
+    e.replace(u"new");
+    const auto bytes = serializeNative(e.document);
+    EXPECT_NE(bytes.find("version=\"10\""), std::string::npos);
+    EXPECT_NE(bytes.find("trackChanges=\"true\""), std::string::npos);
+    const auto restored = parseNative(bytes);
+    EXPECT_TRUE(restored.trackChanges);
+    EXPECT_EQ(restored.revisions, e.document.revisions);
+    EXPECT_EQ(restored.paragraphs[0].runs, e.document.paragraphs[0].runs);
+    auto variant = [&](const std::string &from, const std::string &to) {
+        auto text = bytes;
+        const auto at = text.find(from);
+        EXPECT_NE(at, std::string::npos) << from;
+        text.replace(at, from.size(), to);
+        return text;
+    };
+    EXPECT_THROW(parseNative(variant("<revision ", "<revision color=\"red\" ")), std::exception);
+    EXPECT_THROW(parseNative(variant("version=\"10\"", "version=\"9\"")), std::exception);
+    // Tracking switched on with no changes yet still needs WFG10; plain files stay older.
+    Editor plain;
+    plain.replace(u"x");
+    EXPECT_EQ(serializeNative(plain.document).find("version=\"10\""), std::string::npos);
+    plain.setTrackChanges(true);
+    EXPECT_TRUE(parseNative(serializeNative(plain.document)).trackChanges);
+}

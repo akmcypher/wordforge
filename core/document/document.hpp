@@ -59,6 +59,12 @@ class Run {
     CharacterStyle style;
     CharacterMask direct = 0; // fields of `style` set directly, not inherited from the styles
     std::string characterStyle; // named character style; empty for none
+    // Tracked changes: the Revision that inserted or deleted this run (0 for none). Deleted
+    // text stays in the document, shown struck through, until the change is accepted.
+    std::uint64_t inserted = 0, deleted = 0;
+    bool tracked() const {
+        return inserted || deleted;
+    }
     const std::u16string &text() const;
     const InlineImage *image() const;
     const NoteReference *note() const;
@@ -189,6 +195,15 @@ struct Footnote {
     bool operator==(const Footnote &) const = default;
 };
 void validateFootnoteText(const std::u16string &);
+// Who made a tracked change and when (ISO 8601, or empty).
+struct Revision {
+    std::uint64_t id = 0;
+    std::string author, date;
+    bool operator==(const Revision &) const = default;
+};
+// How a run looks with its tracked change shown: insertions underlined, deletions struck
+// through, both in the change colour.
+CharacterStyle shownStyle(const Run &);
 constexpr std::size_t maxPreservedBytes = 16 * 1024 * 1024, maxPreservedParts = 256;
 void validatePreserved(const PreservedPackage &);
 struct Document {
@@ -199,6 +214,8 @@ struct Document {
     std::vector<Table> tables;
     std::vector<Footnote> footnotes; // each referenced exactly once in the text
     std::vector<Comment> comments;
+    std::vector<Revision> revisions; // each used by at least one run
+    bool trackChanges = false;       // record edits as tracked changes
     StyleSheet styles = builtinStyles();
     PageStyle page;
     std::uint64_t revision = 0, nextId = 2;
@@ -213,8 +230,9 @@ struct Document {
     const CharacterStyle &styleAt(Position) const;
     // The run that typing at `position` continues (the one before it at a boundary).
     const Run &runAt(Position) const;
-    void pruneUnusedImages(); // and footnotes whose reference was deleted
+    void pruneUnusedImages(); // and footnotes and revisions no longer referenced
     const Footnote *footnote(std::uint64_t id) const;
+    const Revision *findRevision(std::uint64_t id) const;
 };
 void validateDocument(const Document &);
 // Effective formatting of a paragraph style after following its based-on chain.
@@ -261,6 +279,7 @@ struct ChangeSet {
     bool tablesChanged = false;
     bool notesChanged = false; // footnote texts, additions or removals
     bool commentsChanged = false;
+    bool revisionsChanged = false; // the revision list or the track-changes switch
 };
 
 class Editor {
@@ -325,6 +344,23 @@ class Editor {
     void deleteComment(std::uint64_t id);
     // The current text range of a comment.
     std::optional<Selection> commentRange(std::uint64_t id) const;
+    // Tracked changes. While document.trackChanges is set, typing and deleting text are
+    // recorded under `reviewer` and `reviewDate` (set by the application) instead of being
+    // applied: deleted text stays, marked, until accepted. Paragraph breaks, pictures,
+    // footnotes, formatting and table structure are not tracked.
+    std::string reviewer = "Author", reviewDate;
+    void setTrackChanges(bool);
+    // Accept or reject the tracked changes in the selection, or the change at the caret.
+    // Returns false when there is none.
+    bool acceptChanges();
+    bool rejectChanges();
+    void acceptAllChanges();
+    void rejectAllChanges();
+    // Selects the next tracked change after the caret, wrapping; false when there is none.
+    bool nextChange();
+    // The tracked change the caret is in, or whether the selection holds one.
+    std::optional<Selection> changeAtCaret() const;
+    bool selectionHasChanges() const;
     void resizeImage(double width, double height);
     std::optional<TableCell> selectedCell() const;
     void insertTable(std::size_t rows, std::size_t columns);
@@ -358,8 +394,22 @@ class Editor {
     bool inTransaction_ = false;
     // When set, text that replace() inserts takes this character style.
     const std::string *forcedCharacterStyle_ = nullptr;
+    bool untracked_ = false; // set while tracked-change machinery edits directly
     void checkpoint();
     void validate(Selection) const;
+    void tracked(const std::function<void(Editor &)> &);
+    void trackedReplace(const std::u16string &, Selection);
+    Position trackedDelete(Position start, Position end);
+    void trackedErase(bool backward);
+    std::uint64_t currentRevision();
+    // Rewrites the runs of `paragraph` in [from, to) through `change`.
+    void markRuns(std::size_t paragraph, std::size_t from, std::size_t to,
+                  const std::function<void(Run &)> &change);
+    // Drops or rewrites each run piece of [start, end): `decide` returns true to drop it.
+    // Returns how much text was dropped from the last paragraph.
+    std::size_t resolveRange(Position start, Position end,
+                             const std::function<bool(Run &)> &decide);
+    bool resolveChanges(bool accept, bool all);
     void replaceRange(const std::u16string &, Selection, const Run *object = nullptr);
     void remapBookmarks(const std::vector<Position> &, Position start, Position end,
                         Position insertedEnd);

@@ -548,18 +548,23 @@ void MainWindow::buildUi() {
         }
     });
 
+    auto *review = new QMenu("&Review", this);
+    fill(review, {"trackChanges", "", "nextChange", "acceptChange", "rejectChange",
+                  "acceptAllChanges", "rejectAllChanges", "", "comment", "editComment",
+                  "deleteComment"});
     auto *help = new QMenu("&Help", this);
     auto *about = commands->add(named(help->addAction("About Wordforge"), "about"), "Help");
     connect(about, &QAction::triggered, this, [this] {
         QMessageBox::about(
             this, "Wordforge " + QApplication::applicationVersion(),
             "Native document editor\n\nQt 6 · Skia · HarfBuzz · FreeType · ICU · Hunspell\n\n"
-            "Developer preview: paragraph styles, lists, tables, pictures, bookmarks, spell "
-            "check, printing, find/replace, native files and PDF export, with partial DOCX "
-            "import/export. Headers and footers, comments, tracked changes and advanced "
-            "layout are not implemented yet.\n\nBuild " WORDFORGE_BUILD_ID);
+            "Developer preview: paragraph styles, lists, tables, pictures, headers and "
+            "footers, footnotes, comments, tracked changes, bookmarks, spell check, printing, "
+            "find/replace, native files and PDF export, with partial DOCX import/export. "
+            "Advanced layout and full Word fidelity are not implemented yet.\n\nBuild "
+            WORDFORGE_BUILD_ID);
     });
-    for (auto *menu : {file, edit, insert, format, tools, viewMenu, help})
+    for (auto *menu : {file, edit, insert, format, review, tools, viewMenu, help})
         menuBar()->addMenu(menu);
     // Shortcuts keep working while focus mode hides the menu bar.
     for (auto *action : commands->all())

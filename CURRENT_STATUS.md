@@ -1,5 +1,20 @@
 # Current status
 
+2026-11-16 — Tracked changes (P1, first slice). Review → Track changes (Ctrl+Shift+E)
+records typing and deleting under the user's name, to the minute: inserted text is
+underlined and deleted text struck through, both in red; deleted text stays until
+accepted. Deleting your own insertion removes it; deleting someone else's marks it.
+Review → Next change, Accept/Reject change (the selection, or the change at the caret,
+then moves on) and Accept/Reject all changes; all undoable. Pictures and footnotes that
+replace a selection delete it as a change. Saved in WFG10. DOCX writes w:ins/w:del
+(w:delText) and the trackRevisions setting, and imports Word's text insertions,
+deletions and moves (before this, inserted text inside w:ins was dropped on import).
+Not tracked yet: paragraph marks (Enter adds an untracked break; Backspace at a
+paragraph start only moves the caret), formatting, table structure; no per-author
+colours, balloons or "show original". Word count, find and plain-text export still
+include deleted text. Windows ARM64: all 6 suites pass; Ubuntu by CI. Not opened in
+Microsoft Word yet.
+
 2026-11-16 — v0.6.5 released: Windows installers/ZIPs on GitHub, Snap `latest/stable` 0.6.5
 (amd64 rev 35, arm64 rev 34). DOCX package-part preservation, footnotes, comments (entries
 below). Notes: docs/releases/v0.6.5.md.

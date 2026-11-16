@@ -536,3 +536,142 @@ TEST(Comments, SurviveTableStructureEdits) {
     EXPECT_NO_THROW(validateDocument(e.document));
     EXPECT_EQ(e.document.comments.size(), 1u);
 }
+
+namespace {
+// One letter per run: '-' plain, 'i' inserted, 'd' deleted, 'b' both.
+std::string marks(const wf::Paragraph &paragraph) {
+    std::string out;
+    for (const auto &run : paragraph.runs)
+        out += run.inserted && run.deleted ? 'b' : run.inserted ? 'i' : run.deleted ? 'd' : '-';
+    return out;
+}
+} // namespace
+TEST(TrackedChanges, TypingAndDeletingAreRecordedAndResolved) {
+    Editor e;
+    e.replace(u"The cat sat");
+    e.reviewer = "Ana";
+    e.reviewDate = "2026-11-16T11:00:00Z";
+    e.setTrackChanges(true);
+    EXPECT_TRUE(e.document.trackChanges);
+    e.selection = {{0, 4}, {0, 7}}; // "cat"
+    e.replace(u"dog");
+    EXPECT_EQ(e.document.paragraphs[0].text(), u"The catdog sat");
+    EXPECT_EQ(marks(e.document.paragraphs[0]), "-di-");
+    ASSERT_EQ(e.document.revisions.size(), 1u);
+    EXPECT_EQ(e.document.revisions[0].author, "Ana");
+    EXPECT_EQ(e.selection.focus, (Position{0, 10}));
+    // Backspace over the reviewer's own insertion removes it; over original text, marks it.
+    e.eraseBackward();
+    EXPECT_EQ(e.document.paragraphs[0].text(), u"The catdo sat");
+    e.selection = {{0, 3}, {0, 3}};
+    e.eraseBackward();
+    EXPECT_EQ(e.document.paragraphs[0].text(), u"The catdo sat");
+    EXPECT_EQ(e.selection.focus, (Position{0, 2}));
+    EXPECT_EQ(marks(e.document.paragraphs[0]), "-d-di-");
+    // Delete forward over deleted text just moves past it.
+    e.eraseForward();
+    EXPECT_EQ(e.selection.focus, (Position{0, 3}));
+    EXPECT_NO_THROW(validateDocument(e.document));
+
+    auto accepted = e;
+    accepted.acceptAllChanges();
+    EXPECT_EQ(accepted.document.paragraphs[0].text(), u"Th do sat");
+    EXPECT_EQ(marks(accepted.document.paragraphs[0]), "-");
+    EXPECT_TRUE(accepted.document.revisions.empty());
+    auto rejected = e;
+    rejected.rejectAllChanges();
+    EXPECT_EQ(rejected.document.paragraphs[0].text(), u"The cat sat");
+    EXPECT_TRUE(rejected.document.revisions.empty());
+
+    // The change at the caret only.
+    e.selection = {{0, 5}, {0, 5}}; // inside "cat"
+    ASSERT_TRUE(e.changeAtCaret());
+    EXPECT_EQ(e.changeAtCaret()->anchor, (Position{0, 4}));
+    EXPECT_TRUE(e.rejectChanges());
+    EXPECT_EQ(marks(e.document.paragraphs[0]), "-d-i-");
+    EXPECT_TRUE(e.undo());
+    EXPECT_EQ(marks(e.document.paragraphs[0]), "-d-di-");
+    EXPECT_TRUE(e.redo());
+    e.selection = {{0, 0}, {0, 0}};
+    EXPECT_FALSE(e.acceptChanges()); // nothing at the caret
+    EXPECT_TRUE(e.nextChange());
+    EXPECT_EQ(e.selection.anchor, (Position{0, 2}));
+    EXPECT_EQ(e.selection.focus, (Position{0, 3}));
+    EXPECT_TRUE(e.nextChange());
+    EXPECT_EQ(e.selection.anchor, (Position{0, 7}));
+    EXPECT_EQ(e.selection.focus, (Position{0, 9}));
+    EXPECT_TRUE(e.nextChange()); // wraps
+    EXPECT_EQ(e.selection.anchor, (Position{0, 2}));
+
+    // Another reviewer deleting Ana's insertion marks it deleted too; rejecting removes it.
+    e.reviewer = "Bo";
+    e.selection = {{0, 7}, {0, 9}};
+    e.replace(u"");
+    EXPECT_EQ(marks(e.document.paragraphs[0]), "-d-b-");
+    EXPECT_EQ(e.document.revisions.size(), 2u);
+    e.selection = {{0, 8}, {0, 8}};
+    EXPECT_TRUE(e.selectionHasChanges());
+    EXPECT_TRUE(e.rejectChanges());
+    EXPECT_EQ(e.document.paragraphs[0].text(), u"The cat sat");
+    EXPECT_EQ(e.document.revisions.size(), 1u);
+
+    // Copying leaves deleted text out and drops the marks.
+    e.selection = {{0, 0}, {0, 11}};
+    const auto copied = e.copySelection();
+    ASSERT_EQ(copied.size(), 1u);
+    EXPECT_EQ(copied[0].text(), u"Th cat sat");
+    EXPECT_EQ(marks(copied[0]), "--");
+}
+TEST(TrackedChanges, ParagraphsAndOtherContent) {
+    Editor e;
+    e.replace(u"one\ntwo");
+    e.setTrackChanges(true);
+    // Paragraph marks are not tracked: backspace at a paragraph start only moves the caret.
+    e.selection = {{1, 0}, {1, 0}};
+    e.eraseBackward();
+    EXPECT_EQ(e.document.paragraphs.size(), 2u);
+    EXPECT_EQ(e.selection.focus, (Position{0, 3}));
+    e.selection = {{0, 3}, {0, 3}};
+    e.eraseForward();
+    EXPECT_EQ(e.selection.focus, (Position{1, 0}));
+    // Typed paragraphs: their text is marked, the break is not.
+    e.selection = {{0, 3}, {0, 3}};
+    e.replace(u"!\nnew");
+    EXPECT_EQ(e.document.paragraphs.size(), 3u);
+    EXPECT_EQ(marks(e.document.paragraphs[0]), "-i");
+    EXPECT_EQ(marks(e.document.paragraphs[1]), "i");
+    // A selection across paragraphs is marked, not joined.
+    e.selection = {{0, 1}, {2, 2}};
+    e.replace(u"");
+    EXPECT_EQ(e.document.paragraphs.size(), 3u);
+    EXPECT_EQ(e.document.paragraphs[0].text(), u"one"); // the inserted "!" went
+    EXPECT_EQ(e.document.paragraphs[1].text(), u"");
+    EXPECT_EQ(marks(e.document.paragraphs[2]), "d-");
+    EXPECT_NO_THROW(validateDocument(e.document));
+    // Comments survive changes being resolved.
+    e.selection = {{2, 0}, {2, 3}};
+    e.addComment(u"Note", "Ana", "");
+    e.acceptAllChanges();
+    EXPECT_EQ(e.document.paragraphs[2].text(), u"o");
+    EXPECT_EQ(e.document.comments.size(), 1u);
+    EXPECT_NO_THROW(validateDocument(e.document));
+    // A picture or footnote replacing a selection deletes it as a tracked change.
+    EXPECT_EQ(e.document.paragraphs[0].text(), u"o");
+    e.selection = {{0, 0}, {0, 1}};
+    e.insertFootnote(u"Source");
+    EXPECT_EQ(e.document.paragraphs[0].text(), u"o￼");
+    EXPECT_EQ(marks(e.document.paragraphs[0]), "d-");
+    // Turning tracking off makes edits plain again.
+    e.setTrackChanges(false);
+    e.selection = {{0, 0}, {0, 1}};
+    e.replace(u"");
+    EXPECT_EQ(e.document.paragraphs[0].text(), u"￼");
+    // Invalid documents: a mark without a revision, an empty tracked run.
+    auto broken = e.document;
+    broken.paragraphs[0].runs[0].inserted = 999999;
+    EXPECT_THROW(validateDocument(broken), std::invalid_argument);
+    e.reviewer = std::string(300, 'x');
+    e.setTrackChanges(true);
+    e.selection = {{1, 0}, {1, 0}};
+    EXPECT_THROW(e.replace(u"x"), std::invalid_argument);
+}

@@ -462,6 +462,28 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
         if (const auto id = view->commentAtCaret())
             view->deleteComment(*id);
     })->setIconText("Delete comment");
+    // Review: tracked changes.
+    create("trackChanges", "Track changes", "Review",
+           [this, view] { view->setTrackChanges(get("trackChanges")->isChecked()); })
+        ->setIconText("Track");
+    get("trackChanges")->setCheckable(true);
+    get("trackChanges")->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E)); // as in Word
+    create("nextChange", "Next change", "Review", [view] { view->nextChange(); })
+        ->setIconText("Next change");
+    create("acceptChange", "Accept change", "Review", [view] {
+        view->acceptChanges();
+        view->nextChange();
+    })->setIconText("Accept");
+    create("rejectChange", "Reject change", "Review", [view] {
+        view->rejectChanges();
+        view->nextChange();
+    })->setIconText("Reject");
+    create("acceptAllChanges", "Accept all changes", "Review",
+           [view] { view->acceptAllChanges(); })
+        ->setIconText("Accept all");
+    create("rejectAllChanges", "Reject all changes", "Review",
+           [view] { view->rejectAllChanges(); })
+        ->setIconText("Reject all");
     create("headerFooter", "Header and footer…", "Insert",
            [this, view] { headerFooterDialog(view, window_); })
         ->setIconText("Header & footer");
@@ -569,6 +591,13 @@ void Commands::sync() {
     const bool inComment = view_->commentAtCaret().has_value();
     get("editComment")->setEnabled(inComment);
     get("deleteComment")->setEnabled(inComment);
+    get("trackChanges")->setChecked(view_->document().trackChanges);
+    const bool anyChanges = !view_->document().revisions.empty();
+    const bool hereChanges = anyChanges && view_->selectionHasChanges();
+    get("acceptChange")->setEnabled(hereChanges);
+    get("rejectChange")->setEnabled(hereChanges);
+    for (const auto *id : {"nextChange", "acceptAllChanges", "rejectAllChanges"})
+        get(id)->setEnabled(anyChanges);
     const auto cell = view_->selectedCell();
     const Table *table = nullptr;
     if (cell)

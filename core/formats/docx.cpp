@@ -385,6 +385,65 @@ std::string relationshipKind(const std::string &type) {
 }
 // Keeps the package parts Wordforge does not edit: document properties, theme, settings,
 // font table, web settings and custom XML, with the parts they reference.
+// Word settings XML with its Track Changes switch set to `on`; unchanged bytes when it
+// already is. The switch goes before the settings that follow it in the schema.
+std::string withTrackRevisions(const std::string &data, bool on) {
+    pugi::xml_document settings;
+    if (!settings.load_buffer(data.data(), data.size()))
+        return data;
+    auto root = settings.document_element();
+    std::vector<pugi::xml_node> existing;
+    for (auto node : root.children())
+        if (is(node, "trackRevisions"))
+            existing.push_back(node);
+    if (on == !existing.empty())
+        return data;
+    for (auto node : existing)
+        root.remove_child(node);
+    if (on) {
+        static const std::set<std::string> later{
+            "doNotTrackMoves", "doNotTrackFormatting", "documentProtection", "autoFormatOverride",
+            "styleLockTheme", "styleLockQFSet", "defaultTabStop", "autoHyphenation",
+            "consecutiveHyphenLimit", "hyphenationZone", "doNotHyphenateCaps", "showEnvelope",
+            "summaryLength", "clickAndTypeStyle", "defaultTableStyle", "evenAndOddHeaders",
+            "bookFoldRevPrinting", "bookFoldPrinting", "bookFoldPrintingSheets",
+            "drawingGridHorizontalSpacing", "drawingGridVerticalSpacing",
+            "displayHorizontalDrawingGridEvery", "displayVerticalDrawingGridEvery",
+            "doNotUseMarginsForDrawingGridOrigin", "drawingGridHorizontalOrigin",
+            "drawingGridVerticalOrigin", "doNotShadeFormData", "noPunctuationKerning",
+            "characterSpacingControl", "printTwoOnOne", "strictFirstAndLastChars",
+            "noLineBreaksAfter", "noLineBreaksBefore", "savePreviewPicture",
+            "doNotValidateAgainstSchema", "saveInvalidXml", "ignoreMixedContent",
+            "alwaysShowPlaceholderText", "doNotDemarcateInvalidXml", "saveXmlDataOnly",
+            "useXSLTWhenSaving", "saveThroughXslt", "showXMLTags", "alwaysMergeEmptyNamespace",
+            "updateFields", "hdrShapeDefaults", "footnotePr", "endnotePr", "compat", "docVars",
+            "rsids", "mathPr", "attachedSchema", "themeFontLang", "clrSchemeMapping",
+            "doNotIncludeSubdocsInStats", "doNotAutoCompressPictures", "forceUpgrade",
+            "captions", "readModeInkLockDown", "smartTagType", "schemaLibrary",
+            "shapeDefaults", "doNotEmbedSmartTags", "decimalSymbol", "listSeparator"};
+        const std::string rootName = root.name();
+        const auto colon = rootName.find(':');
+        const auto prefix = colon == std::string::npos ? std::string() : rootName.substr(0, colon + 1);
+        pugi::xml_node before;
+        for (auto node : root.children()) {
+            if (node.type() != pugi::node_element)
+                continue;
+            const std::string name = node.name();
+            if (!name.starts_with(prefix) || later.contains(name.substr(prefix.size()))) {
+                before = node;
+                break;
+            }
+        }
+        const auto name = prefix + "trackRevisions";
+        if (before)
+            root.insert_child_before(name.c_str(), before);
+        else
+            root.append_child(name.c_str());
+    }
+    std::ostringstream output;
+    settings.save(output, "", pugi::format_raw, pugi::encoding_utf8);
+    return output.str();
+}
 std::shared_ptr<const PreservedPackage> preservePackage(const opc::Parts &parts,
                                                         const std::string &main,
                                                         std::vector<std::string> &warnings) {
@@ -759,6 +818,31 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
     DocxImport result;
     auto &warnings = result.warnings;
     auto &document = result.document;
+    // Tracked changes: one Revision per author and date; the marks of the w:ins / w:del
+    // being read.
+    std::map<std::pair<std::string, std::string>, std::uint64_t> revisionIds;
+    std::uint64_t insertedMark = 0, deletedMark = 0;
+    auto revisionFor = [&](pugi::xml_node change) {
+        auto author = attr(change, "author");
+        auto date = attr(change, "date");
+        try {
+            validateCommentAuthor(author);
+        } catch (const std::invalid_argument &) {
+            author = "Unknown";
+        }
+        if (date.size() > 64 || std::any_of(date.begin(), date.end(),
+                                            [](char c) { return c < 0x20 || c > 0x7e; }))
+            date.clear();
+        const auto found = revisionIds.find({author, date});
+        if (found != revisionIds.end())
+            return found->second;
+        if (document.revisions.size() >= 100000)
+            throw std::runtime_error("Too many tracked changes");
+        const auto id = document.allocateId();
+        document.revisions.push_back({id, author, date});
+        revisionIds.emplace(std::pair{author, date}, id);
+        return id;
+    };
     document.paragraphs.clear();
     CharacterStyle defaultRun;
     Paragraph defaultParagraph;
@@ -1094,10 +1178,24 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                     marks.push_back({attr(run, "id"), is(run, "commentRangeStart"), 0, offset});
                     continue;
                 }
+                if (is(run, "ins") || is(run, "del") || is(run, "moveTo") ||
+                    is(run, "moveFrom")) {
+                    const bool insertion = is(run, "ins") || is(run, "moveTo");
+                    auto &mark = insertion ? insertedMark : deletedMark;
+                    const auto saved = mark;
+                    mark = revisionFor(run);
+                    readRuns(run, depth + 1);
+                    mark = saved;
+                    continue;
+                }
+                if (is(run, "moveFromRangeStart") || is(run, "moveFromRangeEnd") ||
+                    is(run, "moveToRangeStart") || is(run, "moveToRangeEnd"))
+                    continue;
                 if (is(run, "hyperlink")) {
                     warn(warnings, "Hyperlink text is preserved; link targets are not.");
                     readRuns(run, depth + 1);
                 } else if (is(run, "r")) {
+                    const auto firstRun = paragraph.runs.size();
                     auto style = base;
                     std::set<std::string> runSeen;
                     applyStyle(val(child(child(run, "rPr"), "rStyle")), paragraph, style, runSeen);
@@ -1140,7 +1238,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                                 picture->characterStyle = characterStyle;
                                 paragraph.runs.push_back(std::move(*picture));
                             }
-                        } else if (is(item, "t")) {
+                        } else if (is(item, "t") || is(item, "delText")) {
                             for (auto chunk : item.children())
                                 if (chunk.type() == pugi::node_pcdata ||
                                     chunk.type() == pugi::node_cdata)
@@ -1159,6 +1257,11 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                         paragraph.runs.push_back({std::move(text), std::move(style)});
                         paragraph.runs.back().characterStyle = characterStyle;
                     }
+                    for (auto i = firstRun; i < paragraph.runs.size(); ++i)
+                        if (!paragraph.runs[i].text().empty()) {
+                            paragraph.runs[i].inserted = insertedMark;
+                            paragraph.runs[i].deleted = deletedMark;
+                        }
                 } else
                     warn(warnings,
                          "Unsupported paragraph content was omitted: " + local(run.name()));
@@ -1183,6 +1286,10 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                     {run.text().substr(start, end == std::u16string::npos ? end : end - start),
                      run.style});
                 split.runs.back().characterStyle = run.characterStyle;
+                if (!split.runs.back().text().empty()) {
+                    split.runs.back().inserted = run.inserted;
+                    split.runs.back().deleted = run.deleted;
+                }
                 if (end == std::u16string::npos)
                     break;
                 document.paragraphs.push_back(split);
@@ -1628,6 +1735,19 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             warn(warnings, "Comments are kept as one paragraph of plain text each.");
     }
     document.preserved = preservePackage(parts, main, warnings);
+    // Word's "Track Changes" switch lives in the (kept) settings part.
+    if (document.preserved)
+        for (const auto &part : document.preserved->parts)
+            if (part.contentType ==
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml") {
+                pugi::xml_document settings;
+                if (settings.load_buffer(part.data.data(), part.data.size()))
+                    for (auto node : settings.document_element().children())
+                        if (is(node, "trackRevisions"))
+                            document.trackChanges = attr(node, "val") != "false" &&
+                                                    attr(node, "val") != "0" &&
+                                                    attr(node, "val") != "off";
+            }
     validateDocument(document);
     return result;
 }
@@ -1646,6 +1766,7 @@ std::string serializeDocx(const Document &document) {
     root.append_attribute("xmlns:a") = "http://schemas.openxmlformats.org/drawingml/2006/main";
     root.append_attribute("xmlns:pic") = "http://schemas.openxmlformats.org/drawingml/2006/picture";
     unsigned long long drawingId = 0;
+    unsigned long long changeId = 0; // w:ins / w:del identifiers
     std::set<std::uint64_t> imageIds;
     auto body = element(root, "body");
     pugi::xml_document numbers;
@@ -1845,7 +1966,21 @@ std::string serializeDocx(const Document &document) {
         };
         for (const auto &[pieceOffset, run] : pieces) {
             emitMarkers(pieceOffset);
-            auto r = element(p, "r");
+            // Tracked changes wrap the run: w:ins, then w:del inside it.
+            auto container = p;
+            for (const auto &[mark, name] :
+                 {std::pair{run.inserted, "ins"}, std::pair{run.deleted, "del"}}) {
+                if (!mark)
+                    continue;
+                container = element(container, name);
+                set(container, "id", static_cast<double>(++changeId));
+                if (const auto *revision = document.findRevision(mark)) {
+                    set(container, "author", revision->author);
+                    if (!revision->date.empty())
+                        set(container, "date", revision->date);
+                }
+            }
+            auto r = element(container, "r");
             auto rpr = element(r, "rPr");
             if (!run.characterStyle.empty())
                 property(rpr, "rStyle", run.characterStyle);
@@ -1929,7 +2064,7 @@ std::string serializeDocx(const Document &document) {
             std::size_t begin = 0;
             for (;;) {
                 auto end = run.text().find(u'\t', begin);
-                auto t = element(r, "t");
+                auto t = element(r, run.deleted ? "delText" : "t");
                 t.append_attribute("xml:space") = "preserve";
                 t.text().set(
                     utf8(run.text().substr(begin, end == std::u16string::npos ? end : end - begin))
@@ -2202,13 +2337,46 @@ std::string serializeDocx(const Document &document) {
         parts["[Content_Types].xml"] = saved(types);
         parts["word/_rels/document.xml.rels"] = saved(relationships);
     }
+    const bool keptSettings =
+        document.preserved &&
+        std::any_of(document.preserved->parts.begin(), document.preserved->parts.end(),
+                    [](const PreservedPart &part) {
+                        return part.contentType == "application/vnd.openxmlformats-"
+                                                   "officedocument.wordprocessingml.settings+xml";
+                    });
+    if (document.trackChanges && !keptSettings) {
+        pugi::xml_document settings, types, relationships;
+        auto root = settings.append_child("w:settings");
+        root.append_attribute("xmlns:w") = wordNs;
+        element(root, "trackRevisions");
+        types.load_string(parts.at("[Content_Types].xml").c_str());
+        relationships.load_string(parts.at("word/_rels/document.xml.rels").c_str());
+        auto entry = types.document_element().append_child("Override");
+        entry.append_attribute("PartName") = "/word/settings.xml";
+        entry.append_attribute("ContentType") =
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml";
+        auto relation = relationships.document_element().append_child("Relationship");
+        relation.append_attribute("Id") = "settings";
+        relation.append_attribute("Type") =
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings";
+        relation.append_attribute("Target") = "settings.xml";
+        parts.emplace("word/settings.xml", saved(settings));
+        parts["[Content_Types].xml"] = saved(types);
+        parts["word/_rels/document.xml.rels"] = saved(relationships);
+    }
     if (document.preserved) {
         pugi::xml_document types, packageRelationships, relationships;
         types.load_string(parts.at("[Content_Types].xml").c_str());
         packageRelationships.load_string(parts.at("_rels/.rels").c_str());
         relationships.load_string(parts.at("word/_rels/document.xml.rels").c_str());
         for (const auto &part : document.preserved->parts) {
-            if (!parts.emplace(part.path, part.data).second)
+            const bool settings =
+                part.contentType ==
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml";
+            if (!parts
+                     .emplace(part.path, settings ? withTrackRevisions(part.data, document.trackChanges)
+                                                  : part.data)
+                     .second)
                 throw std::runtime_error("A kept document part collides with generated content");
             if (part.contentType.empty())
                 continue;

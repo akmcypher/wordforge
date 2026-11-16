@@ -974,3 +974,82 @@ TEST(Docx, CommentsRoundTripAndImportFromWord) {
     EXPECT_FALSE(warned("commentRange"));
     EXPECT_FALSE(warned("commentReference"));
 }
+
+TEST(Docx, TrackedChangesRoundTripAndImportFromWord) {
+    Editor e;
+    e.replace(u"Alpha beta");
+    e.reviewer = "Ana Lima";
+    e.reviewDate = "2026-11-16T11:00:00Z";
+    e.setTrackChanges(true);
+    e.selection = {{0, 6}, {0, 10}};
+    e.replace(u"gamma");
+    const auto parts = opc::read(serializeDocx(e.document));
+    pugi::xml_document body;
+    ASSERT_TRUE(body.load_string(parts.at("word/document.xml").c_str()));
+    EXPECT_EQ(body.select_nodes("//w:ins/w:r").size(), 1u);
+    EXPECT_EQ(body.select_nodes("//w:del/w:r/w:delText").size(), 1u);
+    EXPECT_STREQ(body.select_node("//w:ins").node().attribute("w:author").value(), "Ana Lima");
+    ASSERT_TRUE(parts.contains("word/settings.xml"));
+    EXPECT_NE(parts.at("word/settings.xml").find("trackRevisions"), std::string::npos);
+    const auto imported = parseDocx(opc::write(parts));
+    EXPECT_TRUE(imported.warnings.empty());
+    EXPECT_TRUE(imported.document.trackChanges);
+    ASSERT_EQ(imported.document.paragraphs[0].runs.size(), 3u);
+    EXPECT_EQ(imported.document.paragraphs[0].text(), u"Alpha betagamma");
+    EXPECT_TRUE(imported.document.paragraphs[0].runs[1].deleted);
+    EXPECT_TRUE(imported.document.paragraphs[0].runs[2].inserted);
+    ASSERT_EQ(imported.document.revisions.size(), 1u);
+    EXPECT_EQ(imported.document.revisions[0].author, "Ana Lima");
+    EXPECT_EQ(imported.document.revisions[0].date, "2026-11-16T11:00:00Z");
+
+    // Word: an insertion holding a deletion and a line break; a move counts as both.
+    auto word = wordDocument(
+        "<w:p><w:r><w:t>a</w:t></w:r><w:ins w:id='1' w:author='Cy' w:date='2026-01-01T00:00:00Z'>"
+        "<w:r><w:t>b</w:t><w:br/><w:t>c</w:t></w:r><w:del w:id='2' w:author='Dee'><w:r>"
+        "<w:delText>d</w:delText></w:r></w:del></w:ins><w:moveFrom w:id='3' w:author='Cy' "
+        "w:date='2026-01-01T00:00:00Z'><w:r><w:t>e</w:t></w:r></w:moveFrom></w:p>");
+    const auto fromWord = parseDocx(opc::write(word));
+    for (const auto &warning : fromWord.warnings)
+        EXPECT_EQ(warning.find("omitted"), std::string::npos) << warning;
+    ASSERT_EQ(fromWord.document.paragraphs.size(), 2u);
+    EXPECT_EQ(fromWord.document.paragraphs[0].text(), u"ab");
+    EXPECT_EQ(fromWord.document.paragraphs[1].text(), u"cde");
+    const auto &second = fromWord.document.paragraphs[1].runs;
+    ASSERT_EQ(second.size(), 3u);
+    EXPECT_TRUE(second[0].inserted && !second[0].deleted);
+    EXPECT_TRUE(second[1].inserted && second[1].deleted);
+    EXPECT_TRUE(!second[2].inserted && second[2].deleted);
+    EXPECT_EQ(second[0].inserted, second[2].deleted); // same author and date
+    EXPECT_EQ(fromWord.document.revisions.size(), 2u);
+    EXPECT_FALSE(fromWord.document.trackChanges);
+    EXPECT_NO_THROW(validateDocument(fromWord.document));
+}
+TEST(Docx, TrackChangesSwitchFollowsKeptSettings) {
+    const std::string w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    const std::string rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
+    auto parts = wordDocument("<w:p><w:r><w:t>x</w:t></w:r></w:p>",
+                              "<Relationship Id='s' Type='" + rel +
+                                  "settings' Target='settings.xml'/>");
+    parts["word/settings.xml"] = "<w:settings xmlns:w='" + w +
+                                 "'><w:zoom w:percent='100'/><w:trackRevisions/>"
+                                 "<w:defaultTabStop w:val='720'/></w:settings>";
+    auto &types = parts["[Content_Types].xml"];
+    types.insert(types.rfind("</Types>"),
+                 "<Override PartName='/word/settings.xml' ContentType='application/"
+                 "vnd.openxmlformats-officedocument.wordprocessingml.settings+xml'/>");
+    auto document = parseDocx(opc::write(parts)).document;
+    EXPECT_TRUE(document.trackChanges);
+    // Unchanged: the kept bytes are written back as they were.
+    EXPECT_EQ(opc::read(serializeDocx(document)).at("word/settings.xml"),
+              keptPart(document, "word/settings.xml")->data);
+    document.trackChanges = false;
+    const auto off = opc::read(serializeDocx(document)).at("word/settings.xml");
+    EXPECT_EQ(off.find("trackRevisions"), std::string::npos);
+    EXPECT_NE(off.find("defaultTabStop"), std::string::npos);
+    auto again = parseDocx(opc::write(opc::read(serializeDocx(document)))).document;
+    EXPECT_FALSE(again.trackChanges);
+    again.trackChanges = true;
+    const auto on = opc::read(serializeDocx(again)).at("word/settings.xml");
+    EXPECT_LT(on.find("zoom"), on.find("trackRevisions"));
+    EXPECT_LT(on.find("trackRevisions"), on.find("defaultTabStop"));
+}

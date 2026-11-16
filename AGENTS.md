@@ -22,9 +22,11 @@ frozen. Development happens here only.
 - Imports must preserve the active document on failure. Partial DOCX imports
   require a warning/consent and open as copies. A package-part registry
   (`PreservedPackage`) keeps document properties, theme, settings, font table, web
-  settings and custom XML byte for byte; footnotes and comments are imported as plain
-  text; other unknown content inside the document body (endnotes, fields, tracked
-  changes, unknown elements) is still omitted with a warning. Do
+  settings and custom XML byte for byte (only the Track Changes switch in settings is
+  rewritten); footnotes and comments are imported as plain text and tracked text
+  insertions/deletions as tracked changes; other unknown content inside the document body
+  (endnotes, fields, formatting/paragraph-mark revisions, unknown elements) is still
+  omitted with a warning. Do
   not describe this as full DOCX preservation.
 - Test both actual Windows and Ubuntu paths where available. Offscreen tests
   alone do not prove desktop accessibility, installed packaging or Word fidelity.

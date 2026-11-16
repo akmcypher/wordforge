@@ -1,5 +1,13 @@
 # Native WFG schema and migration
 
+**WFG10 (tracked changes)** is written only when Track Changes is on or the document holds
+tracked changes; other documents keep their earlier version. The root may carry
+`trackChanges="true"`. Root elements `revision` (`id`, `author`: at most 256 bytes without
+control characters, optional `date`: printable ASCII, at most 64 bytes) name who made a
+change; text, picture and footnote-reference runs may carry `ins` and/or `del` naming a
+revision. Every revision must be used by a run, every mark must name a revision, and
+marked runs must not be empty. Deleted text stays in the paragraph until accepted.
+
 **WFG9 (footnotes, kept DOCX parts)** is written only when a document has footnotes or
 carries kept DOCX package parts. Footnotes are root elements `footnote` (`id`, `text`: one
 paragraph of plain text, at most 2000 characters, no control characters) and inline

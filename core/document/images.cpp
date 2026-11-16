@@ -86,6 +86,8 @@ Run Run::slice(std::size_t start, std::size_t end) const {
     Run part(text().substr(start, end - start), style);
     part.direct = direct;
     part.characterStyle = characterStyle;
+    part.inserted = inserted;
+    part.deleted = deleted;
     return part;
 }
 void Run::appendText(const std::u16string &text) {
@@ -111,6 +113,15 @@ void validateImageResource(const ImageResource &resource) {
         throw std::invalid_argument("PNG dimensions do not match resource metadata");
 }
 void Document::pruneUnusedImages() {
+    if (!revisions.empty()) {
+        std::unordered_set<std::uint64_t> marks;
+        for (const auto &paragraph : paragraphs)
+            for (const auto &run : paragraph.runs) {
+                marks.insert(run.inserted);
+                marks.insert(run.deleted);
+            }
+        std::erase_if(revisions, [&](const Revision &r) { return !marks.contains(r.id); });
+    }
     if (images.empty() && footnotes.empty())
         return;
     std::unordered_set<std::uint64_t> used;
@@ -163,7 +174,8 @@ std::uint64_t Editor::insertImage(std::shared_ptr<const ImageResource> resource,
         id = editor.document.allocateId();
         auto run = Run::fromImage({id, width, height, description}, editor.typingStyle);
         editor.document.images.emplace(id, frozen);
-        const auto start = std::min(editor.selection.anchor, editor.selection.focus);
+        editor.replace(u""); // the selection, as a tracked deletion when tracking
+        const auto start = editor.selection.focus;
         editor.replaceRange(u"\ufffc", editor.selection, &run);
         editor.selection = {start, {start.paragraph, start.offset + 1}};
     };
@@ -238,7 +250,8 @@ std::uint64_t Editor::insertFootnote(const std::u16string &text) {
         auto style = editor.typingStyle;
         auto run = Run::fromNote({id}, style);
         editor.document.footnotes.push_back({id, text});
-        const auto start = std::min(editor.selection.anchor, editor.selection.focus);
+        editor.replace(u""); // the selection, as a tracked deletion when tracking
+        const auto start = editor.selection.focus;
         editor.replaceRange(u"\ufffc", editor.selection, &run);
         const Position after{start.paragraph, start.offset + 1};
         editor.selection = {after, after};

@@ -50,7 +50,7 @@ class DesktopTest : public QObject {
         QStringList menus;
         for (auto *action : window.menuBar()->actions())
             menus << action->text().remove('&');
-        QCOMPARE(menus, QStringList({"File", "Edit", "Insert", "Format", "Tools", "View", "Help"}));
+        QCOMPARE(menus, QStringList({"File", "Edit", "Insert", "Format", "Review", "Tools", "View", "Help"}));
         auto *toolbar = window.findChild<QToolBar *>("compactToolbar");
         QVERIFY(toolbar && toolbar->isVisible());
         auto *panel = window.findChild<QDockWidget *>("formatPanel");
@@ -771,6 +771,46 @@ class DesktopTest : public QObject {
         QCOMPARE(pages("range.pdf", 2, 3), 2);
         QVERIFY(window.findChild<QAction *>("printAction"));
         QCOMPARE(window.findChild<QAction *>("printAction")->shortcut(), QKeySequence(QKeySequence::Print));
+    }
+    void trackedChangesFromTheReviewMenu() {
+        wf::MainWindow window;
+        window.show();
+        auto *view = window.pageView();
+        view->setDocument({});
+        view->insertText("Plain text");
+        auto *track = window.findChild<QAction *>("trackChangesAction");
+        QVERIFY(track && track->isCheckable() && !track->isChecked());
+        QCOMPARE(track->shortcut(), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E));
+        track->trigger();
+        QVERIFY(view->document().trackChanges);
+        QVERIFY(track->isChecked());
+        view->selectRange({{0, 0}, {0, 5}});
+        view->insertText("Marked");
+        QCOMPARE(QString::fromStdU16String(view->document().paragraphs[0].text()),
+                 QString("PlainMarked text"));
+        QCOMPARE(view->document().revisions.size(), std::size_t{1});
+        QVERIFY(!view->document().revisions[0].author.empty());
+        QVERIFY(window.findChild<QAction *>("acceptAllChangesAction")->isEnabled());
+        view->selectRange({{0, 0}, {0, 0}});
+        window.findChild<QAction *>("nextChangeAction")->trigger();
+        QCOMPARE(view->selection().focus, (wf::Position{0, 5}));
+        auto *accept = window.findChild<QAction *>("acceptChangeAction");
+        QVERIFY(accept->isEnabled());
+        accept->trigger(); // the deletion of "Plain", then moves to the insertion
+        QCOMPARE(QString::fromStdU16String(view->document().paragraphs[0].text()),
+                 QString("Marked text"));
+        window.findChild<QAction *>("rejectChangeAction")->trigger();
+        QCOMPARE(QString::fromStdU16String(view->document().paragraphs[0].text()),
+                 QString(" text"));
+        QVERIFY(view->document().revisions.empty());
+        window.findChild<QAction *>("undoAction")->trigger();
+        QCOMPARE(QString::fromStdU16String(view->document().paragraphs[0].text()),
+                 QString("Marked text"));
+        bool listed = false;
+        for (auto *menu : window.menuBar()->actions())
+            if (menu->text() == "&Review")
+                listed = menu->menu() && menu->menu()->actions().contains(track);
+        QVERIFY(listed);
     }
     void commentsAreAddedListedSelectedAndDeleted() {
         wf::MainWindow window;

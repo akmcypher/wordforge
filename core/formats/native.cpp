@@ -198,6 +198,8 @@ std::string serializeNative(const Document &document) {
     // WFG9 only for footnotes or kept DOCX package parts (which need the ZIP transport).
     const bool preserving = document.preserved != nullptr;
     const bool noted = !document.footnotes.empty() || !document.comments.empty();
+    // WFG10 only for tracked changes, so other files stay readable by 0.6.5.
+    const bool reviewed = document.trackChanges || !document.revisions.empty();
     const bool packaged = tables || !imageIds.empty() || preserving;
     // WFG6 only when styles were customized; built-in styles keep files readable by 0.6.0.
     const bool styled = document.styles != builtinStyles();
@@ -211,8 +213,9 @@ std::string serializeNative(const Document &document) {
         std::any_of(document.tables.begin(), document.tables.end(),
                     [](const Table &t) { return !t.widths.empty() || !t.merges.empty(); });
     // WFG6 and later store paragraph style names and direct-formatting masks.
-    const bool semantic = styled || banded || preserving || noted;
-    root.append_attribute("version") = preserving || noted          ? "9"
+    const bool semantic = styled || banded || preserving || noted || reviewed;
+    root.append_attribute("version") = reviewed                     ? "10"
+                                       : preserving || noted        ? "9"
                                        : banded                     ? "8"
                                        : characterStyled            ? "7"
                                        : styled                     ? "6"
@@ -237,6 +240,15 @@ std::string serializeNative(const Document &document) {
     root.append_attribute("margin") = document.page.margin;
     if (document.page.differentFirstPage)
         root.append_attribute("differentFirstPage") = "true";
+    if (document.trackChanges)
+        root.append_attribute("trackChanges") = "true";
+    for (const auto &revision : document.revisions) {
+        auto node = root.append_child("revision");
+        node.append_attribute("id") = static_cast<unsigned long long>(revision.id);
+        node.append_attribute("author") = revision.author.c_str();
+        if (!revision.date.empty())
+            node.append_attribute("date") = revision.date.c_str();
+    }
     for (auto [name, band] : {std::pair{"header", &document.page.header},
                               std::pair{"footer", &document.page.footer}}) {
         if (band->empty())
@@ -365,6 +377,10 @@ std::string serializeNative(const Document &document) {
                 run.append_attribute("direct") = r.direct;
             if (!r.characterStyle.empty())
                 run.append_attribute("cstyle") = r.characterStyle.c_str();
+            if (r.inserted)
+                run.append_attribute("ins") = static_cast<unsigned long long>(r.inserted);
+            if (r.deleted)
+                run.append_attribute("del") = static_cast<unsigned long long>(r.deleted);
             if (!image && !r.note())
                 run.append_child(pugi::node_pcdata).set_value(utf8(r.text()).c_str());
         }
@@ -417,11 +433,13 @@ Document parseNative(const std::string &input) {
     const std::string_view version = root.attribute("version").value();
     if (std::string_view(root.name()) != "wordforge" ||
         (version != "1" && version != "2" && version != "3" && version != "4" && version != "5" &&
-         version != "6" && version != "7" && version != "8" && version != "9"))
+         version != "6" && version != "7" && version != "8" && version != "9" &&
+         version != "10"))
         throw std::runtime_error("Unsupported native document version");
     // WFG7 is WFG6 plus character styles; WFG8 adds headers and footers.
     // WFG9 adds DOCX package parts kept from an imported file.
-    const bool v9 = version == "9";
+    const bool v10 = version == "10";
+    const bool v9 = version == "9" || v10;
     const bool v8 = version == "8" || v9;
     const bool v7 = version == "7" || v8;
     const bool v6 = version == "6" || v7;
@@ -429,6 +447,9 @@ Document parseNative(const std::string &input) {
         throw std::runtime_error("WFG4/5 require ZIP transport; legacy versions require XML");
     if (version == "1")
         attributes(root, {"version", "width", "height", "margin"});
+    else if (v10)
+        attributes(root, {"version", "width", "height", "margin", "nextId", "differentFirstPage",
+                          "trackChanges"});
     else if (v8)
         attributes(root, {"version", "width", "height", "margin", "nextId", "differentFirstPage"});
     else
@@ -445,9 +466,19 @@ Document parseNative(const std::string &input) {
     pageGeometry(document.page);
     if (v8)
         document.page.differentFirstPage = boolean(root, "differentFirstPage");
+    if (v10)
+        document.trackChanges = boolean(root, "trackChanges");
     for (auto p : root.children()) {
         if (indentation(p))
             continue;
+        if (v10 && std::string_view(p.name()) == "revision") {
+            attributes(p, {"id", "author", "date"});
+            if (p.first_child())
+                throw std::runtime_error("Unexpected revision content");
+            document.revisions.push_back(
+                {identifier(p, "id"), p.attribute("author").value(), p.attribute("date").value()});
+            continue;
+        }
         if (v9 && std::string_view(p.name()) == "comment") {
             attributes(p, {"id", "author", "date", "text", "startParagraph", "startOffset",
                            "endParagraph", "endOffset"});
@@ -645,14 +676,17 @@ Document parseNative(const std::string &input) {
                 throw std::runtime_error("Unknown inline content; refusing lossy import");
             if (note)
                 attributes(r, {"id", "family", "size", "bold", "italic", "underline", "color",
-                               "strike", "highlight", "direct", "cstyle"});
+                               "strike", "highlight", "direct", "cstyle", v10 ? "ins" : "id",
+                               v10 ? "del" : "id"});
             else if (image)
                 attributes(r, {"resource", "width", "height", "description", "family", "size",
                                "bold", "italic", "underline", "color", "strike", "highlight",
-                               v6 ? "direct" : "resource", v7 ? "cstyle" : "resource"});
+                               v6 ? "direct" : "resource", v7 ? "cstyle" : "resource",
+                               v10 ? "ins" : "resource", v10 ? "del" : "resource"});
             else
                 attributes(r, {"family", "size", "bold", "italic", "underline", "color", "strike",
-                               "highlight", v6 ? "direct" : "family", v7 ? "cstyle" : "family"});
+                               "highlight", v6 ? "direct" : "family", v7 ? "cstyle" : "family",
+                               v10 ? "ins" : "family", v10 ? "del" : "family"});
             for (auto child : r.children())
                 if (image || note ? !indentation(child)
                           : child.type() != pugi::node_pcdata && child.type() != pugi::node_cdata)
@@ -685,6 +719,10 @@ Document parseNative(const std::string &input) {
                                      run.style);
             if (v6 && r.attribute("direct"))
                 run.direct = mask(r, AllCharacterFields);
+            if (r.attribute("ins"))
+                run.inserted = identifier(r, "ins");
+            if (r.attribute("del"))
+                run.deleted = identifier(r, "del");
             if (v7 && r.attribute("cstyle")) {
                 run.characterStyle = r.attribute("cstyle").value();
                 if (run.characterStyle.empty())

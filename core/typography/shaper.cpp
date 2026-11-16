@@ -181,9 +181,10 @@ ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::siz
         for (const auto &run : paragraph.runs) {
             const auto begin = std::max(a, runStart),
                        finish = std::min(b, runStart + run.text().size());
+            const auto shown = shownStyle(run); // tracked changes marked
             if (run.atom()) {
                 if (begin < finish)
-                    spans.push_back({begin, finish, run.style, nullptr, previousScript, false,
+                    spans.push_back({begin, finish, shown, nullptr, previousScript, false,
                                      run.image(), run.note(), firstNote + notesBefore});
                 if (run.note())
                     ++notesBefore;
@@ -193,7 +194,7 @@ ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::siz
             for (auto pos = begin; pos < finish;) {
                 const auto next =
                     std::min(*std::upper_bound(boundaries.begin(), boundaries.end(), pos), finish);
-                auto &face = impl_->select(text, pos, next, run.style);
+                auto &face = impl_->select(text, pos, next, shown);
                 int32_t cursor = static_cast<int32_t>(pos);
                 UChar32 cp;
                 U16_NEXT(text.data(), cursor, static_cast<int32_t>(next), cp);
@@ -204,11 +205,11 @@ ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::siz
                     previousScript = script;
                 const bool tab = text[pos] == u'\t';
                 if (!tab && !spans.empty() && !spans.back().tab && spans.back().end == pos &&
-                    spans.back().face == &face && spans.back().style == run.style &&
+                    spans.back().face == &face && spans.back().style == shown &&
                     spans.back().script == script)
                     spans.back().end = next;
                 else
-                    spans.push_back({pos, next, run.style, &face, script, tab, nullptr});
+                    spans.push_back({pos, next, shown, &face, script, tab, nullptr});
                 pos = next;
             }
             runStart += run.text().size();

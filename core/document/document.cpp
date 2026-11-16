@@ -97,6 +97,17 @@ void validateDocument(const Document &document) {
             throw std::invalid_argument("Invalid footnote identifier");
         validateFootnoteText(note.text);
     }
+    if (document.revisions.size() > 100000)
+        throw std::invalid_argument("Too many tracked changes");
+    for (const auto &revision : document.revisions) {
+        if (!revision.id || revision.id >= document.nextId || !ids.insert(revision.id).second)
+            throw std::invalid_argument("Invalid revision identifier");
+        validateCommentAuthor(revision.author);
+        if (revision.date.size() > 64 ||
+            std::any_of(revision.date.begin(), revision.date.end(),
+                        [](char c) { return c < 0x20 || c > 0x7e; }))
+            throw std::invalid_argument("Invalid revision date");
+    }
     std::unordered_set<std::uint64_t> noteReferences;
     for (const auto &paragraph : document.paragraphs) {
         if (!paragraph.id || paragraph.id >= document.nextId || !ids.insert(paragraph.id).second)
@@ -124,6 +135,11 @@ void validateDocument(const Document &document) {
                 if (!document.images.contains(image->resourceId))
                     throw std::invalid_argument("Missing image resource");
             }
+            for (const auto mark : {run.inserted, run.deleted})
+                if (mark && !document.findRevision(mark))
+                    throw std::invalid_argument("Tracked change without a revision");
+            if (run.tracked() && run.text().empty())
+                throw std::invalid_argument("Empty tracked run");
             if (const auto *note = run.note())
                 if (!document.footnote(note->id) || !noteReferences.insert(note->id).second)
                     throw std::invalid_argument("Footnote reference without a unique footnote");
@@ -219,7 +235,8 @@ void append(std::vector<Run> &runs, Run run) {
     if (run.text().empty())
         return;
     if (!run.atom() && !runs.empty() && !runs.back().atom() && runs.back().style == run.style &&
-        runs.back().direct == run.direct && runs.back().characterStyle == run.characterStyle)
+        runs.back().direct == run.direct && runs.back().characterStyle == run.characterStyle &&
+        runs.back().inserted == run.inserted && runs.back().deleted == run.deleted)
         runs.back().appendText(run.text());
     else
         runs.push_back(std::move(run));
@@ -376,6 +393,13 @@ ChangeSet Editor::transact(const std::function<void(Editor &)> &command) {
     changes.tablesChanged = document.tables != candidate.document.tables;
     changes.notesChanged = document.footnotes != candidate.document.footnotes;
     changes.commentsChanged = document.comments != candidate.document.comments;
+    changes.revisionsChanged = document.revisions != candidate.document.revisions ||
+                               document.trackChanges != candidate.document.trackChanges;
+    for (const auto &revision : candidate.document.revisions)
+        if (revision.id < idHighWater_ &&
+            std::none_of(document.revisions.begin(), document.revisions.end(),
+                         [&](const Revision &old) { return old.id == revision.id; }))
+            throw std::invalid_argument("Transaction reuses a retired revision identifier");
     for (const auto &table : candidate.document.tables)
         if (table.id < idHighWater_ && std::none_of(
                                            document.tables.begin(), document.tables.end(),
@@ -418,7 +442,7 @@ ChangeSet Editor::transact(const std::function<void(Editor &)> &command) {
     const bool contentChanged = changes.pageChanged || changes.orderChanged ||
                                 changes.bookmarksChanged || changes.resourcesChanged ||
                                 changes.tablesChanged || changes.notesChanged ||
-                                changes.commentsChanged ||
+                                changes.commentsChanged || changes.revisionsChanged ||
                                 !changes.inserted.empty() ||
                                 !changes.removed.empty() || !changes.changed.empty();
     if (contentChanged) {
@@ -450,7 +474,10 @@ void Editor::restore(State state, bool preserveAllocator) {
         p.revision = serial_;
 }
 void Editor::replace(const std::u16string &input) {
-    replaceRange(input, selection);
+    if (document.trackChanges && !untracked_)
+        tracked([&](Editor &e) { e.trackedReplace(input, e.selection); });
+    else
+        replaceRange(input, selection);
 }
 void Editor::replaceRange(const std::u16string &input, Selection range, const Run *object) {
     validate(range);
@@ -569,6 +596,10 @@ void Editor::replaceRange(const std::u16string &input, Selection range, const Ru
 }
 void Editor::eraseBackward() {
     validate(selection);
+    if (document.trackChanges && !untracked_) {
+        tracked([](Editor &e) { e.trackedErase(true); });
+        return;
+    }
     auto range = selection;
     if (range.anchor == range.focus) {
         auto &p = range.anchor;
@@ -585,6 +616,10 @@ void Editor::eraseBackward() {
 }
 void Editor::eraseForward() {
     validate(selection);
+    if (document.trackChanges && !untracked_) {
+        tracked([](Editor &e) { e.trackedErase(false); });
+        return;
+    }
     auto range = selection;
     if (range.anchor == range.focus) {
         auto &p = range.focus;
@@ -998,8 +1033,10 @@ std::vector<Paragraph> Editor::copySelection() const {
         p.runs.clear();
         for (auto &run : slice(source, i == start.paragraph ? start.offset : 0,
                                i == end.paragraph ? end.offset : source.text().size()))
-            if (!run.atom())
+            if (!run.atom() && !run.deleted) {
+                run.inserted = 0;
                 p.runs.push_back(std::move(run));
+            }
         if (p.runs.empty())
             p.runs.push_back({u"", source.runs.empty() ? CharacterStyle{} : source.runs[0].style});
         fragment.push_back(std::move(p));
@@ -1042,5 +1079,270 @@ void Editor::insertFragment(const std::vector<Paragraph> &fragment) {
             }
         }
     });
+}
+// Tracked changes.
+namespace {
+struct Raise {
+    bool &flag;
+    bool saved;
+    explicit Raise(bool &value) : flag(value), saved(value) {
+        flag = true;
+    }
+    ~Raise() {
+        flag = saved;
+    }
+};
+// Runs of text with the same tracked change, as [begin, end) offsets in one paragraph.
+std::vector<std::pair<std::size_t, std::size_t>> changeSpans(const Paragraph &paragraph) {
+    std::vector<std::pair<std::size_t, std::size_t>> spans;
+    const Run *previous = nullptr;
+    std::size_t offset = 0;
+    for (const auto &run : paragraph.runs) {
+        const auto size = run.text().size();
+        if (run.tracked()) {
+            if (previous && !spans.empty() && spans.back().second == offset &&
+                previous->inserted == run.inserted && previous->deleted == run.deleted)
+                spans.back().second += size;
+            else
+                spans.emplace_back(offset, offset + size);
+        }
+        previous = &run;
+        offset += size;
+    }
+    return spans;
+}
+} // namespace
+const Revision *Document::findRevision(std::uint64_t id) const {
+    for (const auto &revision : revisions)
+        if (revision.id == id)
+            return &revision;
+    return nullptr;
+}
+CharacterStyle shownStyle(const Run &run) {
+    auto style = run.style;
+    if (run.inserted)
+        style.underline = true;
+    if (run.deleted)
+        style.strike = true;
+    if (run.tracked())
+        style.color = 0xffb3261e;
+    return style;
+}
+void Editor::tracked(const std::function<void(Editor &)> &command) {
+    if (inTransaction_)
+        command(*this);
+    else
+        transact(command);
+}
+void Editor::setTrackChanges(bool on) {
+    tracked([on](Editor &e) { e.document.trackChanges = on; });
+}
+std::uint64_t Editor::currentRevision() {
+    for (const auto &revision : document.revisions)
+        if (revision.author == reviewer && revision.date == reviewDate)
+            return revision.id;
+    validateCommentAuthor(reviewer);
+    if (reviewDate.size() > 64)
+        throw std::invalid_argument("Invalid revision date");
+    document.nextId = std::max(document.nextId, idHighWater_);
+    const auto id = document.allocateId();
+    document.revisions.push_back({id, reviewer, reviewDate});
+    return id;
+}
+void Editor::markRuns(std::size_t index, std::size_t from, std::size_t to,
+                      const std::function<void(Run &)> &change) {
+    if (from >= to)
+        return;
+    auto &paragraph = document.paragraphs[index];
+    const auto size = paragraph.text().size();
+    auto runs = slice(paragraph, 0, from);
+    for (auto run : slice(paragraph, from, to)) {
+        change(run);
+        append(runs, std::move(run));
+    }
+    for (auto run : slice(paragraph, to, size))
+        append(runs, std::move(run));
+    paragraph.runs = std::move(runs);
+}
+std::size_t Editor::resolveRange(Position start, Position end,
+                                 const std::function<bool(Run &)> &decide) {
+    Raise guard(untracked_);
+    std::size_t droppedAtEnd = 0;
+    for (auto i = end.paragraph + 1; i-- > start.paragraph;) {
+        auto &paragraph = document.paragraphs[i];
+        const auto size = paragraph.text().size();
+        const auto from = i == start.paragraph ? start.offset : 0;
+        const auto to = i == end.paragraph ? end.offset : size;
+        if (from >= to)
+            continue;
+        std::vector<std::pair<std::size_t, std::size_t>> drops;
+        auto runs = slice(paragraph, 0, from);
+        std::size_t offset = from;
+        for (auto run : slice(paragraph, from, to)) {
+            const auto length = run.text().size();
+            auto changed = run;
+            if (decide(changed)) {
+                if (!drops.empty() && drops.back().second == offset)
+                    drops.back().second += length;
+                else
+                    drops.emplace_back(offset, offset + length);
+                append(runs, std::move(run));
+            } else
+                append(runs, std::move(changed));
+            offset += length;
+        }
+        for (auto run : slice(paragraph, to, size))
+            append(runs, std::move(run));
+        paragraph.runs = std::move(runs);
+        for (auto drop = drops.rbegin(); drop != drops.rend(); ++drop) {
+            replaceRange(u"", {{i, drop->first}, {i, drop->second}});
+            if (i == end.paragraph)
+                droppedAtEnd += drop->second - drop->first;
+        }
+    }
+    return droppedAtEnd;
+}
+Position Editor::trackedDelete(Position start, Position end) {
+    const auto cell = document.paragraphs[start.paragraph].cell;
+    for (auto i = start.paragraph; i <= end.paragraph; ++i)
+        if (document.paragraphs[i].cell != cell)
+            throw std::invalid_argument(
+                "Selection crosses table cell boundaries; edit one cell or use table controls");
+    const auto id = currentRevision();
+    const auto dropped = resolveRange(start, end, [&](Run &run) {
+        if (run.deleted)
+            return false;
+        if (run.inserted) // the reviewer's own insertion simply goes
+            if (const auto *revision = document.findRevision(run.inserted);
+                revision && revision->author == reviewer)
+                return true;
+        run.deleted = id;
+        return false;
+    });
+    return {end.paragraph, end.offset - dropped};
+}
+void Editor::trackedReplace(const std::u16string &input, Selection range) {
+    Raise guard(untracked_);
+    validate(range);
+    const auto [start, end] = ordered(range);
+    const auto caret = start == end ? start : trackedDelete(start, end);
+    selection = {caret, caret};
+    if (input.empty())
+        return;
+    replaceRange(input, selection);
+    const auto id = currentRevision();
+    const auto finish = selection.focus;
+    for (auto i = caret.paragraph; i <= finish.paragraph; ++i)
+        markRuns(i, i == caret.paragraph ? caret.offset : 0,
+                 i == finish.paragraph ? finish.offset : document.paragraphs[i].text().size(),
+                 [id](Run &run) { run.inserted = id; });
+}
+void Editor::trackedErase(bool backward) {
+    Raise guard(untracked_);
+    auto [start, end] = ordered(selection);
+    if (start != end) {
+        trackedDelete(start, end);
+        selection = {start, start};
+        return;
+    }
+    const auto &paragraph = document.paragraphs[start.paragraph];
+    const auto size = paragraph.text().size();
+    // Paragraph marks are not tracked: at a paragraph's edge the caret just moves on.
+    if (backward && !start.offset) {
+        if (start.paragraph &&
+            document.paragraphs[start.paragraph - 1].cell == paragraph.cell) {
+            const Position previous{start.paragraph - 1,
+                                    document.paragraphs[start.paragraph - 1].text().size()};
+            selection = {previous, previous};
+        }
+        return;
+    }
+    if (!backward && start.offset == size) {
+        if (start.paragraph + 1 < document.paragraphs.size() &&
+            document.paragraphs[start.paragraph + 1].cell == paragraph.cell)
+            selection = {Position{start.paragraph + 1, 0}, Position{start.paragraph + 1, 0}};
+        return;
+    }
+    if (backward)
+        start.offset = previousGrapheme(paragraph, start.offset);
+    else
+        end.offset = nextGrapheme(paragraph, end.offset);
+    const auto after = trackedDelete(start, end);
+    selection.anchor = selection.focus = backward ? start : after;
+}
+std::optional<Selection> Editor::changeAtCaret() const {
+    const auto caret = selection.focus;
+    if (caret.paragraph >= document.paragraphs.size())
+        return {};
+    for (const auto &[begin, end] : changeSpans(document.paragraphs[caret.paragraph]))
+        if (begin <= caret.offset && caret.offset <= end)
+            return Selection{{caret.paragraph, begin}, {caret.paragraph, end}};
+    return {};
+}
+bool Editor::selectionHasChanges() const {
+    const auto [start, end] = ordered(selection);
+    if (start == end)
+        return changeAtCaret().has_value();
+    for (auto i = start.paragraph; i <= end.paragraph; ++i)
+        for (const auto &[begin, finish] : changeSpans(document.paragraphs[i]))
+            if ((i != start.paragraph || finish > start.offset) &&
+                (i != end.paragraph || begin < end.offset))
+                return true;
+    return false;
+}
+bool Editor::resolveChanges(bool accept, bool all) {
+    Position start, end;
+    if (all) {
+        end = {document.paragraphs.size() - 1, document.paragraphs.back().text().size()};
+    } else if (selection.anchor != selection.focus) {
+        std::tie(start, end) = ordered(selection);
+    } else if (const auto span = changeAtCaret()) {
+        start = span->anchor;
+        end = span->focus;
+    } else
+        return false;
+    bool found = false;
+    tracked([&](Editor &e) {
+        e.resolveRange(start, end, [&](Run &run) {
+            if (!run.tracked())
+                return false;
+            found = true;
+            if (accept ? run.deleted != 0 : run.inserted != 0)
+                return true;
+            run.inserted = run.deleted = 0;
+            return false;
+        });
+        e.selection = {start, start};
+    });
+    return found;
+}
+bool Editor::acceptChanges() {
+    return resolveChanges(true, false);
+}
+bool Editor::rejectChanges() {
+    return resolveChanges(false, false);
+}
+void Editor::acceptAllChanges() {
+    resolveChanges(true, true);
+}
+void Editor::rejectAllChanges() {
+    resolveChanges(false, true);
+}
+bool Editor::nextChange() {
+    const auto from = std::max(selection.anchor, selection.focus);
+    std::optional<Selection> first;
+    for (std::size_t i = 0; i < document.paragraphs.size(); ++i)
+        for (const auto &[begin, end] : changeSpans(document.paragraphs[i])) {
+            const Selection span{{i, begin}, {i, end}};
+            if (!first)
+                first = span;
+            if (span.anchor >= from && span.focus > from) {
+                selection = span;
+                return true;
+            }
+        }
+    if (first)
+        selection = *first;
+    return first.has_value();
 }
 } // namespace wf
