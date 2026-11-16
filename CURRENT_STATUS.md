@@ -1,5 +1,8 @@
 # Current status
 
+2026-11-16 — v0.6.5 prepared: DOCX package-part preservation, footnotes, comments (entries
+below). Notes: docs/releases/v0.6.5.md.
+
 2026-11-16 — Comments (P1 track changes/comments, first slice). Insert → Comment… (Ctrl+Alt+M)
 comments the selected text with the user's name and the time; commented text is
 highlighted in light yellow. A Comments panel (View → Comments panel; it opens with the

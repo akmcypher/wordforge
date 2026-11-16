@@ -1,6 +1,6 @@
 name: wordforge
 title: Wordforge - Office Word Processor
-version: '0.6.4-preview'
+version: '0.6.5-preview'
 summary: Office word processor and document writer - DOCX, PDF, offline and private
 description: |
   Wordforge is a fast, native office word processor and document writer for Linux. It
