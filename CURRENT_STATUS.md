@@ -1,6 +1,7 @@
 # Current status
 
-2026-11-16 — v0.6.5 prepared: DOCX package-part preservation, footnotes, comments (entries
+2026-11-16 — v0.6.5 released: Windows installers/ZIPs on GitHub, Snap `latest/stable` 0.6.5
+(amd64 rev 35, arm64 rev 34). DOCX package-part preservation, footnotes, comments (entries
 below). Notes: docs/releases/v0.6.5.md.
 
 2026-11-16 — Comments (P1 track changes/comments, first slice). Insert → Comment… (Ctrl+Alt+M)

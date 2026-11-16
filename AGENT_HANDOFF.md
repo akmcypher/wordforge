@@ -2,16 +2,15 @@
 
 ## Current state (2026-11-16) — authoritative; everything below this section is history
 
-**Released and live.** v0.6.4 (tag `v0.6.4`, commit c705aa8):
-- Windows: <https://github.com/akmcypher/wordforge/releases/tag/v0.6.4> — x64/ARM64
+**Released and live.** v0.6.5 (tag `v0.6.5`, commit 5ff9309):
+- Windows: <https://github.com/akmcypher/wordforge/releases/tag/v0.6.5> — x64/ARM64
   `-setup.exe` (Inno Setup, per-user, unsigned) and portable ZIPs + `SHA256SUMS.txt`.
-- Snap: `latest/stable` = 0.6.4 (amd64 rev 26, arm64 rev 27); edge follows `main`.
-- `main` = v0.6.4 plus docs only. No open PRs, no uncommitted work.
+- Snap: `latest/stable` = 0.6.5 (amd64 rev 35, arm64 rev 34); edge follows `main`.
+- `main` = v0.6.5 plus docs only. No open PRs, no uncommitted work.
 
-**After 0.6.4 (on main or in review):** DOCX package-part preservation (branch
-feat/docx-preservation, WFG9; see CURRENT_STATUS.md). Footnotes (#23).
-Comments (branch feat/comments). Next: cut v0.6.5, then the P1 list (tracked changes,
-incremental pagination, navigation pane, accessibility).
+**In 0.6.5:** DOCX package-part preservation (#22, WFG9), footnotes (#23), comments
+(#24). Next: the P1 list (tracked changes, incremental pagination, navigation pane,
+accessibility).
 
 **In 0.6.4:** DOCX table and picture import (#17), headers/footers/page numbers (#18,
 WFG8), merged table cells and column widths (#19). See CURRENT_STATUS.md.
