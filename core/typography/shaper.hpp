@@ -28,7 +28,9 @@ class Shaper {
     ~Shaper();
     Shaper(const Shaper &) = delete;
     Shaper &operator=(const Shaper &) = delete;
-    ShapedLine shape(const Paragraph &, std::size_t start, std::size_t end);
+    // `firstNote` is the number shown for the paragraph's first footnote reference.
+    ShapedLine shape(const Paragraph &, std::size_t start, std::size_t end,
+                     std::size_t firstNote = 1);
     std::vector<std::string> families() const;
 
   private:

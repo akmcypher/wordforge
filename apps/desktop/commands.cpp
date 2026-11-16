@@ -90,6 +90,36 @@ void insertTableDialog(PageView *view, QWidget *parent) {
         view->insertTable(static_cast<std::size_t>(rows->value()),
                           static_cast<std::size_t>(columns->value()));
 }
+// Footnote text: one paragraph of plain text. `id` edits an existing footnote.
+void footnoteDialog(PageView *view, QWidget *parent, std::optional<std::uint64_t> id) {
+    QDialog dialog(parent);
+    dialog.setWindowTitle(id ? "Edit footnote" : "Insert footnote");
+    dialog.setObjectName("footnoteDialog");
+    auto *form = new QFormLayout(&dialog);
+    auto *text = new QLineEdit;
+    text->setObjectName("footnoteText");
+    text->setAccessibleName("Footnote text");
+    text->setMaxLength(2000);
+    text->setMinimumWidth(420);
+    if (id)
+        if (const auto *note = view->document().footnote(*id))
+            text->setText(QString::fromStdU16String(note->text));
+    form->addRow("Footnote", text);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    form->addRow(buttons);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    auto value = text->text().trimmed().toStdU16String();
+    for (auto &character : value)
+        if (character < 0x20 || character == 0x7f || character == 0xfffc)
+            character = u' ';
+    if (id)
+        view->setFootnoteText(*id, value);
+    else
+        view->insertFootnote(value);
+}
 // The caret column's width, in centimetres.
 void columnWidthDialog(PageView *view, QWidget *parent) {
     const auto cell = view->selectedCell();
@@ -381,6 +411,14 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
            [view] { view->distributeColumns(); })
         ->setIconText("Even widths");
 
+    create("footnote", "Footnote…", "Insert",
+           [this, view] { footnoteDialog(view, window_, std::nullopt); });
+    get("footnote")->setIconText("Footnote");
+    get("footnote")->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_F)); // as in Word
+    create("editFootnote", "Edit footnote…", "Insert", [this, view] {
+        if (const auto id = view->selectedFootnote())
+            footnoteDialog(view, window_, id);
+    })->setIconText("Edit note");
     create("headerFooter", "Header and footer…", "Insert",
            [this, view] { headerFooterDialog(view, window_); })
         ->setIconText("Header & footer");
@@ -484,6 +522,7 @@ void Commands::sync() {
                          54 &&
                      p.indentLeft < 360);
     get("pictureSize")->setEnabled(view_->selectedImage().has_value());
+    get("editFootnote")->setEnabled(view_->selectedFootnote().has_value());
     const auto cell = view_->selectedCell();
     const Table *table = nullptr;
     if (cell)

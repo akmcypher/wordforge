@@ -432,3 +432,50 @@ TEST(Preservation, PartsAndRelationshipsAreValidated) {
     package.parts[0].data.assign(maxPreservedBytes + 1, 'x');
     EXPECT_THROW(validatePreserved(package), std::invalid_argument);
 }
+
+TEST(Footnotes, InsertEditDeleteAndUndo) {
+    Editor e;
+    e.replace(u"claim");
+    const auto id = e.insertFootnote(u"Source: a study.");
+    ASSERT_EQ(e.document.footnotes.size(), 1u);
+    EXPECT_EQ(e.document.paragraphs[0].text(), u"claim￼");
+    EXPECT_EQ(e.selectedFootnote(), id); // caret just after the reference
+    e.replace(u" more");
+    EXPECT_EQ(e.document.paragraphs[0].text(), u"claim￼ more");
+    e.selection = {{0, 6}, {0, 6}};
+    e.setFootnoteText(id, u"Edited.");
+    EXPECT_EQ(e.document.footnote(id)->text, u"Edited.");
+    EXPECT_TRUE(e.undo());
+    EXPECT_EQ(e.document.footnote(id)->text, u"Source: a study.");
+    // Deleting the reference deletes the footnote; undo brings both back.
+    e.selection = {{0, 5}, {0, 6}};
+    e.replace(u"");
+    EXPECT_TRUE(e.document.footnotes.empty());
+    EXPECT_NO_THROW(validateDocument(e.document));
+    EXPECT_TRUE(e.undo());
+    EXPECT_EQ(e.document.footnotes.size(), 1u);
+    // Copying text does not duplicate the reference.
+    // (Undo may group the deletion with the typing before it.)
+    e.selection = {{0, 0}, {0, e.document.paragraphs[0].text().size()}};
+    const auto fragment = e.copySelection();
+    for (const auto &p : fragment)
+        for (const auto &run : p.runs)
+            EXPECT_FALSE(run.note());
+    EXPECT_THROW(e.insertFootnote(u"bad\ttext"), std::invalid_argument);
+    EXPECT_THROW(e.insertFootnote(std::u16string(2001, u'x')), std::invalid_argument);
+    EXPECT_THROW(e.setFootnoteText(id + 100, u"x"), std::invalid_argument);
+}
+TEST(Footnotes, ReferencesAndNotesMustMatch) {
+    Editor e;
+    e.replace(u"a");
+    const auto id = e.insertFootnote(u"note");
+    auto orphan = e.document;
+    orphan.footnotes.push_back({orphan.allocateId(), u"orphan"});
+    EXPECT_THROW(validateDocument(orphan), std::invalid_argument);
+    auto twice = e.document;
+    twice.paragraphs[0].runs.push_back(Run::fromNote({id}));
+    EXPECT_THROW(validateDocument(twice), std::invalid_argument);
+    auto missing = e.document;
+    missing.footnotes.clear();
+    EXPECT_THROW(validateDocument(missing), std::invalid_argument);
+}

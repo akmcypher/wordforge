@@ -65,7 +65,7 @@ QString fragmentToHtml(const std::vector<Paragraph> &fragment) {
                     .arg(p.indentLeft)
                     .arg(std::lround(p.lineSpacing * 100));
         for (const auto &run : p.runs)
-            if (!run.image() && !run.text().empty())
+            if (!run.atom() && !run.text().empty())
                 html += "<span style=\"" + runCss(run.style) + "\">" +
                         QString::fromStdU16String(run.text()).toHtmlEscaped().replace(
                             '\t', "&#9;") +

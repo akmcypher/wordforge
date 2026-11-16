@@ -1,6 +1,7 @@
 #include "core/layout/layout.hpp"
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <gtest/gtest.h>
 using namespace wf;
 TEST(Layout, RightToLeftImageCaretUsesLogicalEdges) {
@@ -347,4 +348,64 @@ TEST(Layout, VerticallyMergedRowsStayOnOnePage) {
             EXPECT_EQ(cell.page, 1u); // moved to the next page as a whole
             EXPECT_NEAR(cell.height, 48, 1e-6);
         }
+}
+
+TEST(Layout, FootnotesSitAtTheBottomOfTheirPageNumberedInOrder) {
+    Editor e;
+    // Enough text for several pages, with a footnote every few paragraphs.
+    std::vector<std::uint64_t> notes;
+    for (int i = 0; i < 120; ++i) {
+        e.replace(u"Paragraph text that fills a line or so of the page.");
+        if (i % 7 == 3)
+            notes.push_back(e.insertFootnote(u"A footnote explaining paragraph " +
+                                             std::u16string(1, char16_t(u'A' + i % 26)) +
+                                             u" in some detail so that it wraps onto a second "
+                                             u"line at ten points on an A4 page."));
+        e.insertParagraphBreak();
+    }
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    const auto layout = engine.compose(e.document);
+    ASSERT_GT(layout.pageCount, 2u);
+    const auto &page = e.document.page;
+    const double bottom = page.height - page.margin;
+    // Each page with notes has one rule; note lines sit between it and the bottom margin,
+    // below every body line of that page.
+    std::map<std::size_t, double> rule;
+    for (auto [p, y] : layout.noteSeparators)
+        EXPECT_TRUE(rule.emplace(p, y).second);
+    EXPECT_FALSE(rule.empty());
+    std::map<std::size_t, double> lowestBody;
+    for (const auto &line : layout.lines)
+        lowestBody[line.page] =
+            std::max(lowestBody[line.page], line.baseline - line.shaped.ascent + line.height);
+    std::size_t noteLines = 0;
+    for (const auto &line : layout.furniture) {
+        ASSERT_TRUE(rule.contains(line.page));
+        const double top = line.baseline - line.shaped.ascent;
+        EXPECT_GT(top, rule[line.page]);
+        EXPECT_LE(top + line.height, bottom + 0.5);
+        EXPECT_GE(top, lowestBody[line.page] - 0.5);
+        ++noteLines;
+    }
+    EXPECT_GE(noteLines, notes.size());
+    // A reference is drawn as a raised superscript number on the same page as its note.
+    std::size_t index = 0;
+    for (const auto &line : layout.lines) {
+        const auto &paragraph = e.document.paragraphs[line.paragraph];
+        std::size_t offset = 0;
+        for (const auto &run : paragraph.runs) {
+            if (run.note() && offset >= line.start && offset < line.end) {
+                ++index;
+                EXPECT_TRUE(rule.contains(line.page));
+                bool raised = false;
+                for (const auto &glyphs : line.shaped.runs)
+                    if (glyphs.start == offset && !glyphs.glyphs.empty())
+                        raised = glyphs.glyphs[0].y < 0 && glyphs.style.size < 12;
+                EXPECT_TRUE(raised);
+            }
+            offset += run.text().size();
+        }
+    }
+    EXPECT_EQ(index, notes.size());
 }

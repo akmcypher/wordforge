@@ -32,7 +32,8 @@ void validatePreserved(const PreservedPackage &package) {
     auto reserved = [](const std::string &path) {
         return path == "_rels/.rels" || path == "word/_rels/document.xml.rels" ||
                path == "word/document.xml" || path == "word/styles.xml" ||
-               path == "word/numbering.xml" || path.starts_with("word/media/") ||
+               path == "word/numbering.xml" || path == "word/footnotes.xml" ||
+               path.starts_with("word/media/") ||
                path == "word/header.xml" || path == "word/footer.xml" ||
                path == "word/headerFirst.xml" || path == "word/footerFirst.xml";
     };
@@ -88,6 +89,14 @@ void validateDocument(const Document &document) {
             throw std::invalid_argument("Image resources exceed the 64 MiB preview limit");
         imageBytes += resource->png.size();
     }
+    if (document.footnotes.size() > 10000)
+        throw std::invalid_argument("Too many footnotes");
+    for (const auto &note : document.footnotes) {
+        if (!note.id || note.id >= document.nextId || !ids.insert(note.id).second)
+            throw std::invalid_argument("Invalid footnote identifier");
+        validateFootnoteText(note.text);
+    }
+    std::unordered_set<std::uint64_t> noteReferences;
     for (const auto &paragraph : document.paragraphs) {
         if (!paragraph.id || paragraph.id >= document.nextId || !ids.insert(paragraph.id).second)
             throw std::invalid_argument("Invalid or duplicate document node identifier");
@@ -114,6 +123,9 @@ void validateDocument(const Document &document) {
                 if (!document.images.contains(image->resourceId))
                     throw std::invalid_argument("Missing image resource");
             }
+            if (const auto *note = run.note())
+                if (!document.footnote(note->id) || !noteReferences.insert(note->id).second)
+                    throw std::invalid_argument("Footnote reference without a unique footnote");
             utf8(run.text());
             for (auto ch : run.text())
                 if (ch < 32 && ch != u'\t')
@@ -121,6 +133,8 @@ void validateDocument(const Document &document) {
             validateCharacterStyle(run.style);
         }
     }
+    if (noteReferences.size() != document.footnotes.size())
+        throw std::invalid_argument("A footnote has no reference in the text");
     std::unordered_set<std::string> names;
     if (!document.bookmarks.empty())
         (void)document.bookmarkPositions();
@@ -188,7 +202,7 @@ BreakIterator graphemes(const std::u16string &text) {
 void append(std::vector<Run> &runs, Run run) {
     if (run.text().empty())
         return;
-    if (!run.image() && !runs.empty() && !runs.back().image() && runs.back().style == run.style &&
+    if (!run.atom() && !runs.empty() && !runs.back().atom() && runs.back().style == run.style &&
         runs.back().direct == run.direct && runs.back().characterStyle == run.characterStyle)
         runs.back().appendText(run.text());
     else
@@ -344,6 +358,7 @@ ChangeSet Editor::transact(const std::function<void(Editor &)> &command) {
     changes.bookmarksChanged = document.bookmarks != candidate.document.bookmarks;
     changes.resourcesChanged = document.images != candidate.document.images;
     changes.tablesChanged = document.tables != candidate.document.tables;
+    changes.notesChanged = document.footnotes != candidate.document.footnotes;
     for (const auto &table : candidate.document.tables)
         if (table.id < idHighWater_ && std::none_of(
                                            document.tables.begin(), document.tables.end(),
@@ -385,7 +400,8 @@ ChangeSet Editor::transact(const std::function<void(Editor &)> &command) {
     changes.orderChanged = previousOrder != nextOrder;
     const bool contentChanged = changes.pageChanged || changes.orderChanged ||
                                 changes.bookmarksChanged || changes.resourcesChanged ||
-                                changes.tablesChanged || !changes.inserted.empty() ||
+                                changes.tablesChanged || changes.notesChanged ||
+                                !changes.inserted.empty() ||
                                 !changes.removed.empty() || !changes.changed.empty();
     if (contentChanged) {
         candidate.document.revision = ++candidate.serial_;
@@ -444,14 +460,14 @@ void Editor::replaceRange(const std::u16string &input, Selection range, const Ru
         return;
     const auto bookmarkPositions = document.bookmarkPositions();
     bool removedImage = false;
-    if (start != end && !document.images.empty())
+    if (start != end && (!document.images.empty() || !document.footnotes.empty()))
         for (auto index = start.paragraph; index <= end.paragraph; ++index) {
             std::size_t offset = 0;
             const auto first = index == start.paragraph ? start.offset : 0;
             const auto last =
                 index == end.paragraph ? end.offset : document.paragraphs[index].text().size();
             for (const auto &run : document.paragraphs[index].runs) {
-                if (run.image() && first < offset + 1 && last > offset)
+                if (run.atom() && first < offset + 1 && last > offset)
                     removedImage = true;
                 offset += run.text().size();
             }
@@ -964,7 +980,7 @@ std::vector<Paragraph> Editor::copySelection() const {
         p.runs.clear();
         for (auto &run : slice(source, i == start.paragraph ? start.offset : 0,
                                i == end.paragraph ? end.offset : source.text().size()))
-            if (!run.image())
+            if (!run.atom())
                 p.runs.push_back(std::move(run));
         if (p.runs.empty())
             p.runs.push_back({u"", source.runs.empty() ? CharacterStyle{} : source.runs[0].style});
@@ -996,7 +1012,7 @@ void Editor::insertFragment(const std::vector<Paragraph> &fragment) {
                     format.pageBreakBefore = false;
                 });
             for (const auto &run : fragment[i].runs) {
-                if (run.image() || run.text().empty())
+                if (run.atom() || run.text().empty())
                     continue;
                 e.typingStyle = run.style;
                 const auto characterStyle = e.document.styles.findCharacter(run.characterStyle)

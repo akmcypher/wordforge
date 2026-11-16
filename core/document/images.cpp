@@ -15,6 +15,32 @@ const std::u16string &Run::text() const {
 const InlineImage *Run::image() const {
     return std::get_if<InlineImage>(&content_);
 }
+const NoteReference *Run::note() const {
+    return std::get_if<NoteReference>(&content_);
+}
+bool Run::atom() const {
+    return !std::holds_alternative<TextContent>(content_);
+}
+Run Run::fromNote(NoteReference note, CharacterStyle style) {
+    if (!note.id)
+        throw std::invalid_argument("Invalid footnote reference");
+    Run run({}, std::move(style));
+    run.content_ = note;
+    return run;
+}
+void validateFootnoteText(const std::u16string &text) {
+    if (text.size() > 2000)
+        throw std::invalid_argument("Footnote text is limited to 2000 characters");
+    for (auto ch : text)
+        if (ch < 32 || ch == 0x7f || ch == 0xfffc)
+            throw std::invalid_argument("Footnote text contains a control character");
+}
+const Footnote *Document::footnote(std::uint64_t id) const {
+    for (const auto &note : footnotes)
+        if (note.id == id)
+            return &note;
+    return nullptr;
+}
 void validateInlineImage(const InlineImage &image) {
     if (!image.resourceId || !std::isfinite(image.width) || !std::isfinite(image.height) ||
         image.width < 1 || image.height < 1 || image.width > 2880 || image.height > 2880 ||
@@ -52,7 +78,7 @@ Run Run::fromImage(InlineImage image, CharacterStyle style) {
 Run Run::slice(std::size_t start, std::size_t end) const {
     if (start > end || end > text().size())
         throw std::out_of_range("Invalid inline slice");
-    if (image()) {
+    if (atom()) {
         if (start != 0 || end != 1)
             throw std::invalid_argument("Cannot split an image atom");
         return *this;
@@ -85,20 +111,23 @@ void validateImageResource(const ImageResource &resource) {
         throw std::invalid_argument("PNG dimensions do not match resource metadata");
 }
 void Document::pruneUnusedImages() {
-    if (images.empty())
+    if (images.empty() && footnotes.empty())
         return;
     std::unordered_set<std::uint64_t> used;
     for (const auto &paragraph : paragraphs)
         for (const auto &run : paragraph.runs)
             if (run.image())
                 used.insert(run.image()->resourceId);
+            else if (run.note())
+                used.insert(run.note()->id);
     std::erase_if(images, [&](const auto &entry) { return !used.contains(entry.first); });
+    std::erase_if(footnotes, [&](const Footnote &note) { return !used.contains(note.id); });
 }
 std::vector<std::size_t> Paragraph::boundaries() const {
     auto result = graphemeBoundaries(text());
     std::size_t offset = 0;
     for (const auto &run : runs) {
-        if (run.image()) {
+        if (run.atom()) {
             result.push_back(offset);
             result.push_back(offset + 1);
         }
@@ -168,6 +197,71 @@ void Editor::resizeImage(double width, double height) {
         run.direct = direct;
         run.characterStyle = std::move(characterStyle);
         paragraph.revision = editor.document.revision = ++editor.serial_;
+    };
+    if (inTransaction_)
+        command(*this);
+    else
+        transact(command);
+}
+namespace {
+// The footnote reference at, just before, or selected at the caret.
+std::optional<std::uint64_t> noteAt(const Editor &editor) {
+    const auto start = std::min(editor.selection.anchor, editor.selection.focus);
+    const auto end = std::max(editor.selection.anchor, editor.selection.focus);
+    if (start.paragraph != end.paragraph || start.paragraph >= editor.document.paragraphs.size() ||
+        (start != end && end.offset - start.offset != 1))
+        return {};
+    std::size_t offset = 0;
+    std::optional<std::uint64_t> before;
+    for (const auto &run : editor.document.paragraphs[start.paragraph].runs) {
+        if (run.note()) {
+            if (start != end && start.offset == offset)
+                return run.note()->id;
+            if (start == end && start.offset == offset + 1)
+                return run.note()->id; // just after it: the usual place after typing it
+            if (start == end && start.offset == offset)
+                before = run.note()->id;
+        }
+        offset += run.text().size();
+    }
+    return before;
+}
+} // namespace
+std::uint64_t Editor::insertFootnote(const std::u16string &text) {
+    validateFootnoteText(text);
+    std::uint64_t id = 0;
+    auto command = [&](Editor &editor) {
+        if (editor.document.footnotes.size() >= 10000)
+            throw std::invalid_argument("Too many footnotes");
+        editor.document.nextId = std::max(editor.document.nextId, editor.idHighWater_);
+        id = editor.document.allocateId();
+        auto style = editor.typingStyle;
+        auto run = Run::fromNote({id}, style);
+        editor.document.footnotes.push_back({id, text});
+        const auto start = std::min(editor.selection.anchor, editor.selection.focus);
+        editor.replaceRange(u"\ufffc", editor.selection, &run);
+        const Position after{start.paragraph, start.offset + 1};
+        editor.selection = {after, after};
+    };
+    if (inTransaction_)
+        command(*this);
+    else
+        transact(command);
+    return id;
+}
+std::optional<std::uint64_t> Editor::selectedFootnote() const {
+    return noteAt(*this);
+}
+void Editor::setFootnoteText(std::uint64_t id, const std::u16string &text) {
+    validateFootnoteText(text);
+    auto command = [&](Editor &editor) {
+        for (auto &note : editor.document.footnotes)
+            if (note.id == id) {
+                note.text = text;
+                editor.document.revision = ++editor.serial_;
+                return;
+            }
+        throw std::invalid_argument("Unknown footnote");
     };
     if (inTransaction_)
         command(*this);

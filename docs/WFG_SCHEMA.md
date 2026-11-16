@@ -1,7 +1,11 @@
 # Native WFG schema and migration
 
-**WFG9 (kept DOCX parts)** is written only when a document imported from DOCX carries
-package parts Wordforge keeps (document properties, theme, settings, font table, web
+**WFG9 (footnotes, kept DOCX parts)** is written only when a document has footnotes or
+carries kept DOCX package parts. Footnotes are root elements `footnote` (`id`, `text`: one
+paragraph of plain text, at most 2000 characters, no control characters) and inline
+elements `note` (`id` naming a footnote, plus the run attributes) inside paragraphs; every
+footnote must be referenced exactly once. Kept parts come from a document imported from
+DOCX that carries package parts Wordforge keeps (document properties, theme, settings, font table, web
 settings, custom XML). It is WFG8 in ZIP transport plus root elements `preservedPart`
 (`path` in the DOCX package, `contentType` — absent for `.rels` parts — and `part`, the
 ZIP entry `preserved/N` holding the bytes) and `preservedRelationship` (`type`, `target`

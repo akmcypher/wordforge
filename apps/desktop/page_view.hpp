@@ -64,6 +64,11 @@ class PageView : public QAbstractScrollArea {
     bool goToBookmark(std::uint64_t);
     bool insertPicture(const QString &);
     bool resizePicture(double width, double height);
+    std::optional<std::uint64_t> selectedFootnote() const {
+        return editor_.selectedFootnote();
+    }
+    bool insertFootnote(const std::u16string &text);
+    bool setFootnoteText(std::uint64_t id, const std::u16string &text);
     std::optional<InlineImage> selectedImage() const {
         return editor_.selectedImage();
     }

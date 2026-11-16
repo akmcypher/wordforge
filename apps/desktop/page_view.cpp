@@ -267,6 +267,12 @@ bool PageView::tableColumn(bool insert, bool before) {
 bool PageView::removeTable() {
     return change([](Editor &candidate) { candidate.removeTable(); });
 }
+bool PageView::insertFootnote(const std::u16string &text) {
+    return change([&](Editor &candidate) { candidate.insertFootnote(text); });
+}
+bool PageView::setFootnoteText(std::uint64_t id, const std::u16string &text) {
+    return change([&](Editor &candidate) { candidate.setFootnoteText(id, text); });
+}
 bool PageView::mergeCells() {
     return change([](Editor &candidate) { candidate.mergeCells(); });
 }

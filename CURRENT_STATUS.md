@@ -1,5 +1,17 @@
 # Current status
 
+2026-11-16 — Footnotes (P1 professional features, first slice). Insert → Footnote… (Ctrl+Alt+F)
+puts a superscript reference at the caret; Insert → Edit footnote… changes the text of the
+reference next to the caret. Footnotes are numbered in reference order and laid out at the
+bottom of the page holding the reference, below a short rule, with pagination keeping room
+for them (also for references in table cells); deleting a reference deletes its note, and
+undo restores both. Footnote text is one paragraph of plain text (up to 2000 characters).
+Saved in WFG9; DOCX exports footnotes.xml (with Word's separator notes) and
+footnoteReference, and imports Word footnotes as plain text (multi-paragraph or formatted
+notes are simplified with a warning). Not yet: endnotes, formatting inside notes, editing
+notes on the page, notes split across pages. Windows ARM64: all 6 suites pass; Ubuntu by
+CI. Not opened in Microsoft Word yet.
+
 2026-11-16 — DOCX package-part preservation (P0, first slice). Opening a Word file now
 keeps, byte for byte, the package parts Wordforge does not edit: document properties
 (title, author, company), theme, settings (compatibility options, tab stop, zoom), font

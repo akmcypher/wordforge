@@ -11,6 +11,7 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <tuple>
 #include <string_view>
 namespace wf {
 namespace {
@@ -495,7 +496,7 @@ std::shared_ptr<const PreservedPackage> preservePackage(const opc::Parts &parts,
         static const std::set<std::string> handled{
             "styles",     "numbering", "image",       "header",      "footer",
             "theme",      "settings",  "fontTable",   "webSettings", "customXml",
-            "hyperlink",  "stylesWithEffects", "commentsExtended", "commentsIds",
+            "hyperlink",  "stylesWithEffects", "footnotes", "commentsExtended", "commentsIds",
             "commentsExtensible", "people"};
         if (relation.target.empty() || handled.contains(kind))
             continue;
@@ -643,6 +644,50 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
     if (!is(content.document_element(), "document"))
         throw std::runtime_error("Unsupported DOCX document namespace");
     auto body = child(content.document_element(), "body");
+    // Footnote texts by id, as plain text (paragraphs joined by spaces).
+    std::map<std::string, std::u16string> footnoteTexts;
+    bool simplifiedNotes = false;
+    if (const auto notesPath = relationship(parts, main, "footnotes");
+        !notesPath.empty() && parts.contains(notesPath)) {
+        auto notes = xml(parts.at(notesPath));
+        for (auto note : notes.document_element().children()) {
+            if (note.type() != pugi::node_element || !attr(note, "type").empty())
+                continue;
+            std::u16string text;
+            int paragraphs = 0;
+            std::function<void(pugi::xml_node)> collect = [&](pugi::xml_node node) {
+                for (auto item : node.children()) {
+                    if (item.type() != pugi::node_element)
+                        continue;
+                    if (is(item, "p")) {
+                        if (paragraphs++ && !text.empty())
+                            text += u' ';
+                        collect(item);
+                    } else if (is(item, "t"))
+                        text += utf16(item.text().get());
+                    else if (is(item, "tab"))
+                        text += u' ';
+                    else if (is(item, "drawing") || is(item, "tbl") || is(item, "pict"))
+                        simplifiedNotes = true;
+                    else if (!is(item, "pPr") && !is(item, "rPr") && !is(item, "footnoteRef"))
+                        collect(item);
+                }
+            };
+            collect(note);
+            if (paragraphs > 1)
+                simplifiedNotes = true;
+            for (auto &ch : text)
+                if (ch < 32 || ch == 0x7f || ch == 0xfffc)
+                    ch = u' ';
+            const auto first = text.find_first_not_of(u' ');
+            text = first == std::u16string::npos ? std::u16string() : text.substr(first);
+            if (text.size() > 2000) {
+                text.resize(2000);
+                simplifiedNotes = true;
+            }
+            footnoteTexts[attr(note, "id")] = text;
+        }
+    }
     if (!body)
         throw std::runtime_error("DOCX document has no body");
     DocxImport result;
@@ -982,13 +1027,33 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                     auto style = base;
                     std::set<std::string> runSeen;
                     applyStyle(val(child(child(run, "rPr"), "rStyle")), paragraph, style, runSeen);
-                    runProperties(child(run, "rPr"), style, warnings);
+                    // A footnote reference's own formatting (superscript, its character
+                    // style) is Wordforge's to draw, so it is not reported or imported.
+                    const bool noteRun = child(run, "footnoteReference");
+                    std::vector<std::string> ignored;
+                    runProperties(child(run, "rPr"), style, noteRun ? ignored : warnings);
                     std::u16string text;
                     const auto characterStyle =
-                        importCharacterStyle(val(child(child(run, "rPr"), "rStyle")), 0);
+                        noteRun ? std::string()
+                                : importCharacterStyle(val(child(child(run, "rPr"), "rStyle")), 0);
                     bool pictures = false;
                     for (auto item : run.children()) {
-                        if (is(item, "drawing")) {
+                        if (is(item, "footnoteReference")) {
+                            pictures = true;
+                            const auto found = footnoteTexts.find(attr(item, "id"));
+                            if (found == footnoteTexts.end()) {
+                                warn(warnings, "A footnote whose text is missing was omitted.");
+                                continue;
+                            }
+                            if (!text.empty()) {
+                                paragraph.runs.push_back({std::move(text), style});
+                                paragraph.runs.back().characterStyle = characterStyle;
+                                text.clear();
+                            }
+                            const auto id = document.allocateId();
+                            document.footnotes.push_back({id, found->second});
+                            paragraph.runs.push_back(Run::fromNote({id}, style));
+                        } else if (is(item, "drawing")) {
                             pictures = true; // even when omitted: no empty run is left behind
                             if (auto picture = readPicture(item, style)) {
                                 if (!text.empty()) {
@@ -1027,7 +1092,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         Paragraph split = paragraph;
         split.runs.clear();
         for (const auto &run : paragraph.runs) {
-            if (run.image()) {
+            if (run.atom()) {
                 split.runs.push_back(run);
                 continue;
             }
@@ -1422,6 +1487,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             document.styles.find(id)->next = target;
     }
     adoptStyles(document); // DOCX values arrive resolved; mark those differing from styles direct
+    if (simplifiedNotes)
+        warn(warnings, "Footnotes are kept as one paragraph of plain text each.");
     document.preserved = preservePackage(parts, main, warnings);
     validateDocument(document);
     return result;
@@ -1461,6 +1528,7 @@ std::string serializeDocx(const Document &document) {
     std::map<std::uint64_t, const Table *> tables;
     for (const auto &table : document.tables)
         tables.emplace(table.id, &table);
+    std::vector<std::uint64_t> footnoteOrder; // footnote ids in reference order
     std::optional<TableCell> previousCell;
     pugi::xml_node tableNode, rowNode, cellNode;
     std::vector<double> edges;
@@ -1642,6 +1710,13 @@ std::string serializeDocx(const Document &document) {
                 auto geometry = shape.append_child("a:prstGeom");
                 geometry.append_attribute("prst") = "rect";
                 geometry.append_child("a:avLst");
+                continue;
+            }
+            if (const auto *note = run.note()) {
+                property(rpr, "vertAlign", std::string("superscript"));
+                footnoteOrder.push_back(note->id);
+                set(element(r, "footnoteReference"), "id",
+                    static_cast<double>(footnoteOrder.size()));
                 continue;
             }
             std::size_t begin = 0;
@@ -1829,6 +1904,53 @@ std::string serializeDocx(const Document &document) {
             relation.append_attribute("Target") = (name + ".xml").c_str();
             parts.emplace("word/" + name + ".xml", std::move(xmlText));
         }
+        parts["[Content_Types].xml"] = saved(types);
+        parts["word/_rels/document.xml.rels"] = saved(relationships);
+    }
+    if (!footnoteOrder.empty()) {
+        pugi::xml_document notes;
+        auto root = notes.append_child("w:footnotes");
+        root.append_attribute("xmlns:w") = wordNs;
+        // The separator notes Word expects, then one note per reference.
+        for (auto [id, type, mark] : {std::tuple{-1, "separator", "separator"},
+                                      std::tuple{0, "continuationSeparator",
+                                                 "continuationSeparator"}}) {
+            auto note = element(root, "footnote");
+            set(note, "type", std::string(type));
+            set(note, "id", static_cast<double>(id));
+            auto p = element(note, "p");
+            set(element(element(p, "pPr"), "spacing"), "after", 0.0);
+            element(element(p, "r"), mark);
+        }
+        for (std::size_t index = 0; index < footnoteOrder.size(); ++index) {
+            auto note = element(root, "footnote");
+            set(note, "id", static_cast<double>(index + 1));
+            auto p = element(note, "p");
+            set(element(element(p, "pPr"), "spacing"), "after", 0.0);
+            auto mark = element(p, "r");
+            auto markProperties = element(mark, "rPr");
+            property(markProperties, "sz", 20.0);
+            property(markProperties, "vertAlign", std::string("superscript"));
+            element(mark, "footnoteRef");
+            auto text = element(p, "r");
+            property(element(text, "rPr"), "sz", 20.0);
+            auto t = element(text, "t");
+            t.append_attribute("xml:space") = "preserve";
+            t.text().set(utf8(u" " + document.footnote(footnoteOrder[index])->text).c_str());
+        }
+        pugi::xml_document types, relationships;
+        types.load_string(parts.at("[Content_Types].xml").c_str());
+        relationships.load_string(parts.at("word/_rels/document.xml.rels").c_str());
+        auto entry = types.document_element().append_child("Override");
+        entry.append_attribute("PartName") = "/word/footnotes.xml";
+        entry.append_attribute("ContentType") =
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml";
+        auto relation = relationships.document_element().append_child("Relationship");
+        relation.append_attribute("Id") = "footnotes";
+        relation.append_attribute("Type") =
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes";
+        relation.append_attribute("Target") = "footnotes.xml";
+        parts.emplace("word/footnotes.xml", saved(notes));
         parts["[Content_Types].xml"] = saved(types);
         parts["word/_rels/document.xml.rels"] = saved(relationships);
     }

@@ -195,8 +195,9 @@ std::string serializeNative(const Document &document) {
             if (const auto *image = run.image())
                 imageIds.insert(image->resourceId);
     const bool tables = !document.tables.empty();
-    // WFG9 only when DOCX package parts are kept; they need the ZIP transport.
+    // WFG9 only for footnotes or kept DOCX package parts (which need the ZIP transport).
     const bool preserving = document.preserved != nullptr;
+    const bool noted = !document.footnotes.empty();
     const bool packaged = tables || !imageIds.empty() || preserving;
     // WFG6 only when styles were customized; built-in styles keep files readable by 0.6.0.
     const bool styled = document.styles != builtinStyles();
@@ -210,8 +211,8 @@ std::string serializeNative(const Document &document) {
         std::any_of(document.tables.begin(), document.tables.end(),
                     [](const Table &t) { return !t.widths.empty() || !t.merges.empty(); });
     // WFG6 and later store paragraph style names and direct-formatting masks.
-    const bool semantic = styled || banded || preserving;
-    root.append_attribute("version") = preserving                   ? "9"
+    const bool semantic = styled || banded || preserving || noted;
+    root.append_attribute("version") = preserving || noted          ? "9"
                                        : banded                     ? "8"
                                        : characterStyled            ? "7"
                                        : styled                     ? "6"
@@ -256,6 +257,11 @@ std::string serializeNative(const Document &document) {
         if (!style.basedOn.empty())
             node.append_attribute("basedOn") = style.basedOn.c_str();
         writeCharacterProperties(node, style.character);
+    }
+    for (const auto &note : document.footnotes) {
+        auto node = root.append_child("footnote");
+        node.append_attribute("id") = static_cast<unsigned long long>(note.id);
+        node.append_attribute("text") = utf8(note.text).c_str();
     }
     if (preserving) {
         std::size_t number = 0;
@@ -320,7 +326,9 @@ std::string serializeNative(const Document &document) {
             paragraph.append_attribute("break") = true;
         for (const auto &r : p.runs) {
             const auto *image = r.image();
-            auto run = paragraph.append_child(image ? "image" : "r");
+            auto run = paragraph.append_child(image ? "image" : r.note() ? "note" : "r");
+            if (r.note())
+                run.append_attribute("id") = static_cast<unsigned long long>(r.note()->id);
             if (image) {
                 run.append_attribute("resource") =
                     static_cast<unsigned long long>(image->resourceId);
@@ -343,7 +351,7 @@ std::string serializeNative(const Document &document) {
                 run.append_attribute("direct") = r.direct;
             if (!r.characterStyle.empty())
                 run.append_attribute("cstyle") = r.characterStyle.c_str();
-            if (!image)
+            if (!image && !r.note())
                 run.append_child(pugi::node_pcdata).set_value(utf8(r.text()).c_str());
         }
     }
@@ -426,6 +434,19 @@ Document parseNative(const std::string &input) {
     for (auto p : root.children()) {
         if (indentation(p))
             continue;
+        if (v9 && std::string_view(p.name()) == "footnote") {
+            attributes(p, {"id", "text"});
+            if (p.first_child())
+                throw std::runtime_error("Unexpected footnote content");
+            const auto text = utf16(p.attribute("text").value());
+            try {
+                validateFootnoteText(text);
+            } catch (const std::invalid_argument &error) {
+                throw std::runtime_error(error.what());
+            }
+            document.footnotes.push_back({identifier(p, "id"), text});
+            continue;
+        }
         if (v9 && std::string_view(p.name()) == "preservedPart") {
             attributes(p, {"path", "contentType", "part"});
             if (p.first_child() || !packaged)
@@ -583,9 +604,13 @@ Document parseNative(const std::string &input) {
                 continue;
             const bool image = (version == "4" || version == "5" || v6) &&
                                std::string_view(r.name()) == "image";
-            if (std::string_view(r.name()) != "r" && !image)
+            const bool note = v9 && std::string_view(r.name()) == "note";
+            if (std::string_view(r.name()) != "r" && !image && !note)
                 throw std::runtime_error("Unknown inline content; refusing lossy import");
-            if (image)
+            if (note)
+                attributes(r, {"id", "family", "size", "bold", "italic", "underline", "color",
+                               "strike", "highlight", "direct", "cstyle"});
+            else if (image)
                 attributes(r, {"resource", "width", "height", "description", "family", "size",
                                "bold", "italic", "underline", "color", "strike", "highlight",
                                v6 ? "direct" : "resource", v7 ? "cstyle" : "resource"});
@@ -593,11 +618,11 @@ Document parseNative(const std::string &input) {
                 attributes(r, {"family", "size", "bold", "italic", "underline", "color", "strike",
                                "highlight", v6 ? "direct" : "family", v7 ? "cstyle" : "family"});
             for (auto child : r.children())
-                if (image ? !indentation(child)
+                if (image || note ? !indentation(child)
                           : child.type() != pugi::node_pcdata && child.type() != pugi::node_cdata)
                     throw std::runtime_error("Unexpected nested inline content");
             Run run;
-            if (!image)
+            if (!image && !note)
                 for (auto child : r.children())
                     run.appendText(utf16(child.value()));
             for (auto ch : run.text())
@@ -615,6 +640,8 @@ Document parseNative(const std::string &input) {
                 static_cast<std::uint32_t>(number(r, "highlight", 0, 0, 4294967295.0));
             run.style.color =
                 static_cast<std::uint32_t>(number(r, "color", 0xff202631, 0, 4294967295.0));
+            if (note)
+                run = Run::fromNote({identifier(r, "id")}, run.style);
             if (image)
                 run = Run::fromImage({identifier(r, "resource"), number(r, "width", 0, 0, 2880),
                                       number(r, "height", 0, 0, 2880),

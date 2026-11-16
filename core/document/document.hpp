@@ -48,6 +48,11 @@ struct TextContent {
     bool operator==(const TextContent &) const = default;
 };
 void validateInlineImage(const InlineImage &);
+// The superscript mark in the text that a footnote belongs to.
+struct NoteReference {
+    std::uint64_t id = 0; // a Footnote::id
+    bool operator==(const NoteReference &) const = default;
+};
 class Run {
   public:
     Run(std::u16string text = {}, CharacterStyle style = {});
@@ -56,13 +61,17 @@ class Run {
     std::string characterStyle; // named character style; empty for none
     const std::u16string &text() const;
     const InlineImage *image() const;
+    const NoteReference *note() const;
+    // An indivisible object (picture or footnote reference) occupying one U+FFFC.
+    bool atom() const;
     static Run fromImage(InlineImage, CharacterStyle = {});
+    static Run fromNote(NoteReference, CharacterStyle = {});
     Run slice(std::size_t start, std::size_t end) const;
     void appendText(const std::u16string &);
     bool operator==(const Run &) const = default;
 
   private:
-    std::variant<TextContent, InlineImage> content_;
+    std::variant<TextContent, InlineImage, NoteReference> content_;
 };
 void validateImageResource(const ImageResource &);
 using ImageResources = std::map<std::uint64_t, std::shared_ptr<const ImageResource>>;
@@ -160,6 +169,14 @@ struct PreservedPackage {
     std::vector<PreservedRelationship> relationships;
     bool operator==(const PreservedPackage &) const = default;
 };
+// Footnote text (one paragraph of plain text), shown at the bottom of the page that holds
+// its reference. Footnotes are numbered in the order of their references.
+struct Footnote {
+    std::uint64_t id = 0;
+    std::u16string text;
+    bool operator==(const Footnote &) const = default;
+};
+void validateFootnoteText(const std::u16string &);
 constexpr std::size_t maxPreservedBytes = 16 * 1024 * 1024, maxPreservedParts = 256;
 void validatePreserved(const PreservedPackage &);
 struct Document {
@@ -168,6 +185,7 @@ struct Document {
     std::vector<Bookmark> bookmarks;
     ImageResources images;
     std::vector<Table> tables;
+    std::vector<Footnote> footnotes; // each referenced exactly once in the text
     StyleSheet styles = builtinStyles();
     PageStyle page;
     std::uint64_t revision = 0, nextId = 2;
@@ -179,7 +197,8 @@ struct Document {
     const CharacterStyle &styleAt(Position) const;
     // The run that typing at `position` continues (the one before it at a boundary).
     const Run &runAt(Position) const;
-    void pruneUnusedImages();
+    void pruneUnusedImages(); // and footnotes whose reference was deleted
+    const Footnote *footnote(std::uint64_t id) const;
 };
 void validateDocument(const Document &);
 // Effective formatting of a paragraph style after following its based-on chain.
@@ -224,6 +243,7 @@ struct ChangeSet {
     bool bookmarksChanged = false;
     bool resourcesChanged = false;
     bool tablesChanged = false;
+    bool notesChanged = false; // footnote texts, additions or removals
 };
 
 class Editor {
@@ -276,6 +296,11 @@ class Editor {
     std::uint64_t insertImage(std::shared_ptr<const ImageResource>, double width, double height,
                               const std::string &description = {});
     std::optional<InlineImage> selectedImage() const;
+    // Inserts a footnote reference at the caret (replacing the selection) with `text`.
+    std::uint64_t insertFootnote(const std::u16string &text);
+    // The footnote whose reference is next to the caret or selected, if any.
+    std::optional<std::uint64_t> selectedFootnote() const;
+    void setFootnoteText(std::uint64_t id, const std::u16string &text);
     void resizeImage(double width, double height);
     std::optional<TableCell> selectedCell() const;
     void insertTable(std::size_t rows, std::size_t columns);

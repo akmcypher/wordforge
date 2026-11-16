@@ -140,7 +140,8 @@ std::vector<std::string> Shaper::families() const {
     names.erase(std::unique(names.begin(), names.end()), names.end());
     return names;
 }
-ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::size_t end) {
+ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::size_t end,
+                         std::size_t firstNote) {
     const auto text = paragraph.text();
     if (start > end || end > text.size())
         throw std::out_of_range("Shaping range outside paragraph");
@@ -167,20 +168,25 @@ ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::siz
         UScriptCode script;
         bool tab;
         const InlineImage *image;
+        const NoteReference *note = nullptr;
+        std::size_t number = 0;
     };
     for (int32_t visual = 0; visual < count; ++visual) {
         int32_t logical = 0, length = 0;
         const bool rtl = ubidi_getVisualRun(lineBidi.get(), visual, &logical, &length) == UBIDI_RTL;
         const auto a = start + logical, b = a + length;
         std::vector<Span> spans;
-        std::size_t runStart = 0;
+        std::size_t runStart = 0, notesBefore = 0;
         UScriptCode previousScript = USCRIPT_LATIN;
         for (const auto &run : paragraph.runs) {
             const auto begin = std::max(a, runStart),
                        finish = std::min(b, runStart + run.text().size());
-            if (run.image() && begin < finish) {
-                spans.push_back(
-                    {begin, finish, run.style, nullptr, previousScript, false, run.image()});
+            if (run.atom()) {
+                if (begin < finish)
+                    spans.push_back({begin, finish, run.style, nullptr, previousScript, false,
+                                     run.image(), run.note(), firstNote + notesBefore});
+                if (run.note())
+                    ++notesBefore;
                 runStart += 1;
                 continue;
             }
@@ -210,6 +216,33 @@ ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::siz
         if (rtl)
             std::reverse(spans.begin(), spans.end());
         for (const auto &span : spans) {
+            if (span.note) {
+                // A superscript number, shaped as its own small label.
+                auto style = span.style;
+                style.size = std::max(1.0, span.style.size * 0.62);
+                style.underline = style.strike = false;
+                Paragraph label;
+                const auto digits = utf16(std::to_string(span.number));
+                label.runs = {{digits, style}};
+                const auto mark = shape(label, 0, digits.size());
+                const double raise = span.style.size * 0.38;
+                for (auto run : mark.runs) {
+                    run.start = span.begin;
+                    run.end = span.end;
+                    run.rtl = rtl;
+                    run.x = result.width;
+                    for (auto &glyph : run.glyphs) {
+                        glyph.cluster = span.begin;
+                        glyph.y -= raise;
+                    }
+                    run.ascent = mark.ascent + raise;
+                    result.width += run.width;
+                    result.runs.push_back(std::move(run));
+                }
+                result.ascent = std::max(result.ascent, mark.ascent + raise);
+                result.descent = std::max(result.descent, mark.descent);
+                continue;
+            }
             if (span.image) {
                 GlyphRun shaped;
                 shaped.image = *span.image;

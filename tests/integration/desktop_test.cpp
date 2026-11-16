@@ -772,6 +772,46 @@ class DesktopTest : public QObject {
         QVERIFY(window.findChild<QAction *>("printAction"));
         QCOMPARE(window.findChild<QAction *>("printAction")->shortcut(), QKeySequence(QKeySequence::Print));
     }
+    void footnoteDialogsInsertEditAndUndo() {
+        wf::MainWindow window;
+        window.show();
+        auto *view = window.pageView();
+        view->setDocument({});
+        view->insertText("Claim");
+        auto answer = [&](const QString &value) {
+            QTimer::singleShot(0, &window, [value] {
+                auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                if (!dialog)
+                    return;
+                if (auto *text = dialog->findChild<QLineEdit *>("footnoteText")) {
+                    text->setText(value);
+                    dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+                } else
+                    dialog->reject();
+            });
+        };
+        auto *insert = window.findChild<QAction *>("footnoteAction");
+        auto *edit = window.findChild<QAction *>("editFootnoteAction");
+        QVERIFY(insert && edit);
+        QCOMPARE(insert->shortcut(), QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_F));
+        QVERIFY(!edit->isEnabled());
+        answer("Where it came from.");
+        insert->trigger();
+        QCOMPARE(view->document().footnotes.size(), std::size_t{1});
+        QCOMPARE(QString::fromStdU16String(view->document().footnotes[0].text),
+                 QString("Where it came from."));
+        QVERIFY(edit->isEnabled()); // the caret is right after the new reference
+        answer("Corrected source.");
+        edit->trigger();
+        QCOMPARE(QString::fromStdU16String(view->document().footnotes[0].text),
+                 QString("Corrected source."));
+        window.findChild<QAction *>("undoAction")->trigger(); // undoes only the edit
+        QCOMPARE(view->document().footnotes.size(), std::size_t{1});
+        QCOMPARE(QString::fromStdU16String(view->document().footnotes[0].text),
+                 QString("Where it came from."));
+        window.findChild<QAction *>("undoAction")->trigger();
+        QVERIFY(view->document().footnotes.empty());
+    }
     void headerFooterDialogSetsBandsAndUndoes() {
         wf::MainWindow window;
         window.show();

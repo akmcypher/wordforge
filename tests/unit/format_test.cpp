@@ -429,3 +429,29 @@ TEST(NativeFormat, KeptDocxPartsRoundTripInV9) {
     EXPECT_THROW(parseNative(variant("part=\"preserved/0\"", "part=\"preserved/1\"")),
                  std::exception);
 }
+
+TEST(NativeFormat, FootnotesRoundTripInV9) {
+    Editor e;
+    e.replace(u"text");
+    const auto id = e.insertFootnote(u"A note with <markup> & \"quotes\"");
+    const auto bytes = serializeNative(e.document);
+    EXPECT_NE(bytes.find("version=\"9\""), std::string::npos);
+    const auto restored = parseNative(bytes);
+    ASSERT_EQ(restored.footnotes, e.document.footnotes);
+    ASSERT_NE(restored.paragraphs[0].runs.back().note(), nullptr);
+    EXPECT_EQ(restored.paragraphs[0].runs.back().note()->id, id);
+    auto variant = [&](const std::string &from, const std::string &to) {
+        auto text = bytes;
+        const auto at = text.find(from);
+        EXPECT_NE(at, std::string::npos) << from;
+        text.replace(at, from.size(), to);
+        return text;
+    };
+    EXPECT_THROW(parseNative(variant("version=\"9\"", "version=\"8\"")), std::exception);
+    EXPECT_THROW(parseNative(variant("<footnote id=", "<footnote extra=\"1\" id=")),
+                 std::exception);
+    // A reference to a missing footnote.
+    EXPECT_THROW(parseNative(variant("<note id=\"" + std::to_string(id),
+                                     "<note id=\"" + std::to_string(id + 50))),
+                 std::exception);
+}

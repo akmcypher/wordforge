@@ -20,8 +20,10 @@ struct CellRectangle {
 struct Layout {
     std::vector<Line> lines;
     std::vector<CellRectangle> cells;
-    // Header and footer lines, sorted by page; not editable, so not hit-tested.
+    // Header, footer and footnote lines, sorted by page; not hit-tested.
     std::vector<Line> furniture;
+    // The rule above each page's footnotes: (page, y).
+    std::vector<std::pair<std::size_t, double>> noteSeparators;
     std::size_t pageCount = 1, measuredParagraphs = 0;
     PageStyle page;
     ImageResources images;
@@ -45,7 +47,7 @@ class LayoutEngine {
         std::uint64_t revision;
         double width;
         std::vector<Line> lines;
-        std::size_t number = 0;
+        std::size_t number = 0, firstNote = 1;
     };
     Shaper &shaper_;
     std::unordered_map<std::uint64_t, Cached> cache_;

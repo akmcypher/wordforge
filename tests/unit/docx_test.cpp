@@ -842,3 +842,53 @@ TEST(Docx, NamesDroppedPartsAndKeepsOnlyCompleteOnes) {
     // A document without kept parts exports exactly as before.
     EXPECT_FALSE(parseDocx(serializeDocx(Document{})).document.preserved);
 }
+
+TEST(Docx, FootnotesRoundTripAndImportFromWord) {
+    Editor e;
+    e.replace(u"First claim");
+    e.insertFootnote(u"First source.");
+    e.replace(u" and second");
+    e.insertFootnote(u"Second source & more.");
+    const auto parts = opc::read(serializeDocx(e.document));
+    ASSERT_TRUE(parts.contains("word/footnotes.xml"));
+    pugi::xml_document notes;
+    ASSERT_TRUE(notes.load_string(parts.at("word/footnotes.xml").c_str()));
+    EXPECT_EQ(notes.select_nodes("//w:footnote").size(), 4u); // two separators + two notes
+    EXPECT_EQ(notes.select_nodes("//w:footnoteRef").size(), 2u);
+    pugi::xml_document body;
+    ASSERT_TRUE(body.load_string(parts.at("word/document.xml").c_str()));
+    EXPECT_EQ(body.select_nodes("//w:footnoteReference").size(), 2u);
+    const auto imported = parseDocx(opc::write(parts));
+    EXPECT_TRUE(imported.warnings.empty());
+    ASSERT_EQ(imported.document.footnotes.size(), 2u);
+    EXPECT_EQ(imported.document.footnotes[0].text, u"First source.");
+    EXPECT_EQ(imported.document.footnotes[1].text, u"Second source & more.");
+    EXPECT_EQ(imported.document.text(), e.document.text());
+
+    // A Word-style footnotes part: separators, styled reference, two paragraphs in a note.
+    const std::string w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    auto word = wordDocument(
+        "<w:p><w:r><w:t>Text</w:t></w:r><w:r><w:rPr><w:rStyle w:val='FootnoteReference'/>"
+        "<w:vertAlign w:val='superscript'/></w:rPr><w:footnoteReference w:id='1'/></w:r>"
+        "<w:r><w:endnoteReference w:id='1'/></w:r></w:p>",
+        "<Relationship Id='fn' Type='http://schemas.openxmlformats.org/officeDocument/2006/"
+        "relationships/footnotes' Target='footnotes.xml'/>");
+    word["word/footnotes.xml"] =
+        "<w:footnotes xmlns:w='" + w +
+        "'><w:footnote w:type='separator' w:id='-1'><w:p><w:r><w:separator/></w:r></w:p>"
+        "</w:footnote><w:footnote w:id='1'><w:p><w:r><w:footnoteRef/></w:r><w:r><w:t "
+        "xml:space='preserve'> See page</w:t></w:r><w:r><w:tab/><w:t>12.</w:t></w:r></w:p>"
+        "<w:p><w:r><w:t>Also chapter 3.</w:t></w:r></w:p></w:footnote></w:footnotes>";
+    const auto fromWord = parseDocx(opc::write(word));
+    ASSERT_EQ(fromWord.document.footnotes.size(), 1u);
+    EXPECT_EQ(fromWord.document.footnotes[0].text, u"See page 12. Also chapter 3.");
+    auto warned = [&](const char *text) {
+        return std::any_of(fromWord.warnings.begin(), fromWord.warnings.end(),
+                           [&](const auto &warning) { return warning.find(text) != std::string::npos; });
+    };
+    EXPECT_TRUE(warned("one paragraph of plain text"));
+    EXPECT_TRUE(warned("endnoteReference"));
+    EXPECT_FALSE(warned("vertAlign"));
+    EXPECT_FALSE(warned("not kept when saving"));
+    EXPECT_NO_THROW(validateDocument(fromWord.document));
+}

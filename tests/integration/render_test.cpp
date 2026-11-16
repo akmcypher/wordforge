@@ -1,4 +1,5 @@
 #include "core/rendering/page_renderer.hpp"
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -33,6 +34,33 @@ TEST(Rendering, HeadersAndFootersArePaintedAndInvalidatePages) {
     EXPECT_EQ(renderer.synchronize(engine.compose(editor.document)), 1u);
     EXPECT_GT(inked(0, margin - 2), 20);
     EXPECT_GT(inked(height - margin + 2, height), 20);
+}
+TEST(Rendering, FootnoteRuleAndTextArePainted) {
+    Editor editor;
+    editor.replace(u"body");
+    editor.insertFootnote(u"The footnote text");
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    const auto layout = engine.compose(editor.document);
+    ASSERT_EQ(layout.noteSeparators.size(), 1u);
+    PageRenderer renderer;
+    renderer.synchronize(layout);
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(600, 850));
+    renderer.drawPage(*surface->getCanvas(), 0);
+    SkPixmap pixels;
+    surface->peekPixels(&pixels);
+    const auto ruleY = static_cast<int>(std::lround(layout.noteSeparators[0].second));
+    int ink = 0;
+    for (int dy = -1; dy <= 1; ++dy)
+        if ((pixels.getColor(100, ruleY + dy) & 0xffffff) != 0xffffff)
+            ++ink;
+    EXPECT_GT(ink, 0);
+    int text = 0;
+    for (int y = ruleY + 3; y < 841 - 56; ++y)
+        for (int x = 57; x < 300; ++x)
+            if ((pixels.getColor(x, y) & 0xffffff) != 0xffffff)
+                ++text;
+    EXPECT_GT(text, 30);
 }
 TEST(Rendering, InlinePicturesUseResourcesAndProduceActualPixels) {
     std::ifstream file(std::filesystem::path(__FILE__).parent_path().parent_path() /

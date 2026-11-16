@@ -42,6 +42,9 @@ std::string pageKey(const Layout &layout, std::size_t page) {
     std::string key;
     keyValue(key, layout.page.width);
     keyValue(key, layout.page.height);
+    for (const auto &[notePage, noteY] : layout.noteSeparators)
+        if (notePage == page)
+            keyValue(key, noteY);
     for (const auto &cell : layout.cells) {
         if (cell.page != page)
             continue;
@@ -169,6 +172,16 @@ std::size_t PageRenderer::synchronize(const Layout &layout) {
         for (const auto &cell : layout.cells)
             if (cell.page == page)
                 canvas->drawRect(SkRect::MakeXYWH(cell.x, cell.y, cell.width, cell.height), border);
+        for (const auto &[notePage, noteY] : layout.noteSeparators)
+            if (notePage == page) {
+                SkPaint rule;
+                rule.setAntiAlias(true);
+                rule.setColor(0xff8a8f99);
+                rule.setStrokeWidth(0.6f);
+                const auto left = static_cast<float>(layout.page.margin);
+                canvas->drawLine(left, static_cast<float>(noteY), left + 120,
+                                 static_cast<float>(noteY), rule);
+            }
         for (const auto *source : {&layout.lines, &layout.furniture})
         for (const auto &line : pageLines(*source, page)) {
             paintRuns(line, [&](const GlyphRun &run, double x) {
