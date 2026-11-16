@@ -803,7 +803,10 @@ TEST(Docx, NamesDroppedPartsAndKeepsOnlyCompleteOnes) {
         "<Relationship Id='s' Type='" + rel + "settings' Target='settings.xml'/>"
         "<Relationship Id='t' Type='" + rel + "theme' Target='theme/theme1.xml'/>"
         "<Relationship Id='c' Type='" + rel + "comments' Target='comments.xml'/>"
-        "<Relationship Id='f' Type='" + rel + "footnotes' Target='footnotes.xml'/>");
+        "<Relationship Id='f' Type='" + rel + "footnotes' Target='footnotes.xml'/>"
+        "<Relationship Id='e' Type='" + rel + "endnotes' Target='endnotes.xml'/>");
+    parts["word/endnotes.xml"] = "<w:endnotes xmlns:w='" + w +
+                                 "'><w:endnote w:id='1'><w:p/></w:endnote></w:endnotes>";
     parts["word/settings.xml"] =
         "<w:settings xmlns:w='" + w + "'><w:zoom w:percent='100'/><w:evenAndOddHeaders/>"
         "<w:footnotePr><w:footnote w:id='-1'/></w:footnotePr><w:defaultTabStop w:val='720'/>"
@@ -837,8 +840,9 @@ TEST(Docx, NamesDroppedPartsAndKeepsOnlyCompleteOnes) {
     for (const auto &warning : imported.warnings)
         if (warning.find("not kept when saving") != std::string::npos)
             named = warning;
-    EXPECT_NE(named.find("comments"), std::string::npos);
+    EXPECT_NE(named.find("endnotes"), std::string::npos);
     EXPECT_EQ(named.find("footnotes"), std::string::npos);
+    EXPECT_EQ(named.find("comments"), std::string::npos); // imported (this one has no range)
     // A document without kept parts exports exactly as before.
     EXPECT_FALSE(parseDocx(serializeDocx(Document{})).document.preserved);
 }
@@ -891,4 +895,82 @@ TEST(Docx, FootnotesRoundTripAndImportFromWord) {
     EXPECT_FALSE(warned("vertAlign"));
     EXPECT_FALSE(warned("not kept when saving"));
     EXPECT_NO_THROW(validateDocument(fromWord.document));
+}
+
+TEST(Docx, CommentsRoundTripAndImportFromWord) {
+    Editor e;
+    e.replace(u"Alpha beta gamma\nsecond");
+    e.selection = {{0, 6}, {0, 10}}; // "beta"
+    e.addComment(u"Check this word.", "Ana Lima", "2026-11-16T10:00:00Z");
+    e.selection = {{0, 11}, {1, 3}}; // "gamma" to "sec"
+    e.addComment(u"Across paragraphs.", "Bo", "");
+    const auto parts = opc::read(serializeDocx(e.document));
+    ASSERT_TRUE(parts.contains("word/comments.xml"));
+    pugi::xml_document body, comments;
+    ASSERT_TRUE(body.load_string(parts.at("word/document.xml").c_str()));
+    ASSERT_TRUE(comments.load_string(parts.at("word/comments.xml").c_str()));
+    EXPECT_EQ(body.select_nodes("//w:commentRangeStart").size(), 2u);
+    EXPECT_EQ(body.select_nodes("//w:commentRangeEnd").size(), 2u);
+    EXPECT_EQ(body.select_nodes("//w:commentReference").size(), 2u);
+    EXPECT_STREQ(comments.select_node("//w:comment[@w:id='0']").node().attribute("w:initials").value(),
+                 "AL");
+    // The text between the first comment's markers is exactly "beta".
+    std::string between;
+    bool inside = false;
+    for (auto node : body.select_node("//w:p").node().children()) {
+        const std::string name = node.name();
+        if (name == "w:commentRangeStart" && std::string(node.attribute("w:id").value()) == "0")
+            inside = true;
+        else if (name == "w:commentRangeEnd" && std::string(node.attribute("w:id").value()) == "0")
+            inside = false;
+        else if (inside && name == "w:r")
+            for (auto t : node.children("w:t"))
+                between += t.text().get();
+    }
+    EXPECT_EQ(between, "beta");
+    const auto imported = parseDocx(opc::write(parts));
+    EXPECT_TRUE(imported.warnings.empty());
+    ASSERT_EQ(imported.document.comments.size(), 2u);
+    for (std::size_t i = 0; i < 2; ++i) {
+        const auto &a = imported.document.comments[i], &b = e.document.comments[i];
+        EXPECT_EQ(a.text, b.text);
+        EXPECT_EQ(a.author, b.author);
+        EXPECT_EQ(a.date, b.date);
+        EXPECT_EQ(imported.document.resolve(a.start), e.document.resolve(b.start));
+        EXPECT_EQ(imported.document.resolve(a.end), e.document.resolve(b.end));
+    }
+
+    // Word-style: a range across a line break inside one Word paragraph, and a comment
+    // without any range.
+    const std::string w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    auto word = wordDocument(
+        "<w:p><w:r><w:t>one </w:t></w:r><w:commentRangeStart w:id='3'/><w:r><w:t>two</w:t>"
+        "<w:br/><w:t>three</w:t></w:r><w:commentRangeEnd w:id='3'/><w:r><w:rPr><w:rStyle "
+        "w:val='CommentReference'/></w:rPr><w:commentReference w:id='3'/></w:r></w:p>",
+        "<Relationship Id='c' Type='http://schemas.openxmlformats.org/officeDocument/2006/"
+        "relationships/comments' Target='comments.xml'/>");
+    word["word/comments.xml"] =
+        "<w:comments xmlns:w='" + w +
+        "'><w:comment w:id='3' w:author='Cy' w:date='2026-01-02T03:04:05Z'><w:p><w:r>"
+        "<w:annotationRef/></w:r><w:r><w:t>Reword.</w:t></w:r></w:p></w:comment>"
+        "<w:comment w:id='4' w:author='Dee'><w:p><w:r><w:t>Lost</w:t></w:r></w:p></w:comment>"
+        "</w:comments>";
+    const auto fromWord = parseDocx(opc::write(word));
+    ASSERT_EQ(fromWord.document.comments.size(), 1u);
+    const auto &comment = fromWord.document.comments[0];
+    EXPECT_EQ(comment.author, "Cy");
+    EXPECT_EQ(comment.text, u"Reword.");
+    const auto start = fromWord.document.resolve(comment.start);
+    const auto end = fromWord.document.resolve(comment.end);
+    ASSERT_TRUE(start && end);
+    EXPECT_EQ(*start, (Position{0, 4}));
+    EXPECT_EQ(*end, (Position{1, 5})); // after "three" in the paragraph made by the break
+    auto warned = [&](const char *text) {
+        return std::any_of(fromWord.warnings.begin(), fromWord.warnings.end(),
+                           [&](const auto &warning) { return warning.find(text) != std::string::npos; });
+    };
+    EXPECT_TRUE(warned("without a marked text range"));
+    EXPECT_FALSE(warned("not kept when saving"));
+    EXPECT_FALSE(warned("commentRange"));
+    EXPECT_FALSE(warned("commentReference"));
 }

@@ -32,26 +32,59 @@ std::optional<Position> Document::resolve(const Anchor &anchor) const {
     }
     return {};
 }
+std::vector<Anchor *> Document::anchors() {
+    std::vector<Anchor *> result;
+    for (auto &bookmark : bookmarks)
+        result.push_back(&bookmark.anchor);
+    for (auto &comment : comments) {
+        result.push_back(&comment.start);
+        result.push_back(&comment.end);
+    }
+    return result;
+}
+std::vector<const Anchor *> Document::anchors() const {
+    std::vector<const Anchor *> result;
+    for (const auto &bookmark : bookmarks)
+        result.push_back(&bookmark.anchor);
+    for (const auto &comment : comments) {
+        result.push_back(&comment.start);
+        result.push_back(&comment.end);
+    }
+    return result;
+}
+void validateCommentText(const std::u16string &text) {
+    if (text.size() > 4000)
+        throw std::invalid_argument("Comment text is limited to 4000 characters");
+    for (auto ch : text)
+        if (ch < 32 || ch == 0x7f || ch == 0xfffc)
+            throw std::invalid_argument("Comment text contains a control character");
+}
+void validateCommentAuthor(const std::string &author) {
+    const auto text = utf16(author);
+    if (author.size() > 256 || std::any_of(text.begin(), text.end(), [](auto ch) { return ch < 32; }))
+        throw std::invalid_argument("Comment author must be at most 256 bytes without controls");
+}
 std::vector<Position> Document::bookmarkPositions() const {
-    if (bookmarks.empty())
+    const auto all = anchors();
+    if (all.empty())
         return {};
     std::unordered_map<std::uint64_t, std::size_t> indexes;
     for (std::size_t index = 0; index < paragraphs.size(); ++index)
         indexes.emplace(paragraphs[index].id, index);
     std::vector<Position> positions;
     std::unordered_map<std::uint64_t, std::vector<std::size_t>> boundariesByParagraph;
-    positions.reserve(bookmarks.size());
-    for (const auto &bookmark : bookmarks) {
-        const auto found = indexes.find(bookmark.anchor.paragraphId);
-        if (found == indexes.end() || static_cast<unsigned>(bookmark.anchor.affinity) > 1)
+    positions.reserve(all.size());
+    for (const auto *anchor : all) {
+        const auto found = indexes.find(anchor->paragraphId);
+        if (found == indexes.end() || static_cast<unsigned>(anchor->affinity) > 1)
             throw std::invalid_argument("Dangling or invalid bookmark anchor");
-        auto [cache, inserted] = boundariesByParagraph.try_emplace(bookmark.anchor.paragraphId);
+        auto [cache, inserted] = boundariesByParagraph.try_emplace(anchor->paragraphId);
         if (inserted)
             cache->second = paragraphs[found->second].boundaries();
         const auto &boundaries = cache->second;
-        if (!std::binary_search(boundaries.begin(), boundaries.end(), bookmark.anchor.offset))
+        if (!std::binary_search(boundaries.begin(), boundaries.end(), anchor->offset))
             throw std::invalid_argument("Bookmark anchor splits a grapheme");
-        positions.push_back({found->second, bookmark.anchor.offset});
+        positions.push_back({found->second, anchor->offset});
     }
     return positions;
 }
@@ -114,14 +147,15 @@ bool Editor::goToBookmark(std::uint64_t id) {
 }
 void Editor::remapBookmarks(const std::vector<Position> &previous, Position start, Position end,
                             Position insertedEnd) {
-    if (document.bookmarks.empty())
+    const auto all = document.anchors();
+    if (all.empty())
         return;
     std::unordered_map<std::uint64_t, const Paragraph *> targets;
     std::unordered_map<std::uint64_t, std::vector<std::size_t>> boundariesByParagraph;
     for (const auto &paragraph : document.paragraphs)
         targets.emplace(paragraph.id, &paragraph);
-    for (std::size_t index = 0; index < document.bookmarks.size(); ++index) {
-        auto &anchor = document.bookmarks[index].anchor;
+    for (std::size_t index = 0; index < all.size(); ++index) {
+        auto &anchor = *all[index];
         const auto old = previous[index];
         if (old < start || (old > end && old.paragraph != end.paragraph))
             continue;
@@ -148,5 +182,63 @@ void Editor::remapBookmarks(const std::vector<Position> &previous, Position star
             --boundary;
         anchor.offset = *boundary;
     }
+}
+std::uint64_t Editor::addComment(const std::u16string &text, const std::string &author,
+                                 const std::string &date) {
+    validateCommentText(text);
+    validateCommentAuthor(author);
+    std::uint64_t id = 0;
+    auto command = [&](Editor &editor) {
+        if (editor.document.comments.size() >= 10000)
+            throw std::invalid_argument("Too many comments");
+        const auto start = std::min(editor.selection.anchor, editor.selection.focus);
+        const auto end = std::max(editor.selection.anchor, editor.selection.focus);
+        editor.document.nextId = std::max(editor.document.nextId, editor.idHighWater_);
+        id = editor.document.allocateId();
+        editor.document.comments.push_back({id, author, date, text,
+                                            editor.document.anchorAt(start, Affinity::Before),
+                                            editor.document.anchorAt(end, Affinity::After)});
+    };
+    if (inTransaction_)
+        command(*this);
+    else
+        transact(command);
+    return id;
+}
+void Editor::setCommentText(std::uint64_t id, const std::u16string &text) {
+    validateCommentText(text);
+    auto command = [&](Editor &editor) {
+        for (auto &comment : editor.document.comments)
+            if (comment.id == id) {
+                comment.text = text;
+                return;
+            }
+        throw std::invalid_argument("Unknown comment");
+    };
+    if (inTransaction_)
+        command(*this);
+    else
+        transact(command);
+}
+void Editor::deleteComment(std::uint64_t id) {
+    auto command = [&](Editor &editor) {
+        if (!std::erase_if(editor.document.comments, [&](const Comment &c) { return c.id == id; }))
+            throw std::invalid_argument("Unknown comment");
+    };
+    if (inTransaction_)
+        command(*this);
+    else
+        transact(command);
+}
+std::optional<Selection> Editor::commentRange(std::uint64_t id) const {
+    for (const auto &comment : document.comments)
+        if (comment.id == id) {
+            const auto start = document.resolve(comment.start);
+            const auto end = document.resolve(comment.end);
+            if (!start || !end)
+                return {};
+            return Selection{*start, *end};
+        }
+    return {};
 }
 } // namespace wf

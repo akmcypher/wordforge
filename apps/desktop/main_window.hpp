@@ -20,6 +20,7 @@ class MainWindow : public QMainWindow {
     void closeEvent(QCloseEvent *) override;
 
   private:
+    std::size_t shownComments_ = 0;
     PageView *view_;
     QLabel *statistics_ = nullptr;
     QLabel *documentState_ = nullptr;

@@ -419,7 +419,7 @@ void MainWindow::buildUi() {
 
     auto *insert = new QMenu("&Insert", this);
     fill(insert, {"pageBreak", "picture", "table", "date", "", "footnote", "editFootnote",
-                  "headerFooter"});
+                  "comment", "editComment", "deleteComment", "", "headerFooter"});
     auto *symbols = insert->addMenu("Symbol");
     for (int index = 0; index < 7; ++index)
         symbols->addAction(commands->get("symbol" + QString::number(index)));
@@ -458,6 +458,22 @@ void MainWindow::buildUi() {
     panelAction->setText("Format panel");
     panelAction->setIconText("Format");
     panelAction->setToolTip("Show or hide the format panel");
+    auto *comments = new CommentsPanel(view_, *commands, this);
+    addDockWidget(Qt::RightDockWidgetArea, comments);
+    tabifyDockWidget(panel, comments);
+    panel->raise();
+    comments->hide();
+    auto *commentsAction =
+        commands->add(named(comments->toggleViewAction(), "commentsPanel"), "View");
+    commentsAction->setText("Comments panel");
+    commentsAction->setIconText("Comments");
+    // The panel appears when a document gains its first comment (or opens with some).
+    connect(view_, &PageView::contentChanged, comments, [this, comments] {
+        const auto count = view_->document().comments.size();
+        if (count > shownComments_)
+            comments->show(), comments->raise();
+        shownComments_ = count;
+    });
     auto *palette = new CommandPalette(*commands, this);
     auto *paletteAction =
         commands->add(named(new QAction("Command palette…", this), "commandPalette"), "View");
@@ -467,6 +483,7 @@ void MainWindow::buildUi() {
     connect(paletteAction, &QAction::triggered, palette, &CommandPalette::showPalette);
     auto *viewMenu = new QMenu("&View", this);
     viewMenu->addAction(panelAction);
+    viewMenu->addAction(commentsAction);
     viewMenu->addAction(paletteAction);
     viewMenu->addSeparator();
     fill(viewMenu, {"zoom100", "zoomPageWidth", ""});

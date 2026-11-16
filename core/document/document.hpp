@@ -151,6 +151,18 @@ struct Bookmark {
     bool operator==(const Bookmark &) const = default;
 };
 void validateBookmarkName(const std::string &);
+// A review comment on a range of text. The range grows when text is typed at its edges
+// (start has Before affinity, end After) and collapses to a point when deleted.
+struct Comment {
+    std::uint64_t id = 0;
+    std::string author; // UTF-8
+    std::string date;   // ISO 8601 (as Word writes it), or empty
+    std::u16string text; // one paragraph of plain text
+    Anchor start, end;
+    bool operator==(const Comment &) const = default;
+};
+void validateCommentText(const std::u16string &);
+void validateCommentAuthor(const std::string &);
 // DOCX package parts Wordforge does not edit (document properties, theme, settings, font
 // table, web settings, custom XML) kept byte for byte from an imported file, so saving to
 // DOCX writes them back. This is package-part preservation only: unknown content inside
@@ -186,6 +198,7 @@ struct Document {
     ImageResources images;
     std::vector<Table> tables;
     std::vector<Footnote> footnotes; // each referenced exactly once in the text
+    std::vector<Comment> comments;
     StyleSheet styles = builtinStyles();
     PageStyle page;
     std::uint64_t revision = 0, nextId = 2;
@@ -193,7 +206,10 @@ struct Document {
     std::uint64_t allocateId();
     Anchor anchorAt(Position, Affinity = Affinity::After) const;
     std::optional<Position> resolve(const Anchor &) const;
+    // Positions of every anchor (bookmarks, then each comment's start and end).
     std::vector<Position> bookmarkPositions() const;
+    std::vector<Anchor *> anchors();
+    std::vector<const Anchor *> anchors() const;
     const CharacterStyle &styleAt(Position) const;
     // The run that typing at `position` continues (the one before it at a boundary).
     const Run &runAt(Position) const;
@@ -244,6 +260,7 @@ struct ChangeSet {
     bool resourcesChanged = false;
     bool tablesChanged = false;
     bool notesChanged = false; // footnote texts, additions or removals
+    bool commentsChanged = false;
 };
 
 class Editor {
@@ -301,6 +318,13 @@ class Editor {
     // The footnote whose reference is next to the caret or selected, if any.
     std::optional<std::uint64_t> selectedFootnote() const;
     void setFootnoteText(std::uint64_t id, const std::u16string &text);
+    // Comments the selection (or the caret position when nothing is selected).
+    std::uint64_t addComment(const std::u16string &text, const std::string &author,
+                             const std::string &date);
+    void setCommentText(std::uint64_t id, const std::u16string &text);
+    void deleteComment(std::uint64_t id);
+    // The current text range of a comment.
+    std::optional<Selection> commentRange(std::uint64_t id) const;
     void resizeImage(double width, double height);
     std::optional<TableCell> selectedCell() const;
     void insertTable(std::size_t rows, std::size_t columns);

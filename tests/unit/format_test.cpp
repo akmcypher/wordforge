@@ -455,3 +455,23 @@ TEST(NativeFormat, FootnotesRoundTripInV9) {
                                      "<note id=\"" + std::to_string(id + 50))),
                  std::exception);
 }
+
+TEST(NativeFormat, CommentsRoundTripInV9) {
+    Editor e;
+    e.replace(u"first\nsecond line");
+    e.selection = {{0, 2}, {1, 6}};
+    e.addComment(u"Spans two paragraphs & <more>", "Ana Lima", "2026-11-16T10:00:00Z");
+    const auto bytes = serializeNative(e.document);
+    EXPECT_NE(bytes.find("version=\"9\""), std::string::npos);
+    const auto restored = parseNative(bytes);
+    EXPECT_EQ(restored.comments, e.document.comments);
+    auto variant = [&](const std::string &from, const std::string &to) {
+        auto text = bytes;
+        const auto at = text.find(from);
+        EXPECT_NE(at, std::string::npos) << from;
+        text.replace(at, from.size(), to);
+        return text;
+    };
+    EXPECT_THROW(parseNative(variant("startOffset=\"2\"", "startOffset=\"99\"")), std::exception);
+    EXPECT_THROW(parseNative(variant("<comment ", "<comment color=\"red\" ")), std::exception);
+}

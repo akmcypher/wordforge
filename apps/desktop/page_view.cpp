@@ -2,6 +2,7 @@
 #include "apps/desktop/clipboard.hpp"
 #include "apps/desktop/spelling.hpp"
 #include <QApplication>
+#include <QDateTime>
 #include <QBuffer>
 #include <QClipboard>
 #include <QContextMenuEvent>
@@ -267,6 +268,33 @@ bool PageView::tableColumn(bool insert, bool before) {
 bool PageView::removeTable() {
     return change([](Editor &candidate) { candidate.removeTable(); });
 }
+bool PageView::addComment(const std::u16string &text) {
+    const auto author = qEnvironmentVariable("USERNAME", qEnvironmentVariable("USER", "Author"));
+    const auto date = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+    return change([&](Editor &candidate) {
+        candidate.addComment(text, author.left(80).toStdString(), date.toStdString());
+    });
+}
+bool PageView::setCommentText(std::uint64_t id, const std::u16string &text) {
+    return change([&](Editor &candidate) { candidate.setCommentText(id, text); });
+}
+bool PageView::deleteComment(std::uint64_t id) {
+    return change([&](Editor &candidate) { candidate.deleteComment(id); });
+}
+std::optional<std::uint64_t> PageView::commentAtCaret() const {
+    const auto caret = editor_.selection.focus;
+    std::optional<std::uint64_t> found;
+    for (const auto &comment : editor_.document.comments)
+        if (const auto range = editor_.commentRange(comment.id))
+            if (range->anchor <= caret && caret <= range->focus)
+                found = comment.id;
+    return found;
+}
+void PageView::selectRange(Selection range) {
+    moveCaret(range.anchor, false);
+    moveCaret(range.focus, true);
+    setFocus();
+}
 bool PageView::insertFootnote(const std::u16string &text) {
     return change([&](Editor &candidate) { candidate.insertFootnote(text); });
 }
@@ -510,6 +538,10 @@ void PageView::paintEvent(QPaintEvent *) {
             if (overlay) {
                 auto *canvas = overlay->getCanvas();
                 transform(canvas);
+                // Commented text in light yellow, under the selection.
+                for (const auto &comment : editor_.document.comments)
+                    if (const auto range = editor_.commentRange(comment.id))
+                        renderer_.drawSelection(*canvas, layout_, *range, page, 0x55f2c230);
                 renderer_.drawSelection(*canvas, layout_, editor_.selection, page);
                 canvas->restore();
             }

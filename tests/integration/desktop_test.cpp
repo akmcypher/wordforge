@@ -772,6 +772,46 @@ class DesktopTest : public QObject {
         QVERIFY(window.findChild<QAction *>("printAction"));
         QCOMPARE(window.findChild<QAction *>("printAction")->shortcut(), QKeySequence(QKeySequence::Print));
     }
+    void commentsAreAddedListedSelectedAndDeleted() {
+        wf::MainWindow window;
+        window.show();
+        auto *view = window.pageView();
+        view->setDocument({});
+        view->insertText("Needs review here");
+        view->selectRange({{0, 6}, {0, 12}}); // "review"
+        QTimer::singleShot(0, &window, [] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            if (!dialog)
+                return;
+            if (auto *text = dialog->findChild<QLineEdit *>("commentText")) {
+                text->setText("Is this the right word?");
+                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+            } else
+                dialog->reject();
+        });
+        auto *add = window.findChild<QAction *>("commentAction");
+        QVERIFY(add);
+        QCOMPARE(add->shortcut(), QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_M));
+        add->trigger();
+        QCOMPARE(view->document().comments.size(), std::size_t{1});
+        QCOMPARE(QString::fromStdU16String(view->document().comments[0].text),
+                 QString("Is this the right word?"));
+        auto *panel = window.findChild<QDockWidget *>("commentsPanel");
+        QVERIFY(panel && panel->isVisible()); // shown for the first comment
+        auto *list = panel->findChild<QListWidget *>("commentsList");
+        QCOMPARE(list->count(), 1);
+        QVERIFY(list->item(0)->text().contains("Is this the right word?"));
+        view->selectRange({{0, 0}, {0, 0}});
+        emit list->itemActivated(list->item(0));
+        QCOMPARE(view->selection().anchor, (wf::Position{0, 6}));
+        QCOMPARE(view->selection().focus, (wf::Position{0, 12}));
+        auto *remove = window.findChild<QAction *>("deleteCommentAction");
+        QVERIFY(remove->isEnabled());
+        remove->trigger();
+        QVERIFY(view->document().comments.empty());
+        window.findChild<QAction *>("undoAction")->trigger();
+        QCOMPARE(view->document().comments.size(), std::size_t{1});
+    }
     void footnoteDialogsInsertEditAndUndo() {
         wf::MainWindow window;
         window.show();

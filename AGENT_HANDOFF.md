@@ -9,8 +9,9 @@
 - `main` = v0.6.4 plus docs only. No open PRs, no uncommitted work.
 
 **After 0.6.4 (on main or in review):** DOCX package-part preservation (branch
-feat/docx-preservation, WFG9; see CURRENT_STATUS.md). Footnotes (branch
-feat/footnotes). Next: comments, then the P1 list.
+feat/docx-preservation, WFG9; see CURRENT_STATUS.md). Footnotes (#23).
+Comments (branch feat/comments). Next: cut v0.6.5, then the P1 list (tracked changes,
+incremental pagination, navigation pane, accessibility).
 
 **In 0.6.4:** DOCX table and picture import (#17), headers/footers/page numbers (#18,
 WFG8), merged table cells and column widths (#19). See CURRENT_STATUS.md.

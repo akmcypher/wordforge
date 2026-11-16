@@ -197,7 +197,7 @@ std::string serializeNative(const Document &document) {
     const bool tables = !document.tables.empty();
     // WFG9 only for footnotes or kept DOCX package parts (which need the ZIP transport).
     const bool preserving = document.preserved != nullptr;
-    const bool noted = !document.footnotes.empty();
+    const bool noted = !document.footnotes.empty() || !document.comments.empty();
     const bool packaged = tables || !imageIds.empty() || preserving;
     // WFG6 only when styles were customized; built-in styles keep files readable by 0.6.0.
     const bool styled = document.styles != builtinStyles();
@@ -257,6 +257,20 @@ std::string serializeNative(const Document &document) {
         if (!style.basedOn.empty())
             node.append_attribute("basedOn") = style.basedOn.c_str();
         writeCharacterProperties(node, style.character);
+    }
+    for (const auto &comment : document.comments) {
+        auto node = root.append_child("comment");
+        node.append_attribute("id") = static_cast<unsigned long long>(comment.id);
+        node.append_attribute("author") = comment.author.c_str();
+        if (!comment.date.empty())
+            node.append_attribute("date") = comment.date.c_str();
+        node.append_attribute("text") = utf8(comment.text).c_str();
+        node.append_attribute("startParagraph") =
+            static_cast<unsigned long long>(comment.start.paragraphId);
+        node.append_attribute("startOffset") = static_cast<unsigned long long>(comment.start.offset);
+        node.append_attribute("endParagraph") =
+            static_cast<unsigned long long>(comment.end.paragraphId);
+        node.append_attribute("endOffset") = static_cast<unsigned long long>(comment.end.offset);
     }
     for (const auto &note : document.footnotes) {
         auto node = root.append_child("footnote");
@@ -434,6 +448,28 @@ Document parseNative(const std::string &input) {
     for (auto p : root.children()) {
         if (indentation(p))
             continue;
+        if (v9 && std::string_view(p.name()) == "comment") {
+            attributes(p, {"id", "author", "date", "text", "startParagraph", "startOffset",
+                           "endParagraph", "endOffset"});
+            if (p.first_child())
+                throw std::runtime_error("Unexpected comment content");
+            Comment comment{identifier(p, "id"),
+                            p.attribute("author").value(),
+                            p.attribute("date").value(),
+                            utf16(p.attribute("text").value()),
+                            {identifier(p, "startParagraph"), index(p, "startOffset", true),
+                             Affinity::Before},
+                            {identifier(p, "endParagraph"), index(p, "endOffset", true),
+                             Affinity::After}};
+            try {
+                validateCommentText(comment.text);
+                validateCommentAuthor(comment.author);
+            } catch (const std::invalid_argument &error) {
+                throw std::runtime_error(error.what());
+            }
+            document.comments.push_back(std::move(comment));
+            continue;
+        }
         if (v9 && std::string_view(p.name()) == "footnote") {
             attributes(p, {"id", "text"});
             if (p.first_child())

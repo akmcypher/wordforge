@@ -1,5 +1,16 @@
 # Current status
 
+2026-11-16 — Comments (P1 track changes/comments, first slice). Insert → Comment… (Ctrl+Alt+M)
+comments the selected text with the user's name and the time; commented text is
+highlighted in light yellow. A Comments panel (View → Comments panel; it opens with the
+first comment) lists them; choosing one selects its text; Edit/Delete act on the comment
+at the caret. Ranges follow edits like bookmarks (typing at their edges extends them,
+deleting the text leaves a point comment). Saved in WFG9; DOCX exports comments.xml with
+commentRangeStart/End and commentReference, and imports Word comments as plain text with
+their ranges (also across line breaks); comments without a range are dropped with a
+warning. Not yet: replies, resolve, margin balloons, tracked changes. Windows ARM64: all
+6 suites pass; Ubuntu by CI. Not opened in Microsoft Word yet.
+
 2026-11-16 — Footnotes (P1 professional features, first slice). Insert → Footnote… (Ctrl+Alt+F)
 puts a superscript reference at the caret; Insert → Edit footnote… changes the text of the
 reference next to the caret. Footnotes are numbered in reference order and laid out at the

@@ -246,13 +246,13 @@ void PageRenderer::drawPage(SkCanvas &canvas, std::size_t page) const {
     canvas.drawPicture(impl_->pages[page].picture);
 }
 void PageRenderer::drawSelection(SkCanvas &canvas, const Layout &layout, Selection selection,
-                                 std::size_t page) const {
+                                 std::size_t page, std::uint32_t color) const {
     const auto start = std::min(selection.anchor, selection.focus),
                end = std::max(selection.anchor, selection.focus);
     if (start == end)
         return;
     SkPaint paint;
-    paint.setColor(0x66805a3b);
+    paint.setColor(color);
     for (const auto &line : layout.lines)
         if (line.page == page && line.paragraph >= start.paragraph &&
             line.paragraph <= end.paragraph) {

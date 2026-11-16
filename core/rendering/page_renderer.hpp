@@ -10,7 +10,8 @@ class PageRenderer {
     ~PageRenderer();
     std::size_t synchronize(const Layout &);
     void drawPage(SkCanvas &, std::size_t page) const;
-    void drawSelection(SkCanvas &, const Layout &, Selection, std::size_t page) const;
+    void drawSelection(SkCanvas &, const Layout &, Selection, std::size_t page,
+                       std::uint32_t color = 0x66805a3b) const;
 
   private:
     struct Impl;

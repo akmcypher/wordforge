@@ -6,6 +6,7 @@
 #include <cmath>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <map>
 #include <pugixml.hpp>
 #include <set>
@@ -496,7 +497,8 @@ std::shared_ptr<const PreservedPackage> preservePackage(const opc::Parts &parts,
         static const std::set<std::string> handled{
             "styles",     "numbering", "image",       "header",      "footer",
             "theme",      "settings",  "fontTable",   "webSettings", "customXml",
-            "hyperlink",  "stylesWithEffects", "footnotes", "commentsExtended", "commentsIds",
+            "hyperlink",  "stylesWithEffects", "footnotes", "comments", "commentsExtended",
+            "commentsIds",
             "commentsExtensible", "people"};
         if (relation.target.empty() || handled.contains(kind))
             continue;
@@ -688,6 +690,70 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             footnoteTexts[attr(note, "id")] = text;
         }
     }
+    // Comments by id: author, date and plain text (paragraphs joined by spaces).
+    struct ImportedComment {
+        std::string author, date;
+        std::u16string text;
+    };
+    std::map<std::string, ImportedComment> commentTexts;
+    bool simplifiedComments = false;
+    if (const auto commentsPath = relationship(parts, main, "comments");
+        !commentsPath.empty() && parts.contains(commentsPath)) {
+        auto comments = xml(parts.at(commentsPath));
+        for (auto comment : comments.document_element().children()) {
+            if (!is(comment, "comment"))
+                continue;
+            std::u16string text;
+            int paragraphs = 0;
+            std::function<void(pugi::xml_node)> collect = [&](pugi::xml_node node) {
+                for (auto item : node.children()) {
+                    if (item.type() != pugi::node_element)
+                        continue;
+                    if (is(item, "p")) {
+                        if (paragraphs++ && !text.empty())
+                            text += u' ';
+                        collect(item);
+                    } else if (is(item, "t"))
+                        text += utf16(item.text().get());
+                    else if (is(item, "tab"))
+                        text += u' ';
+                    else if (is(item, "drawing") || is(item, "tbl") || is(item, "pict"))
+                        simplifiedComments = true;
+                    else if (!is(item, "pPr") && !is(item, "rPr") && !is(item, "annotationRef"))
+                        collect(item);
+                }
+            };
+            collect(comment);
+            if (paragraphs > 1)
+                simplifiedComments = true;
+            for (auto &ch : text)
+                if (ch < 32 || ch == 0x7f || ch == 0xfffc)
+                    ch = u' ';
+            if (text.size() > 4000) {
+                text.resize(4000);
+                simplifiedComments = true;
+            }
+            auto author = utf16(attr(comment, "author"));
+            for (auto &ch : author)
+                if (ch < 32)
+                    ch = u' ';
+            if (author.size() > 80)
+                author.resize(80);
+            auto date = attr(comment, "date");
+            if (date.size() > 64 || std::any_of(date.begin(), date.end(), [](char c) {
+                    return c < 0x20 || c > 0x7e;
+                }))
+                date.clear();
+            commentTexts[attr(comment, "id")] = {utf8(author), date, text};
+        }
+    }
+    struct CommentMark {
+        std::string id;
+        bool start;
+        std::uint64_t paragraph;
+        std::size_t offset;
+    };
+    std::vector<CommentMark> commentMarks;
     if (!body)
         throw std::runtime_error("DOCX document has no body");
     DocxImport result;
@@ -1009,6 +1075,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             previousNum = id;
         } else
             previousNum.clear();
+        std::vector<CommentMark> marks; // offsets in this paragraph before line-break splits
         std::function<void(pugi::xml_node, unsigned)> readRuns = [&](pugi::xml_node parent,
                                                                      unsigned depth) {
             if (depth > 64)
@@ -1018,6 +1085,13 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                     continue;
                 if (is(run, "bookmarkStart") || is(run, "bookmarkEnd")) {
                     warn(warnings, "DOCX bookmarks are not imported yet.");
+                    continue;
+                }
+                if (is(run, "commentRangeStart") || is(run, "commentRangeEnd")) {
+                    std::size_t offset = 0;
+                    for (const auto &existing : paragraph.runs)
+                        offset += existing.text().size();
+                    marks.push_back({attr(run, "id"), is(run, "commentRangeStart"), 0, offset});
                     continue;
                 }
                 if (is(run, "hyperlink")) {
@@ -1038,7 +1112,9 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                                 : importCharacterStyle(val(child(child(run, "rPr"), "rStyle")), 0);
                     bool pictures = false;
                     for (auto item : run.children()) {
-                        if (is(item, "footnoteReference")) {
+                        if (is(item, "commentReference") || is(item, "annotationRef")) {
+                            // The comment mark; its range markers carry the position.
+                        } else if (is(item, "footnoteReference")) {
                             pictures = true;
                             const auto found = footnoteTexts.find(attr(item, "id"));
                             if (found == footnoteTexts.end()) {
@@ -1091,9 +1167,13 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         readRuns(node, 0);
         Paragraph split = paragraph;
         split.runs.clear();
+        // Where each paragraph made from this one starts in its text, for comment marks.
+        std::vector<std::pair<std::uint64_t, std::size_t>> segments{{split.id, 0}};
+        std::size_t absolute = 0;
         for (const auto &run : paragraph.runs) {
             if (run.atom()) {
                 split.runs.push_back(run);
+                absolute += 1;
                 continue;
             }
             std::size_t start = 0;
@@ -1110,11 +1190,22 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                 split.pageBreakBefore = false;
                 split.runs.clear();
                 start = end + 1;
+                segments.emplace_back(split.id, absolute + start);
             }
+            absolute += run.text().size();
         }
         if (split.runs.empty())
             split.runs.push_back({u"", base});
         document.paragraphs.push_back(std::move(split));
+        for (auto &mark : marks) {
+            auto segment = segments.begin();
+            for (auto it = segments.begin(); it != segments.end(); ++it)
+                if (it->second <= mark.offset)
+                    segment = it;
+            mark.paragraph = segment->first;
+            mark.offset -= segment->second;
+            commentMarks.push_back(std::move(mark));
+        }
         };
     auto emptyParagraph = [&](const std::optional<TableCell> &cell) {
         Paragraph paragraph = defaultParagraph;
@@ -1489,6 +1580,53 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
     adoptStyles(document); // DOCX values arrive resolved; mark those differing from styles direct
     if (simplifiedNotes)
         warn(warnings, "Footnotes are kept as one paragraph of plain text each.");
+    if (!commentTexts.empty()) {
+        std::map<std::string, std::pair<std::optional<Anchor>, std::optional<Anchor>>> ranges;
+        for (const auto &mark : commentMarks) {
+            auto &range = ranges[mark.id];
+            auto &slot = mark.start ? range.first : range.second;
+            if (!slot)
+                slot = Anchor{mark.paragraph, mark.offset,
+                              mark.start ? Affinity::Before : Affinity::After};
+        }
+        // Offsets on grapheme boundaries.
+        auto snap = [&](Anchor anchor) {
+            for (const auto &p : document.paragraphs)
+                if (p.id == anchor.paragraphId) {
+                    const auto boundaries = p.boundaries();
+                    const auto found =
+                        std::lower_bound(boundaries.begin(), boundaries.end(), anchor.offset);
+                    anchor.offset = found == boundaries.end() ? boundaries.back() : *found;
+                }
+            return anchor;
+        };
+        bool unanchored = false;
+        for (const auto &[id, comment] : commentTexts) {
+            const auto found = ranges.find(id);
+            if (found == ranges.end() || (!found->second.first && !found->second.second) ||
+                document.comments.size() >= 10000) {
+                unanchored = true;
+                continue;
+            }
+            auto start = snap(found->second.first ? *found->second.first : *found->second.second);
+            auto end = snap(found->second.second ? *found->second.second : start);
+            start.affinity = Affinity::Before;
+            end.affinity = Affinity::After;
+            const auto from = document.resolve(start), to = document.resolve(end);
+            if (!from || !to) {
+                unanchored = true;
+                continue;
+            }
+            if (*to < *from)
+                end = {start.paragraphId, start.offset, Affinity::After};
+            document.comments.push_back(
+                {document.allocateId(), comment.author, comment.date, comment.text, start, end});
+        }
+        if (unanchored)
+            warn(warnings, "Comments without a marked text range were omitted.");
+        if (simplifiedComments)
+            warn(warnings, "Comments are kept as one paragraph of plain text each.");
+    }
     document.preserved = preservePackage(parts, main, warnings);
     validateDocument(document);
     return result;
@@ -1529,6 +1667,41 @@ std::string serializeDocx(const Document &document) {
     for (const auto &table : document.tables)
         tables.emplace(table.id, &table);
     std::vector<std::uint64_t> footnoteOrder; // footnote ids in reference order
+    // Comment range markers by paragraph index: (offset, end?, exported id).
+    struct Marker {
+        std::size_t offset;
+        bool end;
+        std::size_t id;
+    };
+    std::map<std::size_t, std::vector<Marker>> markers;
+    std::vector<const Comment *> exportedComments;
+    {
+        // Empty covered cells of merged table cells are not written; neither are comments
+        // anchored there.
+        auto written = [&](std::size_t index) {
+            const auto &p = document.paragraphs[index];
+            if (!p.cell || !p.text().empty())
+                return true;
+            for (const auto &table : document.tables)
+                if (table.id == p.cell->tableId)
+                    if (const auto *merge = table.mergeAt(p.cell->row, p.cell->column))
+                        return merge->row == p.cell->row && merge->column == p.cell->column;
+            return true;
+        };
+        for (const auto &comment : document.comments) {
+            const auto start = document.resolve(comment.start), end = document.resolve(comment.end);
+            if (!start || !end || !written(start->paragraph) || !written(end->paragraph))
+                continue;
+            const auto id = exportedComments.size();
+            exportedComments.push_back(&comment);
+            markers[start->paragraph].push_back({start->offset, false, id});
+            markers[end->paragraph].push_back({end->offset, true, id});
+        }
+        for (auto &[index, list] : markers)
+            std::stable_sort(list.begin(), list.end(), [](const Marker &a, const Marker &b) {
+                return a.offset != b.offset ? a.offset < b.offset : !a.end && b.end;
+            });
+    }
     std::optional<TableCell> previousCell;
     pugi::xml_node tableNode, rowNode, cellNode;
     std::vector<double> edges;
@@ -1637,7 +1810,41 @@ std::string serializeDocx(const Document &document) {
                  std::string(paragraph.alignment == Alignment::Center  ? "center"
                              : paragraph.alignment == Alignment::Right ? "right"
                                                                        : "left"));
-        for (const auto &run : paragraph.runs) {
+        // Runs split where comment ranges start or end, with the markers between them.
+        const auto paragraphIndex = static_cast<std::size_t>(&paragraph - document.paragraphs.data());
+        const auto paragraphMarkers = markers.find(paragraphIndex);
+        std::vector<std::pair<std::size_t, Run>> pieces;
+        {
+            std::size_t offset = 0;
+            for (const auto &run : paragraph.runs) {
+                const auto size = run.text().size();
+                std::size_t from = 0;
+                if (!run.atom() && paragraphMarkers != markers.end())
+                    for (const auto &marker : paragraphMarkers->second)
+                        if (marker.offset > offset + from && marker.offset < offset + size) {
+                            pieces.emplace_back(offset + from, run.slice(from, marker.offset - offset));
+                            from = marker.offset - offset;
+                        }
+                pieces.emplace_back(offset + from, from ? run.slice(from, size) : run);
+                offset += size;
+            }
+        }
+        std::size_t nextMarker = 0;
+        auto emitMarkers = [&](std::size_t upTo) {
+            if (paragraphMarkers == markers.end())
+                return;
+            const auto &list = paragraphMarkers->second;
+            while (nextMarker < list.size() && list[nextMarker].offset <= upTo) {
+                const auto &marker = list[nextMarker++];
+                set(element(p, marker.end ? "commentRangeEnd" : "commentRangeStart"), "id",
+                    static_cast<double>(marker.id));
+                if (marker.end)
+                    set(element(element(p, "r"), "commentReference"), "id",
+                        static_cast<double>(marker.id));
+            }
+        };
+        for (const auto &[pieceOffset, run] : pieces) {
+            emitMarkers(pieceOffset);
             auto r = element(p, "r");
             auto rpr = element(r, "rPr");
             if (!run.characterStyle.empty())
@@ -1733,6 +1940,7 @@ std::string serializeDocx(const Document &document) {
                 begin = end + 1;
             }
         }
+        emitMarkers(std::numeric_limits<std::size_t>::max());
     }
     auto section = element(body, "sectPr");
     // Header and footer references come first in sectPr.
@@ -1904,6 +2112,46 @@ std::string serializeDocx(const Document &document) {
             relation.append_attribute("Target") = (name + ".xml").c_str();
             parts.emplace("word/" + name + ".xml", std::move(xmlText));
         }
+        parts["[Content_Types].xml"] = saved(types);
+        parts["word/_rels/document.xml.rels"] = saved(relationships);
+    }
+    if (!exportedComments.empty()) {
+        pugi::xml_document comments;
+        auto root = comments.append_child("w:comments");
+        root.append_attribute("xmlns:w") = wordNs;
+        for (std::size_t index = 0; index < exportedComments.size(); ++index) {
+            const auto &comment = *exportedComments[index];
+            auto node = element(root, "comment");
+            set(node, "id", static_cast<double>(index));
+            set(node, "author", comment.author.empty() ? std::string("Author") : comment.author);
+            if (!comment.date.empty())
+                set(node, "date", comment.date);
+            std::string initials;
+            for (std::size_t i = 0; i < comment.author.size(); ++i)
+                if ((i == 0 || comment.author[i - 1] == ' ') &&
+                    std::isalpha(static_cast<unsigned char>(comment.author[i])))
+                    initials += comment.author[i];
+            if (!initials.empty())
+                set(node, "initials", initials);
+            auto p = element(node, "p");
+            element(element(p, "r"), "annotationRef");
+            auto t = element(element(p, "r"), "t");
+            t.append_attribute("xml:space") = "preserve";
+            t.text().set(utf8(comment.text).c_str());
+        }
+        pugi::xml_document types, relationships;
+        types.load_string(parts.at("[Content_Types].xml").c_str());
+        relationships.load_string(parts.at("word/_rels/document.xml.rels").c_str());
+        auto entry = types.document_element().append_child("Override");
+        entry.append_attribute("PartName") = "/word/comments.xml";
+        entry.append_attribute("ContentType") =
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml";
+        auto relation = relationships.document_element().append_child("Relationship");
+        relation.append_attribute("Id") = "comments";
+        relation.append_attribute("Type") =
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments";
+        relation.append_attribute("Target") = "comments.xml";
+        parts.emplace("word/comments.xml", saved(comments));
         parts["[Content_Types].xml"] = saved(types);
         parts["word/_rels/document.xml.rels"] = saved(relationships);
     }

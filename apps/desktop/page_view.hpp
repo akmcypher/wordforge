@@ -68,6 +68,12 @@ class PageView : public QAbstractScrollArea {
         return editor_.selectedFootnote();
     }
     bool insertFootnote(const std::u16string &text);
+    bool addComment(const std::u16string &text);
+    bool setCommentText(std::uint64_t id, const std::u16string &text);
+    bool deleteComment(std::uint64_t id);
+    // The comment whose range holds the caret (the innermost, latest one), if any.
+    std::optional<std::uint64_t> commentAtCaret() const;
+    void selectRange(Selection);
     bool setFootnoteText(std::uint64_t id, const std::u16string &text);
     std::optional<InlineImage> selectedImage() const {
         return editor_.selectedImage();

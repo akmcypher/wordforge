@@ -479,3 +479,60 @@ TEST(Footnotes, ReferencesAndNotesMustMatch) {
     missing.footnotes.clear();
     EXPECT_THROW(validateDocument(missing), std::invalid_argument);
 }
+
+TEST(Comments, RangesFollowEditsAndUndo) {
+    Editor e;
+    e.replace(u"The quick brown fox");
+    e.selection = {{0, 4}, {0, 9}}; // "quick"
+    const auto id = e.addComment(u"Too informal?", "Ana", "2026-11-16T10:00:00Z");
+    auto text = [&] {
+        const auto range = e.commentRange(id);
+        EXPECT_TRUE(range);
+        const auto p = e.document.paragraphs[range->anchor.paragraph].text();
+        return p.substr(range->anchor.offset, range->focus.offset - range->anchor.offset);
+    };
+    EXPECT_EQ(text(), u"quick");
+    // Typing before the range moves it; typing inside or at its edges grows it.
+    e.selection = {{0, 0}, {0, 0}};
+    e.replace(u"Look: ");
+    EXPECT_EQ(text(), u"quick");
+    e.selection = {{0, 15}, {0, 15}}; // just after "quick"
+    e.replace(u"est");
+    EXPECT_EQ(text(), u"quickest");
+    // Deleting the text collapses the comment to a point; it stays valid.
+    const auto range = *e.commentRange(id);
+    e.selection = {range.anchor, range.focus};
+    e.replace(u"");
+    EXPECT_EQ(text(), u"");
+    EXPECT_NO_THROW(validateDocument(e.document));
+    EXPECT_TRUE(e.undo()); // may also undo the typing grouped with it
+    EXPECT_FALSE(text().empty());
+    e.setCommentText(id, u"Fine.");
+    EXPECT_EQ(e.document.comments[0].text, u"Fine.");
+    EXPECT_TRUE(e.undo());
+    EXPECT_EQ(e.document.comments[0].text, u"Too informal?");
+    e.deleteComment(id);
+    EXPECT_TRUE(e.document.comments.empty());
+    EXPECT_TRUE(e.undo());
+    EXPECT_EQ(e.document.comments.size(), 1u);
+    EXPECT_THROW(e.addComment(u"a\nb", "Ana", ""), std::invalid_argument);
+    EXPECT_THROW(e.deleteComment(id + 99), std::invalid_argument);
+    // A reversed range is rejected.
+    auto reversed = e.document;
+    std::swap(reversed.comments[0].start.offset, reversed.comments[0].end.offset);
+    reversed.comments[0].start.offset = 15;
+    reversed.comments[0].end.offset = 2;
+    EXPECT_THROW(validateDocument(reversed), std::invalid_argument);
+}
+TEST(Comments, SurviveTableStructureEdits) {
+    Editor e;
+    e.insertTable(2, 2);
+    e.replace(u"cell");
+    e.selection = {{0, 0}, {0, 4}};
+    e.addComment(u"About this cell", "Ana", "");
+    e.tableColumn(false); // deletes the column holding the comment
+    EXPECT_NO_THROW(validateDocument(e.document));
+    e.removeTable();
+    EXPECT_NO_THROW(validateDocument(e.document));
+    EXPECT_EQ(e.document.comments.size(), 1u);
+}

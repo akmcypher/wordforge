@@ -113,10 +113,9 @@ void repairBookmarks(Document &document, Position target) {
     std::unordered_set<std::uint64_t> live;
     for (const auto &p : document.paragraphs)
         live.insert(p.id);
-    for (auto &mark : document.bookmarks)
-        if (!live.contains(mark.anchor.paragraphId))
-            mark.anchor = {document.paragraphs[target.paragraph].id, target.offset,
-                           mark.anchor.affinity};
+    for (auto *anchor : document.anchors())
+        if (!live.contains(anchor->paragraphId))
+            *anchor = {document.paragraphs[target.paragraph].id, target.offset, anchor->affinity};
 }
 struct Grid {
     Table *table;

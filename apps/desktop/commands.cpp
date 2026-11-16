@@ -90,6 +90,37 @@ void insertTableDialog(PageView *view, QWidget *parent) {
         view->insertTable(static_cast<std::size_t>(rows->value()),
                           static_cast<std::size_t>(columns->value()));
 }
+// Comment text: one paragraph of plain text. `id` edits an existing comment.
+void commentDialog(PageView *view, QWidget *parent, std::optional<std::uint64_t> id) {
+    QDialog dialog(parent);
+    dialog.setWindowTitle(id ? "Edit comment" : "New comment");
+    dialog.setObjectName("commentDialog");
+    auto *form = new QFormLayout(&dialog);
+    auto *text = new QLineEdit;
+    text->setObjectName("commentText");
+    text->setAccessibleName("Comment text");
+    text->setMaxLength(4000);
+    text->setMinimumWidth(420);
+    if (id)
+        for (const auto &comment : view->document().comments)
+            if (comment.id == *id)
+                text->setText(QString::fromStdU16String(comment.text));
+    form->addRow("Comment", text);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    form->addRow(buttons);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    auto value = text->text().trimmed().toStdU16String();
+    for (auto &character : value)
+        if (character < 0x20 || character == 0x7f || character == 0xfffc)
+            character = u' ';
+    if (id)
+        view->setCommentText(*id, value);
+    else
+        view->addComment(value);
+}
 // Footnote text: one paragraph of plain text. `id` edits an existing footnote.
 void footnoteDialog(PageView *view, QWidget *parent, std::optional<std::uint64_t> id) {
     QDialog dialog(parent);
@@ -419,6 +450,18 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
         if (const auto id = view->selectedFootnote())
             footnoteDialog(view, window_, id);
     })->setIconText("Edit note");
+    create("comment", "Comment…", "Insert",
+           [this, view] { commentDialog(view, window_, std::nullopt); });
+    get("comment")->setIconText("Comment");
+    get("comment")->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_M)); // as in Word
+    create("editComment", "Edit comment…", "Insert", [this, view] {
+        if (const auto id = view->commentAtCaret())
+            commentDialog(view, window_, id);
+    })->setIconText("Edit comment");
+    create("deleteComment", "Delete comment", "Insert", [view] {
+        if (const auto id = view->commentAtCaret())
+            view->deleteComment(*id);
+    })->setIconText("Delete comment");
     create("headerFooter", "Header and footer…", "Insert",
            [this, view] { headerFooterDialog(view, window_); })
         ->setIconText("Header & footer");
@@ -523,6 +566,9 @@ void Commands::sync() {
                      p.indentLeft < 360);
     get("pictureSize")->setEnabled(view_->selectedImage().has_value());
     get("editFootnote")->setEnabled(view_->selectedFootnote().has_value());
+    const bool inComment = view_->commentAtCaret().has_value();
+    get("editComment")->setEnabled(inComment);
+    get("deleteComment")->setEnabled(inComment);
     const auto cell = view_->selectedCell();
     const Table *table = nullptr;
     if (cell)

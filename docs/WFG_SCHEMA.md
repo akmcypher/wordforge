@@ -4,7 +4,10 @@
 carries kept DOCX package parts. Footnotes are root elements `footnote` (`id`, `text`: one
 paragraph of plain text, at most 2000 characters, no control characters) and inline
 elements `note` (`id` naming a footnote, plus the run attributes) inside paragraphs; every
-footnote must be referenced exactly once. Kept parts come from a document imported from
+footnote must be referenced exactly once. Comments are root elements `comment` (`id`,
+`author`, optional `date`, `text`: plain, at most 4000 characters, and the range
+`startParagraph`/`startOffset`, `endParagraph`/`endOffset` as paragraph ids and offsets on
+grapheme boundaries; the start must not come after the end). Kept parts come from a document imported from
 DOCX that carries package parts Wordforge keeps (document properties, theme, settings, font table, web
 settings, custom XML). It is WFG8 in ZIP transport plus root elements `preservedPart`
 (`path` in the DOCX package, `contentType` — absent for `.rels` parts — and `part`, the

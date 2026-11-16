@@ -18,6 +18,11 @@ class FormatPanel : public QDockWidget {
   public:
     FormatPanel(PageView *, Commands &, QWidget *parent = nullptr);
 };
+// Every comment in the document; choosing one selects its text.
+class CommentsPanel : public QDockWidget {
+  public:
+    CommentsPanel(PageView *, Commands &, QWidget *parent = nullptr);
+};
 // Ctrl+K search over every registered command.
 class CommandPalette : public QDialog {
   public:

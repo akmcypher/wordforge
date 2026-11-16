@@ -11,6 +11,7 @@
 #include <QListWidget>
 #include <QMenu>
 #include <QGridLayout>
+#include <QHBoxLayout>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSignalBlocker>
@@ -430,5 +431,59 @@ bool CommandPalette::eventFilter(QObject *watched, QEvent *event) {
         }
     }
     return QDialog::eventFilter(watched, event);
+}
+CommentsPanel::CommentsPanel(PageView *view, Commands &commands, QWidget *parent)
+    : QDockWidget("Comments", parent) {
+    setObjectName("commentsPanel");
+    auto *content = new QWidget;
+    auto *column = new QVBoxLayout(content);
+    auto *list = new QListWidget;
+    list->setObjectName("commentsList");
+    list->setAccessibleName("Comments");
+    list->setWordWrap(true);
+    column->addWidget(list, 1);
+    auto *row = new QHBoxLayout;
+    for (const auto *id : {"comment", "editComment", "deleteComment"}) {
+        auto *button = new QToolButton;
+        button->setDefaultAction(commands.get(id));
+        button->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        button->setFocusPolicy(Qt::NoFocus);
+        row->addWidget(button);
+    }
+    row->addStretch(1);
+    column->addLayout(row);
+    setWidget(content);
+    auto refill = [view, list] {
+        const QSignalBlocker blocker(list);
+        list->clear();
+        const auto current = view->commentAtCaret();
+        for (const auto &comment : view->document().comments) {
+            auto *item = new QListWidgetItem(QString::fromStdString(comment.author) + " · " +
+                                             QString::fromStdU16String(comment.text));
+            item->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(comment.id));
+            item->setToolTip(QString::fromStdString(comment.date));
+            list->addItem(item);
+            if (current == comment.id)
+                list->setCurrentItem(item);
+        }
+        if (list->count() == 0)
+            list->addItem(new QListWidgetItem("No comments. Select text and use Insert → Comment."));
+    };
+    connect(view, &PageView::contentChanged, this, refill);
+    connect(view, &PageView::selectionChanged, this, refill);
+    connect(list, &QListWidget::itemActivated, this, [view](QListWidgetItem *item) {
+        const auto id = item->data(Qt::UserRole);
+        if (!id.isValid())
+            return;
+        for (const auto &comment : view->document().comments)
+            if (comment.id == id.toULongLong()) {
+                const auto start = view->document().resolve(comment.start);
+                const auto end = view->document().resolve(comment.end);
+                if (start && end)
+                    view->selectRange({*start, *end});
+            }
+    });
+    connect(list, &QListWidget::itemClicked, list, &QListWidget::itemActivated);
+    refill();
 }
 } // namespace wf

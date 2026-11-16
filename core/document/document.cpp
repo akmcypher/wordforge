@@ -33,6 +33,7 @@ void validatePreserved(const PreservedPackage &package) {
         return path == "_rels/.rels" || path == "word/_rels/document.xml.rels" ||
                path == "word/document.xml" || path == "word/styles.xml" ||
                path == "word/numbering.xml" || path == "word/footnotes.xml" ||
+               path == "word/comments.xml" ||
                path.starts_with("word/media/") ||
                path == "word/header.xml" || path == "word/footer.xml" ||
                path == "word/headerFirst.xml" || path == "word/footerFirst.xml";
@@ -136,8 +137,23 @@ void validateDocument(const Document &document) {
     if (noteReferences.size() != document.footnotes.size())
         throw std::invalid_argument("A footnote has no reference in the text");
     std::unordered_set<std::string> names;
-    if (!document.bookmarks.empty())
+    if (!document.bookmarks.empty() || !document.comments.empty())
         (void)document.bookmarkPositions();
+    if (document.comments.size() > 10000)
+        throw std::invalid_argument("Too many comments");
+    for (const auto &comment : document.comments) {
+        if (!comment.id || comment.id >= document.nextId || !ids.insert(comment.id).second)
+            throw std::invalid_argument("Invalid comment identifier");
+        validateCommentText(comment.text);
+        validateCommentAuthor(comment.author);
+        if (comment.date.size() > 64 ||
+            std::any_of(comment.date.begin(), comment.date.end(),
+                        [](char c) { return c < 0x20 || c > 0x7e; }))
+            throw std::invalid_argument("Invalid comment date");
+        const auto start = document.resolve(comment.start), end = document.resolve(comment.end);
+        if (!start || !end || *end < *start)
+            throw std::invalid_argument("Comment range is dangling or reversed");
+    }
     for (const auto &bookmark : document.bookmarks) {
         validateBookmarkName(bookmark.name);
         if (!bookmark.id || bookmark.id >= document.nextId || !ids.insert(bookmark.id).second ||
@@ -359,6 +375,7 @@ ChangeSet Editor::transact(const std::function<void(Editor &)> &command) {
     changes.resourcesChanged = document.images != candidate.document.images;
     changes.tablesChanged = document.tables != candidate.document.tables;
     changes.notesChanged = document.footnotes != candidate.document.footnotes;
+    changes.commentsChanged = document.comments != candidate.document.comments;
     for (const auto &table : candidate.document.tables)
         if (table.id < idHighWater_ && std::none_of(
                                            document.tables.begin(), document.tables.end(),
@@ -401,6 +418,7 @@ ChangeSet Editor::transact(const std::function<void(Editor &)> &command) {
     const bool contentChanged = changes.pageChanged || changes.orderChanged ||
                                 changes.bookmarksChanged || changes.resourcesChanged ||
                                 changes.tablesChanged || changes.notesChanged ||
+                                changes.commentsChanged ||
                                 !changes.inserted.empty() ||
                                 !changes.removed.empty() || !changes.changed.empty();
     if (contentChanged) {
