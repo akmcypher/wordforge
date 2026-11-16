@@ -20,8 +20,11 @@ frozen. Development happens here only.
   publish focused commits. Do not leave empty feature shells or duplicate models.
 - Never close a user's running editor to unlock a build. Use a new build directory.
 - Imports must preserve the active document on failure. Partial DOCX imports
-  currently require a warning/consent and open as copies; this is not unknown-part
-  preservation. Keep that distinction until a preservation registry is implemented.
+  require a warning/consent and open as copies. A package-part registry
+  (`PreservedPackage`) keeps document properties, theme, settings, font table, web
+  settings and custom XML byte for byte; unknown content inside the document body
+  (comments, footnotes, fields, unknown elements) is still omitted with a warning. Do
+  not describe this as full DOCX preservation.
 - Test both actual Windows and Ubuntu paths where available. Offscreen tests
   alone do not prove desktop accessibility, installed packaging or Word fidelity.
 - The user prefers autonomous phased implementation; routine engineering choices

@@ -195,7 +195,9 @@ std::string serializeNative(const Document &document) {
             if (const auto *image = run.image())
                 imageIds.insert(image->resourceId);
     const bool tables = !document.tables.empty();
-    const bool packaged = tables || !imageIds.empty();
+    // WFG9 only when DOCX package parts are kept; they need the ZIP transport.
+    const bool preserving = document.preserved != nullptr;
+    const bool packaged = tables || !imageIds.empty() || preserving;
     // WFG6 only when styles were customized; built-in styles keep files readable by 0.6.0.
     const bool styled = document.styles != builtinStyles();
     // WFG7 only when character styles exist, so other styled files stay readable by 0.6.2.
@@ -208,8 +210,9 @@ std::string serializeNative(const Document &document) {
         std::any_of(document.tables.begin(), document.tables.end(),
                     [](const Table &t) { return !t.widths.empty() || !t.merges.empty(); });
     // WFG6 and later store paragraph style names and direct-formatting masks.
-    const bool semantic = styled || banded;
-    root.append_attribute("version") = banded                       ? "8"
+    const bool semantic = styled || banded || preserving;
+    root.append_attribute("version") = preserving                   ? "9"
+                                       : banded                     ? "8"
                                        : characterStyled            ? "7"
                                        : styled                     ? "6"
                                        : tables                     ? "5"
@@ -253,6 +256,25 @@ std::string serializeNative(const Document &document) {
         if (!style.basedOn.empty())
             node.append_attribute("basedOn") = style.basedOn.c_str();
         writeCharacterProperties(node, style.character);
+    }
+    if (preserving) {
+        std::size_t number = 0;
+        for (const auto &part : document.preserved->parts) {
+            const auto stored = "preserved/" + std::to_string(number++);
+            auto node = root.append_child("preservedPart");
+            node.append_attribute("path") = part.path.c_str();
+            if (!part.contentType.empty())
+                node.append_attribute("contentType") = part.contentType.c_str();
+            node.append_attribute("part") = stored.c_str();
+            parts.emplace(stored, part.data);
+        }
+        for (const auto &relationship : document.preserved->relationships) {
+            auto node = root.append_child("preservedRelationship");
+            if (relationship.package)
+                node.append_attribute("package") = "true";
+            node.append_attribute("type") = relationship.type.c_str();
+            node.append_attribute("target") = relationship.target.c_str();
+        }
     }
     for (const auto &table : document.tables) {
         auto node = root.append_child("table");
@@ -373,10 +395,12 @@ Document parseNative(const std::string &input) {
     const std::string_view version = root.attribute("version").value();
     if (std::string_view(root.name()) != "wordforge" ||
         (version != "1" && version != "2" && version != "3" && version != "4" && version != "5" &&
-         version != "6" && version != "7" && version != "8"))
+         version != "6" && version != "7" && version != "8" && version != "9"))
         throw std::runtime_error("Unsupported native document version");
     // WFG7 is WFG6 plus character styles; WFG8 adds headers and footers.
-    const bool v8 = version == "8";
+    // WFG9 adds DOCX package parts kept from an imported file.
+    const bool v9 = version == "9";
+    const bool v8 = version == "8" || v9;
     const bool v7 = version == "7" || v8;
     const bool v6 = version == "6" || v7;
     if (!v6 && packaged != (version == "4" || version == "5"))
@@ -390,6 +414,7 @@ Document parseNative(const std::string &input) {
     Document document;
     document.paragraphs.clear();
     document.nextId = 1;
+    std::shared_ptr<PreservedPackage> preserved;
     if (v6)
         document.styles.paragraphStyles.clear();
     document.page = {number(root, "width", 595.28, 72, 2880),
@@ -401,6 +426,30 @@ Document parseNative(const std::string &input) {
     for (auto p : root.children()) {
         if (indentation(p))
             continue;
+        if (v9 && std::string_view(p.name()) == "preservedPart") {
+            attributes(p, {"path", "contentType", "part"});
+            if (p.first_child() || !packaged)
+                throw std::runtime_error("Invalid preserved document part");
+            const std::string stored = p.attribute("part").value();
+            if (!stored.starts_with("preserved/") || !parts.contains(stored) ||
+                !consumed.insert(stored).second)
+                throw std::runtime_error("Invalid or duplicate preserved document part");
+            if (!preserved)
+                preserved = std::make_shared<PreservedPackage>();
+            preserved->parts.push_back(
+                {p.attribute("path").value(), p.attribute("contentType").value(), parts.at(stored)});
+            continue;
+        }
+        if (v9 && std::string_view(p.name()) == "preservedRelationship") {
+            attributes(p, {"package", "type", "target"});
+            if (p.first_child())
+                throw std::runtime_error("Invalid preserved document relationship");
+            if (!preserved)
+                preserved = std::make_shared<PreservedPackage>();
+            preserved->relationships.push_back(
+                {boolean(p, "package"), p.attribute("type").value(), p.attribute("target").value()});
+            continue;
+        }
         if (v8 && (std::string_view(p.name()) == "header" || std::string_view(p.name()) == "footer")) {
             attributes(p, {"left", "center", "right"});
             for (auto nested : p.children())
@@ -598,6 +647,16 @@ Document parseNative(const std::string &input) {
     }
     if (version != "1")
         document.nextId = identifier(root, "nextId");
+    if (preserved) {
+        if (preserved->parts.empty())
+            throw std::runtime_error("Preserved relationships without parts");
+        try {
+            validatePreserved(*preserved);
+        } catch (const std::invalid_argument &error) {
+            throw std::runtime_error(error.what());
+        }
+        document.preserved = std::move(preserved);
+    }
     if (packaged && consumed.size() != parts.size())
         throw std::runtime_error("Unknown native package part; refusing lossy import");
     validateDocument(document);

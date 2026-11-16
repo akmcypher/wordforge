@@ -1,5 +1,6 @@
 #include "core/document/document.hpp"
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -22,8 +23,53 @@ std::uint64_t Document::allocateId() {
         throw std::overflow_error("Document node identifiers exhausted");
     return nextId++;
 }
+void validatePreserved(const PreservedPackage &package) {
+    auto printable = [](const std::string &text) {
+        return !text.empty() && text.size() <= 255 &&
+               std::all_of(text.begin(), text.end(), [](char c) { return c >= 0x20 && c < 0x7f; });
+    };
+    // Paths Wordforge writes itself when saving DOCX.
+    auto reserved = [](const std::string &path) {
+        return path == "_rels/.rels" || path == "word/_rels/document.xml.rels" ||
+               path == "word/document.xml" || path == "word/styles.xml" ||
+               path == "word/numbering.xml" || path.starts_with("word/media/") ||
+               path == "word/header.xml" || path == "word/footer.xml" ||
+               path == "word/headerFirst.xml" || path == "word/footerFirst.xml";
+    };
+    if (package.parts.size() > maxPreservedParts || package.relationships.size() > 64)
+        throw std::invalid_argument("Too many preserved document parts");
+    std::size_t total = 0;
+    std::unordered_set<std::string> paths;
+    for (const auto &part : package.parts) {
+        const auto &path = part.path;
+        bool safe = printable(path) && path.front() != '/' && path.back() != '/' &&
+                    path.find("//") == std::string::npos;
+        for (char c : path)
+            safe = safe && (std::isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '_' ||
+                            c == '-' || c == '/');
+        for (std::size_t start = 0; safe && start <= path.size();) {
+            const auto end = std::min(path.find('/', start), path.size());
+            const auto segment = path.substr(start, end - start);
+            safe = segment != "." && segment != "..";
+            start = end + 1;
+        }
+        const bool relationships = path.ends_with(".rels");
+        if (!safe || reserved(path) || !paths.insert(path).second ||
+            (relationships ? !part.contentType.empty() : !printable(part.contentType)))
+            throw std::invalid_argument("Invalid preserved document part");
+        total += part.data.size();
+    }
+    if (total > maxPreservedBytes)
+        throw std::invalid_argument("Preserved document parts exceed 16 MiB");
+    for (const auto &relationship : package.relationships)
+        if (!printable(relationship.type) || !paths.contains(relationship.target) ||
+            relationship.target.ends_with(".rels"))
+            throw std::invalid_argument("Invalid preserved document relationship");
+}
 void validateDocument(const Document &document) {
     validatePage(document.page);
+    if (document.preserved)
+        validatePreserved(*document.preserved);
     if (document.paragraphs.empty() || !document.nextId)
         throw std::invalid_argument("Document requires paragraphs and a valid allocator");
     std::unordered_set<std::uint64_t> ids;

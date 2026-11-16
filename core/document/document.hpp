@@ -142,8 +142,29 @@ struct Bookmark {
     bool operator==(const Bookmark &) const = default;
 };
 void validateBookmarkName(const std::string &);
+// DOCX package parts Wordforge does not edit (document properties, theme, settings, font
+// table, web settings, custom XML) kept byte for byte from an imported file, so saving to
+// DOCX writes them back. This is package-part preservation only: unknown content inside
+// the document body is still omitted (with a warning) on import.
+struct PreservedPart {
+    std::string path, contentType, data; // relationship parts (.rels) have no content type
+    bool operator==(const PreservedPart &) const = default;
+};
+struct PreservedRelationship {
+    bool package = false; // from the package root; otherwise from the main document
+    std::string type, target; // target: the path of a preserved part
+    bool operator==(const PreservedRelationship &) const = default;
+};
+struct PreservedPackage {
+    std::vector<PreservedPart> parts;
+    std::vector<PreservedRelationship> relationships;
+    bool operator==(const PreservedPackage &) const = default;
+};
+constexpr std::size_t maxPreservedBytes = 16 * 1024 * 1024, maxPreservedParts = 256;
+void validatePreserved(const PreservedPackage &);
 struct Document {
     std::vector<Paragraph> paragraphs{{1}};
+    std::shared_ptr<const PreservedPackage> preserved; // set by DOCX import
     std::vector<Bookmark> bookmarks;
     ImageResources images;
     std::vector<Table> tables;

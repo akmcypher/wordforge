@@ -402,3 +402,33 @@ TEST(Clipboard, FragmentRoundTripKeepsFormattingInOneUndoStep) {
     EXPECT_TRUE(target.undo());
     EXPECT_EQ(target.document.text(), u"<>");
 }
+
+TEST(Preservation, PartsAndRelationshipsAreValidated) {
+    auto valid = [] {
+        PreservedPackage package;
+        package.parts = {{"word/theme/theme1.xml", "application/x-theme", "<t/>"}};
+        package.relationships = {{false, "http://example/theme", "word/theme/theme1.xml"}};
+        return package;
+    };
+    EXPECT_NO_THROW(validatePreserved(valid()));
+    for (const auto *path : {"", "/abs.xml", "word/../x.xml", "word//x.xml", "a\\b.xml",
+                             "[Content_Types].xml", "word/document.xml", "word/media/a.png",
+                             "_rels/.rels", "word/x y.xml"}) {
+        auto package = valid();
+        package.parts[0].path = path;
+        package.relationships.clear();
+        EXPECT_THROW(validatePreserved(package), std::invalid_argument) << path;
+    }
+    auto package = valid();
+    package.parts.push_back(package.parts[0]); // duplicate
+    EXPECT_THROW(validatePreserved(package), std::invalid_argument);
+    package = valid();
+    package.parts[0].contentType.clear();
+    EXPECT_THROW(validatePreserved(package), std::invalid_argument);
+    package = valid();
+    package.relationships[0].target = "word/other.xml";
+    EXPECT_THROW(validatePreserved(package), std::invalid_argument);
+    package = valid();
+    package.parts[0].data.assign(maxPreservedBytes + 1, 'x');
+    EXPECT_THROW(validatePreserved(package), std::invalid_argument);
+}

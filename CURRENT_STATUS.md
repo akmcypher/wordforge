@@ -1,5 +1,17 @@
 # Current status
 
+2026-11-16 — DOCX package-part preservation (P0, first slice). Opening a Word file now
+keeps, byte for byte, the package parts Wordforge does not edit: document properties
+(title, author, company), theme, settings (compatibility options, tab stop, zoom), font
+table, web settings and custom XML, with the parts they reference. Saving to DOCX writes
+them back with their relationships and content types; they survive edits, undo, .wfg
+saves (WFG9) and recovery drafts. Settings that would point at dropped content
+(footnote separators, even-page headers) are removed; a part whose references cannot all
+be kept is not kept. The import prompt now names parts that are still dropped
+(comments, footnotes with content, others). Not yet: body-level unknown content
+(comments, footnotes, fields, content controls, tracked changes), thumbnails. Windows
+ARM64: all 6 suites pass; Ubuntu by CI. Not opened in Microsoft Word yet.
+
 2026-11-16 — v0.6.4 released: Windows installers/ZIPs on GitHub, Snap `latest/stable` 0.6.4
 (amd64 rev 26, arm64 rev 27). Contains DOCX table and picture import, headers/footers/page numbers,
 merged table cells and column widths (entries below). Notes: docs/releases/v0.6.4.md.

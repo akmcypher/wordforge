@@ -711,3 +711,134 @@ TEST(Docx, MergedCellsAndColumnWidthsRoundTrip) {
     EXPECT_EQ(merged, u"top|typed|");
     EXPECT_NO_THROW(validateDocument(imported.document));
 }
+
+namespace {
+std::string fixture(const char *name) {
+    std::ifstream file(std::filesystem::path(__FILE__).parent_path().parent_path() / "fixtures" / name,
+                       std::ios::binary);
+    return {std::istreambuf_iterator<char>(file), {}};
+}
+const PreservedPart *keptPart(const Document &document, const std::string &path) {
+    if (!document.preserved)
+        return nullptr;
+    for (const auto &part : document.preserved->parts)
+        if (part.path == path)
+            return &part;
+    return nullptr;
+}
+} // namespace
+TEST(Docx, KeepsDocumentPropertiesThemeSettingsAndCustomXmlThroughEditsAndSave) {
+    const auto bytes = fixture("python-docx-basic.docx");
+    ASSERT_FALSE(bytes.empty());
+    const auto source = opc::read(bytes);
+    auto imported = parseDocx(bytes);
+    auto &document = imported.document;
+    ASSERT_TRUE(document.preserved);
+    for (const auto *path :
+         {"docProps/core.xml", "docProps/app.xml", "word/theme/theme1.xml", "word/settings.xml",
+          "word/webSettings.xml", "word/fontTable.xml", "customXml/item1.xml",
+          "customXml/_rels/item1.xml.rels", "customXml/itemProps1.xml"}) {
+        const auto *part = keptPart(document, path);
+        ASSERT_NE(part, nullptr) << path;
+        EXPECT_EQ(part->data, source.at(path)) << path; // byte for byte
+    }
+    EXPECT_FALSE(keptPart(document, "docProps/thumbnail.jpeg")); // stale after edits
+    EXPECT_FALSE(keptPart(document, "word/stylesWithEffects.xml"));
+    EXPECT_EQ(document.preserved->relationships.size(), 7u);
+    for (const auto &warning : imported.warnings)
+        EXPECT_EQ(warning.find("not kept"), std::string::npos) << warning;
+
+    // Edit, save, and look at the package Word would read.
+    Editor editor;
+    editor.document = document;
+    editor.selection = {{0, 0}, {0, 0}};
+    editor.replace(u"Edited. ");
+    const auto saved = opc::read(serializeDocx(editor.document));
+    for (const auto *path : {"docProps/core.xml", "word/theme/theme1.xml", "customXml/item1.xml",
+                             "customXml/itemProps1.xml", "customXml/_rels/item1.xml.rels"})
+        EXPECT_EQ(saved.at(path), source.at(path)) << path;
+    pugi::xml_document rels, documentRels, types;
+    ASSERT_TRUE(rels.load_string(saved.at("_rels/.rels").c_str()));
+    ASSERT_TRUE(documentRels.load_string(saved.at("word/_rels/document.xml.rels").c_str()));
+    ASSERT_TRUE(types.load_string(saved.at("[Content_Types].xml").c_str()));
+    EXPECT_STREQ(rels.select_node("//*[contains(@Type,'core-properties')]").node()
+                     .attribute("Target").value(),
+                 "docProps/core.xml");
+    EXPECT_STREQ(documentRels.select_node("//*[contains(@Type,'/theme')]").node()
+                     .attribute("Target").value(),
+                 "theme/theme1.xml");
+    EXPECT_STREQ(documentRels.select_node("//*[contains(@Type,'/customXml')]").node()
+                     .attribute("Target").value(),
+                 "../customXml/item1.xml");
+    EXPECT_STREQ(types.select_node("//*[@PartName='/customXml/itemProps1.xml']").node()
+                     .attribute("ContentType").value(),
+                 "application/vnd.openxmlformats-officedocument.customXmlProperties+xml");
+    // Every internal relationship target exists.
+    for (const auto &[path, data] : saved) {
+        if (!path.ends_with(".rels"))
+            continue;
+        pugi::xml_document relationships;
+        ASSERT_TRUE(relationships.load_string(data.c_str()));
+        const auto directory = path.substr(0, path.find("_rels/"));
+        for (auto node : relationships.document_element().children()) {
+            if (std::string_view(node.attribute("TargetMode").value()) == "External")
+                continue;
+            const auto target = (std::filesystem::path(directory) / node.attribute("Target").value())
+                                    .lexically_normal()
+                                    .generic_string();
+            EXPECT_TRUE(saved.contains(target)) << path << " -> " << target;
+        }
+    }
+    // Reopening keeps the same parts.
+    const auto again = parseDocx(opc::write(saved));
+    ASSERT_TRUE(again.document.preserved);
+    EXPECT_EQ(*again.document.preserved, *document.preserved);
+    EXPECT_EQ(again.document.paragraphs[0].text().substr(0, 8), u"Edited. ");
+}
+TEST(Docx, NamesDroppedPartsAndKeepsOnlyCompleteOnes) {
+    const std::string w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    const std::string rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
+    auto parts = wordDocument(
+        "<w:p><w:r><w:t>x</w:t></w:r></w:p>",
+        "<Relationship Id='s' Type='" + rel + "settings' Target='settings.xml'/>"
+        "<Relationship Id='t' Type='" + rel + "theme' Target='theme/theme1.xml'/>"
+        "<Relationship Id='c' Type='" + rel + "comments' Target='comments.xml'/>"
+        "<Relationship Id='f' Type='" + rel + "footnotes' Target='footnotes.xml'/>");
+    parts["word/settings.xml"] =
+        "<w:settings xmlns:w='" + w + "'><w:zoom w:percent='100'/><w:evenAndOddHeaders/>"
+        "<w:footnotePr><w:footnote w:id='-1'/></w:footnotePr><w:defaultTabStop w:val='720'/>"
+        "</w:settings>";
+    // The theme references an image that is missing: it is not kept.
+    parts["word/theme/theme1.xml"] = "<a:theme xmlns:a='http://schemas.openxmlformats.org/"
+                                     "drawingml/2006/main' name='T'/>";
+    parts["word/theme/_rels/theme1.xml.rels"] =
+        "<Relationships xmlns='http://schemas.openxmlformats.org/package/2006/relationships'>"
+        "<Relationship Id='i' Type='" + rel + "image' Target='../media/gone.png'/></Relationships>";
+    parts["word/comments.xml"] = "<w:comments xmlns:w='" + w +
+                                 "'><w:comment w:id='1'><w:p/></w:comment></w:comments>";
+    parts["word/footnotes.xml"] = "<w:footnotes xmlns:w='" + w +
+                                  "'><w:footnote w:type='separator' w:id='-1'><w:p/></w:footnote>"
+                                  "</w:footnotes>"; // separators only: nothing to miss
+    auto &types = parts["[Content_Types].xml"];
+    types.insert(types.rfind("</Types>"),
+                 "<Override PartName='/word/settings.xml' ContentType='application/"
+                 "vnd.openxmlformats-officedocument.wordprocessingml.settings+xml'/>"
+                 "<Override PartName='/word/theme/theme1.xml' ContentType='application/"
+                 "vnd.openxmlformats-officedocument.theme+xml'/>");
+    const auto imported = parseDocx(opc::write(parts));
+    ASSERT_TRUE(imported.document.preserved);
+    const auto *settings = keptPart(imported.document, "word/settings.xml");
+    ASSERT_NE(settings, nullptr);
+    EXPECT_EQ(settings->data.find("footnotePr"), std::string::npos);
+    EXPECT_EQ(settings->data.find("evenAndOddHeaders"), std::string::npos);
+    EXPECT_NE(settings->data.find("defaultTabStop"), std::string::npos);
+    EXPECT_FALSE(keptPart(imported.document, "word/theme/theme1.xml"));
+    std::string named;
+    for (const auto &warning : imported.warnings)
+        if (warning.find("not kept when saving") != std::string::npos)
+            named = warning;
+    EXPECT_NE(named.find("comments"), std::string::npos);
+    EXPECT_EQ(named.find("footnotes"), std::string::npos);
+    // A document without kept parts exports exactly as before.
+    EXPECT_FALSE(parseDocx(serializeDocx(Document{})).document.preserved);
+}

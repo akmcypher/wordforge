@@ -1,6 +1,7 @@
 #include "core/formats/docx.hpp"
 #include "core/formats/zip_package.hpp"
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <cmath>
 #include <filesystem>
@@ -339,6 +340,190 @@ std::string relationship(const opc::Parts &parts, const std::string &owner, cons
         return resolved;
     }
     return {};
+}
+std::string relationshipsPath(const std::string &owner) {
+    if (owner.empty())
+        return "_rels/.rels";
+    const auto path = std::filesystem::path(owner);
+    return (path.parent_path() / "_rels" / (path.filename().string() + ".rels")).generic_string();
+}
+struct OwnedRelationship {
+    std::string type, target; // target: a resolved part path, or empty when external
+};
+// Every relationship of `owner`; internal targets resolved to part paths.
+std::vector<OwnedRelationship> relationshipsOf(const opc::Parts &parts, const std::string &owner) {
+    std::vector<OwnedRelationship> result;
+    const auto found = parts.find(relationshipsPath(owner));
+    if (found == parts.end())
+        return result;
+    auto relationships = xml(found->second);
+    const auto directory = std::filesystem::path(owner).parent_path();
+    for (auto node : relationships.document_element().children()) {
+        if (local(node.name()) != "Relationship" || namespaceOf(node, node.name()) != relNs)
+            continue;
+        OwnedRelationship relation{node.attribute("Type").value(), {}};
+        if (std::string_view(node.attribute("TargetMode").value()) != "External") {
+            const std::string target = node.attribute("Target").value();
+            if (target.empty() || target.find('\\') != std::string::npos ||
+                target.find(':') != std::string::npos || target.find('%') != std::string::npos)
+                continue;
+            relation.target = (target.front() == '/' ? std::filesystem::path(target.substr(1))
+                                                     : directory / target)
+                                  .lexically_normal()
+                                  .generic_string();
+            if (relation.target.starts_with("../") || relation.target == "..")
+                continue;
+        }
+        result.push_back(std::move(relation));
+    }
+    return result;
+}
+std::string relationshipKind(const std::string &type) {
+    return type.substr(type.rfind('/') + 1);
+}
+// Keeps the package parts Wordforge does not edit: document properties, theme, settings,
+// font table, web settings and custom XML, with the parts they reference.
+std::shared_ptr<const PreservedPackage> preservePackage(const opc::Parts &parts,
+                                                        const std::string &main,
+                                                        std::vector<std::string> &warnings) {
+    std::map<std::string, std::string> overrides, defaults;
+    auto types = xml(parts.at("[Content_Types].xml"));
+    for (auto node : types.document_element().children()) {
+        if (local(node.name()) == "Override")
+            overrides[node.attribute("PartName").value()] = node.attribute("ContentType").value();
+        else if (local(node.name()) == "Default") {
+            std::string extension = node.attribute("Extension").value();
+            std::transform(extension.begin(), extension.end(), extension.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            defaults[extension] = node.attribute("ContentType").value();
+        }
+    }
+    auto contentType = [&](const std::string &path) -> std::string {
+        if (const auto found = overrides.find("/" + path); found != overrides.end())
+            return found->second;
+        auto extension = std::filesystem::path(path).extension().string();
+        if (extension.empty())
+            return {};
+        extension.erase(0, 1);
+        std::transform(extension.begin(), extension.end(), extension.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        const auto found = defaults.find(extension);
+        return found == defaults.end() ? std::string{} : found->second;
+    };
+    auto package = std::make_shared<PreservedPackage>();
+    std::set<std::string> included, visiting;
+    std::size_t total = 0;
+    bool tooLarge = false;
+    auto acceptable = [&](const PreservedPart &part) {
+        PreservedPackage single{{part}, {}};
+        try {
+            validatePreserved(single);
+            return true;
+        } catch (const std::invalid_argument &) {
+            return false;
+        }
+    };
+    std::function<bool(const std::string &)> include = [&](const std::string &path) -> bool {
+        if (included.contains(path) || visiting.contains(path))
+            return true;
+        const auto found = parts.find(path);
+        PreservedPart part{path, contentType(path), {}};
+        if (found == parts.end() || part.contentType.empty() || !acceptable(part))
+            return false;
+        visiting.insert(path);
+        // The parts it references come along; a part whose references cannot be kept is not
+        // kept either, so no dangling relationship is written.
+        bool complete = true;
+        for (const auto &relation : relationshipsOf(parts, path))
+            if (!relation.target.empty())
+                complete = include(relation.target) && complete;
+        visiting.erase(path);
+        if (!complete)
+            return false;
+        const auto rels = relationshipsPath(path);
+        const auto relsFound = parts.find(rels);
+        const auto size = found->second.size() + (relsFound == parts.end() ? 0 : relsFound->second.size());
+        if (total + size > maxPreservedBytes || package->parts.size() + 2 > maxPreservedParts) {
+            tooLarge = true;
+            return false;
+        }
+        total += size;
+        part.data = found->second;
+        package->parts.push_back(std::move(part));
+        if (relsFound != parts.end())
+            package->parts.push_back({rels, {}, relsFound->second});
+        included.insert(path);
+        return true;
+    };
+    auto roots = [&](const std::string &owner, bool fromPackage,
+                     std::initializer_list<std::string_view> kinds) {
+        for (const auto &relation : relationshipsOf(parts, owner)) {
+            const auto kind = relationshipKind(relation.type);
+            if (relation.target.empty() ||
+                std::find(kinds.begin(), kinds.end(), kind) == kinds.end())
+                continue;
+            if (include(relation.target))
+                package->relationships.push_back({fromPackage, relation.type, relation.target});
+        }
+    };
+    roots("", true, {"core-properties", "extended-properties", "custom-properties"});
+    roots(main, false, {"theme", "settings", "fontTable", "webSettings", "customXml"});
+    if (tooLarge)
+        warn(warnings, "Some document parts (theme, fonts or custom data) are too large to keep.");
+    // Settings name footnote separators and even-page headers that are not kept.
+    for (auto &part : package->parts) {
+        if (part.contentType !=
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml")
+            continue;
+        auto settings = xml(part.data);
+        std::vector<pugi::xml_node> removed;
+        for (auto node : settings.document_element().children())
+            if (is(node, "footnotePr") || is(node, "endnotePr") || is(node, "evenAndOddHeaders"))
+                removed.push_back(node);
+        if (!removed.empty()) {
+            for (auto node : removed)
+                settings.document_element().remove_child(node);
+            std::ostringstream output;
+            settings.save(output, "", pugi::format_raw, pugi::encoding_utf8);
+            part.data = output.str();
+        }
+    }
+    // Name what is still dropped, ignoring parts that hold nothing a reader would miss.
+    std::set<std::string> lost;
+    for (const auto &relation : relationshipsOf(parts, main)) {
+        const auto kind = relationshipKind(relation.type);
+        static const std::set<std::string> handled{
+            "styles",     "numbering", "image",       "header",      "footer",
+            "theme",      "settings",  "fontTable",   "webSettings", "customXml",
+            "hyperlink",  "stylesWithEffects", "commentsExtended", "commentsIds",
+            "commentsExtensible", "people"};
+        if (relation.target.empty() || handled.contains(kind))
+            continue;
+        const auto found = parts.find(relation.target);
+        if (found != parts.end() && (kind == "footnotes" || kind == "endnotes" || kind == "comments")) {
+            bool content = false;
+            try {
+                auto notes = xml(found->second);
+                for (auto node : notes.document_element().children())
+                    if (node.type() == pugi::node_element && attr(node, "type").empty())
+                        content = true;
+            } catch (const std::exception &) {
+                content = true;
+            }
+            if (!content)
+                continue;
+        }
+        lost.insert(kind);
+    }
+    if (!lost.empty()) {
+        std::string names;
+        for (const auto &kind : lost)
+            names += (names.empty() ? "" : ", ") + kind;
+        warn(warnings, "These document parts are not kept when saving: " + names + ".");
+    }
+    if (package->parts.empty())
+        return nullptr;
+    return package;
 }
 // Writes the character formatting `value` into rPr. With `base`, only what differs from
 // it, as a style definition: b/i/strike there toggle the inherited value.
@@ -1237,6 +1422,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             document.styles.find(id)->next = target;
     }
     adoptStyles(document); // DOCX values arrive resolved; mark those differing from styles direct
+    document.preserved = preservePackage(parts, main, warnings);
     validateDocument(document);
     return result;
 }
@@ -1644,6 +1830,36 @@ std::string serializeDocx(const Document &document) {
             parts.emplace("word/" + name + ".xml", std::move(xmlText));
         }
         parts["[Content_Types].xml"] = saved(types);
+        parts["word/_rels/document.xml.rels"] = saved(relationships);
+    }
+    if (document.preserved) {
+        pugi::xml_document types, packageRelationships, relationships;
+        types.load_string(parts.at("[Content_Types].xml").c_str());
+        packageRelationships.load_string(parts.at("_rels/.rels").c_str());
+        relationships.load_string(parts.at("word/_rels/document.xml.rels").c_str());
+        for (const auto &part : document.preserved->parts) {
+            if (!parts.emplace(part.path, part.data).second)
+                throw std::runtime_error("A kept document part collides with generated content");
+            if (part.contentType.empty())
+                continue;
+            auto entry = types.document_element().append_child("Override");
+            entry.append_attribute("PartName") = ("/" + part.path).c_str();
+            entry.append_attribute("ContentType") = part.contentType.c_str();
+        }
+        int number = 0;
+        for (const auto &relation : document.preserved->relationships) {
+            auto node = (relation.package ? packageRelationships : relationships)
+                            .document_element()
+                            .append_child("Relationship");
+            node.append_attribute("Id") = ("kept" + std::to_string(++number)).c_str();
+            node.append_attribute("Type") = relation.type.c_str();
+            const auto target = relation.package                    ? relation.target
+                                : relation.target.starts_with("word/") ? relation.target.substr(5)
+                                                                       : "../" + relation.target;
+            node.append_attribute("Target") = target.c_str();
+        }
+        parts["[Content_Types].xml"] = saved(types);
+        parts["_rels/.rels"] = saved(packageRelationships);
         parts["word/_rels/document.xml.rels"] = saved(relationships);
     }
     return opc::write(parts);

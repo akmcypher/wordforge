@@ -3,7 +3,10 @@
 #include "apps/desktop/page_view.hpp"
 #include "apps/desktop/recovery_file.hpp"
 #include "apps/desktop/spelling.hpp"
+#include "core/formats/zip_package.hpp"
 #include <QAction>
+#include <QTimer>
+#include <QMessageBox>
 #include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
@@ -339,6 +342,37 @@ class DesktopTest : public QObject {
         malformed.close();
         QVERIFY_THROWS_EXCEPTION(std::exception, reader.openFile(malformed.fileName()));
         QCOMPARE(reader.pageView()->document().text(), writer.pageView()->document().text());
+    }
+    void docxPackagePartsSurviveOpenEditSaveAndRecovery() {
+        QTemporaryDir directory;
+        const auto source = QString::fromStdString(
+            (std::filesystem::path(__FILE__).parent_path().parent_path() /
+             "fixtures/python-docx-basic.docx")
+                .string());
+        wf::MainWindow window;
+        // Accept the import-limitations prompt if the file triggers one.
+        QTimer::singleShot(0, &window, [] {
+            if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget()))
+                box->button(QMessageBox::Open)->click();
+        });
+        window.openFile(source);
+        auto *view = window.pageView();
+        QVERIFY(view->document().preserved);
+        view->insertText("Edited ");
+        const auto saved = directory.path() + "/saved.docx";
+        window.saveFile(saved);
+        QFile file(saved);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto parts = wf::opc::read(file.readAll().toStdString());
+        QVERIFY(parts.contains("docProps/core.xml"));
+        QVERIFY(parts.contains("customXml/itemProps1.xml"));
+        // Through the native format (recovery drafts and .wfg saves) too.
+        const auto native = directory.path() + "/saved.wfg";
+        window.saveFile(native);
+        wf::MainWindow reopened;
+        reopened.openFile(native);
+        QVERIFY(reopened.pageView()->document().preserved);
+        QCOMPARE(*reopened.pageView()->document().preserved, *view->document().preserved);
     }
     void initTestCase() {
         QStandardPaths::setTestModeEnabled(true);

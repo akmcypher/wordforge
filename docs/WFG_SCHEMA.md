@@ -1,5 +1,15 @@
 # Native WFG schema and migration
 
+**WFG9 (kept DOCX parts)** is written only when a document imported from DOCX carries
+package parts Wordforge keeps (document properties, theme, settings, font table, web
+settings, custom XML). It is WFG8 in ZIP transport plus root elements `preservedPart`
+(`path` in the DOCX package, `contentType` — absent for `.rels` parts — and `part`, the
+ZIP entry `preserved/N` holding the bytes) and `preservedRelationship` (`type`, `target`
+naming a kept part, optional `package="true"` for package-level relationships, otherwise
+from the main document). Paths must be relative, without `.`/`..` segments, limited to
+letters, digits, `.`, `_`, `-`, `/`, unique, and not paths Wordforge writes itself; at most
+256 parts, 64 relationships and 16 MiB. WFG8 and older files with these are rejected.
+
 **WFG8 (headers and footers)** is written only when the page has a header, a footer or
 the first-page option, so other files keep WFG7 or older. It is WFG7 plus optional root
 elements `header` and `footer` (at most one each, attributes `left`, `center`, `right`,

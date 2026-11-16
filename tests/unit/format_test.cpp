@@ -395,3 +395,37 @@ TEST(NativeFormat, HeaderDocumentsWithDirectFormattingReopen) {
     EXPECT_TRUE(runs.back().style.bold);
     EXPECT_EQ(restored.page, e.document.page);
 }
+
+TEST(NativeFormat, KeptDocxPartsRoundTripInV9) {
+    Document document;
+    EXPECT_EQ(serializeNative(document).find("version=\"9\""), std::string::npos);
+    auto kept = std::make_shared<PreservedPackage>();
+    kept->parts = {{"docProps/core.xml", "application/vnd.openxmlformats-package.core-properties+xml",
+                    "<cp:coreProperties/>"},
+                   {"customXml/item1.xml", "application/xml", std::string("\0binary\xff", 8)},
+                   {"customXml/_rels/item1.xml.rels", "", "<Relationships/>"}};
+    kept->relationships = {{true, "http://example/core-properties", "docProps/core.xml"},
+                           {false, "http://example/customXml", "customXml/item1.xml"}};
+    document.preserved = kept;
+    const auto bytes = serializeNative(document);
+    const auto restored = parseNative(bytes);
+    ASSERT_TRUE(restored.preserved);
+    EXPECT_EQ(*restored.preserved, *kept);
+    auto variant = [&](const std::string &from, const std::string &to) {
+        auto parts = opc::read(bytes);
+        auto &xml = parts.at("document.xml");
+        const auto at = xml.find(from);
+        EXPECT_NE(at, std::string::npos) << from;
+        xml.replace(at, from.size(), to);
+        return opc::write(parts);
+    };
+    EXPECT_THROW(parseNative(variant("version=\"9\"", "version=\"8\"")), std::exception);
+    EXPECT_THROW(parseNative(variant("path=\"docProps/core.xml\"", "path=\"../core.xml\"")),
+                 std::exception);
+    EXPECT_THROW(parseNative(variant("path=\"docProps/core.xml\"", "path=\"word/document.xml\"")),
+                 std::exception);
+    EXPECT_THROW(parseNative(variant("target=\"customXml/item1.xml\"", "target=\"missing.xml\"")),
+                 std::exception);
+    EXPECT_THROW(parseNative(variant("part=\"preserved/0\"", "part=\"preserved/1\"")),
+                 std::exception);
+}
