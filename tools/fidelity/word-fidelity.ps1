@@ -130,6 +130,16 @@ foreach ($file in Get-ChildItem $Corpus -Filter *.docx | Sort-Object Name) {
             if ($before.characters[$i] -eq $after.characters[$i]) { $match++ }
         }
         $row.characters = [Math]::Round($match / $n, 4)
+        # What differed, for diagnosis: Word's values before -> after, one line each.
+        $details = @()
+        foreach ($kind in @("signature", "characters")) {
+            for ($i = 0; $i -lt [Math]::Max($before[$kind].Count, $after[$kind].Count); $i++) {
+                if ($before[$kind][$i] -ne $after[$kind][$i]) {
+                    $details += "$kind $i : $($before[$kind][$i])  ->  $($after[$kind][$i])"
+                }
+            }
+        }
+        if ($details) { $details | Set-Content (Join-Path $Out "wordforge\$($file.BaseName).diff.txt") -Encoding UTF8 }
         $row.pages = $before.pages -eq $after.pages
         $row.pagesWord = $before.pages
         $row.pagesAfter = $after.pages

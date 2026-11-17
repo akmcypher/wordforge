@@ -18,6 +18,19 @@ Status vocabulary: **implemented** = integrated with executed evidence;
 **unverified** = code/configuration exists without the required execution.
 Nothing below asserts a completed production-grade phase.
 
+## Milestones (agreed 2026-11-17)
+
+1. **Document fidelity.** Finish tracked changes; test 100–200 representative DOCX
+   documents in real Microsoft Word and LibreOffice and fix structural and formatting
+   differences. Harness and results: [docs/WORD_FIDELITY.md](docs/WORD_FIDELITY.md)
+   (114 Word documents, 95/100 after the first fixes; LibreOffice not yet).
+2. **Performance architecture.** Incremental pagination, background layout, efficient
+   undo/history, measured 100-, 500- and 1,000-page document tests.
+3. **Professional workflows.** Sections, advanced tables, rich footnotes, table of
+   contents, navigation, images and review tools.
+4. **Distribution and trust.** Signed Windows binaries, validated desktop installs,
+   accessibility, and security, crash and performance regression coverage.
+
 ## Current checkpoint
 
 - Published starting baseline: `32b1461` (native editor, brown UI, recovery,
