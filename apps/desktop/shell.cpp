@@ -273,7 +273,7 @@ FormatPanel::FormatPanel(PageView *view, Commands &commands, QWidget *parent)
     for (const auto &id : {"table", "tableDelete", "tableRowAbove", "tableRowBelow",
                            "tableColumnLeft", "tableColumnRight", "tableDeleteRow",
                            "tableDeleteColumn", "tableMerge", "tableSplit", "tableColumnWidth",
-                           "tableDistribute"}) {
+                           "tableDistribute", "tableBorders", "tableShading"}) {
         auto *button = actionButton(id);
         button->setToolButtonStyle(Qt::ToolButtonTextOnly);
         button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);

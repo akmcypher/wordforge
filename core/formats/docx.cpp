@@ -1352,7 +1352,12 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
     std::function<void(pugi::xml_node)> readTable = [&](pugi::xml_node table) {
         std::vector<std::vector<pugi::xml_node>> rows; // null nodes are cells covered by a span
         std::size_t columns = 0;
-        bool shaded = false;
+        struct Fill {
+            std::size_t row, column;
+            std::uint32_t color;
+        };
+        std::vector<Fill> fills;
+        bool cellBorders = false;
         // Spans: (row, column, columns, vMerge state: 0 none, 1 restart, 2 continue).
         struct Span {
             std::size_t row, column, columns;
@@ -1374,8 +1379,18 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                     continue;
                 }
                 const auto properties = child(cell, "tcPr");
-                if (child(properties, "shd"))
-                    shaded = true;
+                if (const auto shading = child(properties, "shd")) {
+                    const auto fill = attr(shading, "fill");
+                    if (!fill.empty() && fill != "auto") {
+                        try {
+                            fills.push_back({rows.size(), cells.size(), color(fill)});
+                        } catch (const std::runtime_error &) {
+                            warn(warnings, "An unreadable cell shading colour was omitted.");
+                        }
+                    }
+                }
+                if (child(properties, "tcBorders"))
+                    cellBorders = true;
                 const auto span = val(child(properties, "gridSpan"));
                 const auto count = span.empty() ? 1.0 : std::clamp(number(span), 1.0, 64.0);
                 const auto vMerge = child(properties, "vMerge");
@@ -1399,8 +1414,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                         readCell(cell, std::nullopt, 0);
             return;
         }
-        if (shaded)
-            warn(warnings, "Table cell shading is not preserved.");
+        if (cellBorders)
+            warn(warnings, "Borders set on single cells are shown like the table's borders.");
         // Two tables in a row need a body paragraph between them.
         if (!document.paragraphs.empty() && document.paragraphs.back().cell)
             document.paragraphs.push_back(emptyParagraph(std::nullopt));
@@ -1447,6 +1462,48 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         }
         if (overlapping)
             warn(warnings, "Overlapping merged table cells are split into separate cells.");
+        // Cell fills: a merged cell takes its top-left cell's (Word repeats it below).
+        for (const auto &fill : fills) {
+            if (fill.row >= created.rows || fill.column >= created.columns)
+                continue;
+            if (const auto *merge = created.mergeAt(fill.row, fill.column);
+                merge && (merge->row != fill.row || merge->column != fill.column))
+                continue;
+            if (!created.fillAt(fill.row, fill.column))
+                created.shading.push_back({fill.row, fill.column, fill.color});
+        }
+        // Borders: one width and colour for the whole table, from its own border settings
+        // (borders from a table style keep Wordforge's default).
+        if (const auto borders = child(child(table, "tblPr"), "tblBorders")) {
+            bool any = false, none = true, plain = true;
+            for (auto side : borders.children()) {
+                if (side.type() != pugi::node_element)
+                    continue;
+                any = true;
+                const auto kind = val(side);
+                if (kind == "nil" || kind == "none")
+                    continue;
+                if (none) {
+                    const auto size = attr(side, "sz");
+                    created.border.width =
+                        size.empty() ? 0.5 : std::clamp(number(size) / 8, 0.25, 6.0);
+                    const auto shade = attr(side, "color");
+                    if (shade.empty() || shade == "auto")
+                        created.border.color = 0xff000000;
+                    else
+                        try {
+                            created.border.color = color(shade);
+                        } catch (const std::runtime_error &) {
+                        }
+                }
+                none = false;
+                plain = plain && kind == "single";
+            }
+            if (any && none)
+                created.border.width = 0;
+            if (!plain)
+                warn(warnings, "Table border styles are shown as single lines of one width.");
+        }
         // Column widths from the grid, when it matches.
         std::vector<double> widths;
         for (auto column : child(table, "tblGrid").children())
@@ -1844,9 +1901,14 @@ std::string serializeDocx(const Document &document) {
                 auto borders = element(properties, "tblBorders");
                 for (const auto *side : {"top", "left", "bottom", "right", "insideH", "insideV"}) {
                     auto border = element(borders, side);
+                    if (table.border.width <= 0) {
+                        set(border, "val", std::string("nil"));
+                        continue;
+                    }
                     set(border, "val", std::string("single"));
-                    set(border, "sz", 4);
-                    set(border, "color", std::string("805A3B"));
+                    // Eighths of a point; Word accepts 2 to 96.
+                    set(border, "sz", std::clamp(std::round(table.border.width * 8), 2.0, 96.0));
+                    set(border, "color", hex(table.border.color));
                 }
                 set(element(properties, "tblLayout"), "type", std::string("fixed"));
                 auto margins = element(properties, "tblCellMar");
@@ -1882,6 +1944,13 @@ std::string serializeDocx(const Document &document) {
                         auto vertical = element(properties, "vMerge");
                         if (anchor)
                             set(vertical, "val", std::string("restart"));
+                    }
+                    if (const auto fill = merge ? table.fillAt(merge->row, merge->column)
+                                                : table.fillAt(cell.row, cell.column)) {
+                        auto shading = element(properties, "shd");
+                        set(shading, "val", std::string("clear"));
+                        set(shading, "color", std::string("auto"));
+                        set(shading, "fill", hex(fill));
                     }
                     if (anchor)
                         anchors[{cell.row, cell.column}] = cellNode;

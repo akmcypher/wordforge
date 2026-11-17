@@ -1,5 +1,14 @@
 # Current status
 
+2026-11-16 — Table borders and shading (0.6.7). Format → Table → Borders… sets one
+width (0 = no borders, up to 6 pt) and colour for every line of the table; Cell
+shading… fills the selected cells (a merged cell as a whole), No cell shading clears
+them. Shading follows inserted/deleted rows and columns and merges. Saved in WFG11.
+DOCX writes tblBorders (nil for none) and tcPr/shd both ways; Word's per-cell borders,
+border styles (dashed, double…) and table-style borders are approximated with a
+warning. Before this, Word cell shading was dropped on import. Windows ARM64: all 6
+suites pass; Ubuntu by CI. Not opened in Microsoft Word yet.
+
 2026-11-16 — v0.6.6 prepared: tracked changes (entry below). Notes: docs/releases/v0.6.6.md.
 
 2026-11-16 — Tracked changes (P1, first slice). Review → Track changes (Ctrl+Shift+E)

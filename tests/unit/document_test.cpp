@@ -675,3 +675,57 @@ TEST(TrackedChanges, ParagraphsAndOtherContent) {
     e.selection = {{1, 0}, {1, 0}};
     EXPECT_THROW(e.replace(u"x"), std::invalid_argument);
 }
+
+TEST(Tables, BordersAndShadingFollowStructureEdits) {
+    Editor e;
+    e.insertTable(3, 3);
+    auto table = [&]() -> const Table & { return e.document.tables[0]; };
+    auto at = [&](std::size_t row, std::size_t column) {
+        for (std::size_t i = 0; i < e.document.paragraphs.size(); ++i)
+            if (e.document.paragraphs[i].cell == TableCell{table().id, row, column})
+                return Position{i, 0};
+        ADD_FAILURE() << row << "," << column;
+        return Position{};
+    };
+    e.selection = {at(0, 0), at(0, 0)};
+    e.setTableBorder({1.5, 0x112233});
+    EXPECT_EQ(table().border, (TableBorder{1.5, 0xff112233})); // made opaque
+    EXPECT_THROW(e.setTableBorder({7, 0xff000000}), std::invalid_argument);
+    e.setTableBorder({0, 0xff000000});
+    EXPECT_EQ(table().border.width, 0);
+    // A block of cells, then one cleared.
+    e.selection = {at(0, 0), at(1, 1)};
+    e.shadeCells(0xffeeddcc);
+    EXPECT_EQ(table().shading.size(), 4u);
+    EXPECT_EQ(table().fillAt(1, 1), 0xffeeddccu);
+    e.selection = {at(1, 1), at(1, 1)};
+    e.shadeCells(0);
+    EXPECT_EQ(table().shading.size(), 3u);
+    // A row inserted above moves the shading down; a deleted column takes its shading.
+    e.selection = {at(0, 0), at(0, 0)};
+    e.tableRow(true, true);
+    EXPECT_EQ(table().fillAt(0, 0), 0u);
+    EXPECT_EQ(table().fillAt(1, 0), 0xffeeddccu);
+    e.selection = {at(1, 1), at(1, 1)};
+    e.tableColumn(false);
+    EXPECT_EQ(table().shading.size(), 2u); // (1,0) and (2,0)
+    // A merged cell keeps a fill from inside it, on its top-left cell.
+    e.selection = {at(0, 0), at(1, 0)};
+    e.mergeCells();
+    EXPECT_EQ(table().fillAt(0, 0), 0xffeeddccu);
+    EXPECT_EQ(table().fillAt(1, 0), 0u);
+    EXPECT_EQ(table().shading.size(), 2u);
+    // Shading from a covered cell shades the merged cell.
+    e.selection = {at(1, 0), at(1, 0)};
+    e.shadeCells(0xff0000ff);
+    EXPECT_EQ(table().fillAt(0, 0), 0xff0000ffu);
+    EXPECT_NO_THROW(validateDocument(e.document));
+    EXPECT_TRUE(e.undo());
+    EXPECT_EQ(table().fillAt(0, 0), 0xffeeddccu);
+    auto broken = e.document;
+    broken.tables[0].shading.push_back(broken.tables[0].shading[0]);
+    EXPECT_THROW(validateDocument(broken), std::invalid_argument);
+    broken = e.document;
+    broken.tables[0].border.color = 0x80000000;
+    EXPECT_THROW(validateDocument(broken), std::invalid_argument);
+}

@@ -359,7 +359,8 @@ Layout LayoutEngine::compose(const Document &document) {
                     height += heights[r - cell.row];
                 result.cells.push_back({page.margin + edges[box.column], top,
                                         edges[box.column + box.columns] - edges[box.column], height,
-                                        pageIndex, box.first, box.last});
+                                        pageIndex, box.first, box.last,
+                                        table.fillAt(box.row, box.column), table.border});
                 for (auto &line : box.lines) {
                     line.page = pageIndex;
                     line.box = result.cells.size() - 1;

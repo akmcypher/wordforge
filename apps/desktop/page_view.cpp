@@ -347,6 +347,12 @@ bool PageView::setColumnWidth(double points) {
 bool PageView::distributeColumns() {
     return change([](Editor &candidate) { candidate.distributeColumns(); });
 }
+bool PageView::setTableBorder(TableBorder border) {
+    return change([border](Editor &candidate) { candidate.setTableBorder(border); });
+}
+bool PageView::shadeCells(std::uint32_t color) {
+    return change([color](Editor &candidate) { candidate.shadeCells(color); });
+}
 double PageView::writingWidth() const {
     const auto &page = document().page;
     const auto &paragraph = document().paragraphs[selection().focus.paragraph];

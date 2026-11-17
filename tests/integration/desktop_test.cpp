@@ -10,6 +10,7 @@
 #include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
+#include <QColorDialog>
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -771,6 +772,42 @@ class DesktopTest : public QObject {
         QCOMPARE(pages("range.pdf", 2, 3), 2);
         QVERIFY(window.findChild<QAction *>("printAction"));
         QCOMPARE(window.findChild<QAction *>("printAction")->shortcut(), QKeySequence(QKeySequence::Print));
+    }
+    void tableBordersAndShadingDialogs() {
+        wf::MainWindow window;
+        window.show();
+        auto *view = window.pageView();
+        view->setDocument({});
+        QVERIFY(!window.findChild<QAction *>("tableBordersAction")->isEnabled());
+        view->insertTable(2, 2);
+        auto *borders = window.findChild<QAction *>("tableBordersAction");
+        QVERIFY(borders->isEnabled());
+        QTimer::singleShot(0, &window, [] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            if (!dialog)
+                return;
+            if (auto *width = dialog->findChild<QDoubleSpinBox *>("borderWidth")) {
+                width->setValue(0);
+                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+            } else
+                dialog->reject();
+        });
+        borders->trigger();
+        QCOMPARE(view->document().tables[0].border.width, 0.0);
+        QTimer::singleShot(0, &window, [] {
+            auto *dialog = qobject_cast<QColorDialog *>(QApplication::activeModalWidget());
+            if (!dialog)
+                return;
+            dialog->setCurrentColor(QColor(10, 20, 30));
+            dialog->accept();
+        });
+        window.findChild<QAction *>("tableShadingAction")->trigger();
+        QCOMPARE(view->document().tables[0].shading.size(), std::size_t{1});
+        QCOMPARE(view->document().tables[0].shading[0].color, QColor(10, 20, 30).rgb());
+        auto *clear = window.findChild<QAction *>("tableNoShadingAction");
+        QVERIFY(clear->isEnabled());
+        clear->trigger();
+        QVERIFY(view->document().tables[0].shading.empty());
     }
     void trackedChangesFromTheReviewMenu() {
         wf::MainWindow window;

@@ -409,3 +409,18 @@ TEST(Layout, FootnotesSitAtTheBottomOfTheirPageNumberedInOrder) {
     }
     EXPECT_EQ(index, notes.size());
 }
+
+TEST(Layout, CellsCarryTheirFillAndTableBorder) {
+    Editor e;
+    e.insertTable(2, 2);
+    e.setTableBorder({2, 0xff336699});
+    e.shadeCells(0xffffeecc); // the caret cell (0,0)
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    const auto layout = engine.compose(e.document);
+    ASSERT_EQ(layout.cells.size(), 4u);
+    EXPECT_EQ(layout.cells[0].fill, 0xffffeeccu);
+    EXPECT_EQ(layout.cells[1].fill, 0u);
+    for (const auto &cell : layout.cells)
+        EXPECT_EQ(cell.border, (TableBorder{2, 0xff336699}));
+}

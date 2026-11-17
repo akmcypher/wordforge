@@ -507,3 +507,27 @@ TEST(NativeFormat, TrackedChangesRoundTripInV10) {
     plain.setTrackChanges(true);
     EXPECT_TRUE(parseNative(serializeNative(plain.document)).trackChanges);
 }
+
+TEST(NativeFormat, TableBordersAndShadingRoundTripInV11) {
+    Editor e;
+    e.insertTable(2, 2);
+    // Tables travel in the ZIP transport; the XML is document.xml.
+    auto xml = [](const std::string &bytes) { return opc::read(bytes).at("document.xml"); };
+    EXPECT_EQ(xml(serializeNative(e.document)).find("version=\"11\""), std::string::npos);
+    e.setTableBorder({0, 0xff000000});
+    e.shadeCells(0xffaabbcc);
+    const auto bytes = serializeNative(e.document);
+    EXPECT_NE(xml(bytes).find("version=\"11\""), std::string::npos);
+    const auto restored = parseNative(bytes);
+    EXPECT_EQ(restored.tables, e.document.tables);
+    auto variant = [&](const std::string &from, const std::string &to) {
+        auto parts = opc::read(bytes);
+        auto &text = parts.at("document.xml");
+        const auto at = text.find(from);
+        EXPECT_NE(at, std::string::npos) << from;
+        text.replace(at, from.size(), to);
+        return opc::write(parts);
+    };
+    EXPECT_THROW(parseNative(variant("<shade ", "<shade tint=\"1\" ")), std::exception);
+    EXPECT_THROW(parseNative(variant("version=\"11\"", "version=\"10\"")), std::exception);
+}

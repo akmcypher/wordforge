@@ -108,6 +108,8 @@ class PageView : public QAbstractScrollArea {
     bool splitCell();
     bool setColumnWidth(double points);
     bool distributeColumns();
+    bool setTableBorder(TableBorder);
+    bool shadeCells(std::uint32_t color); // 0 removes the fill
     // Width available for content at the caret: the page body or the table cell,
     // less the paragraph's indent and list marker.
     double writingWidth() const;
