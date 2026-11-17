@@ -1053,3 +1053,25 @@ TEST(Docx, TrackChangesSwitchFollowsKeptSettings) {
     EXPECT_LT(on.find("zoom"), on.find("trackRevisions"));
     EXPECT_LT(on.find("trackRevisions"), on.find("defaultTabStop"));
 }
+
+TEST(Docx, WordPageAndSectionBreaksStartNewPages) {
+    const auto word = wordDocument(
+        "<w:p><w:r><w:t>one</w:t></w:r></w:p>"
+        "<w:p><w:r><w:br w:type='page'/></w:r></w:p>"
+        "<w:p><w:r><w:t>two</w:t></w:r></w:p>"
+        "<w:p><w:r><w:t>a</w:t><w:br w:type='page'/><w:t>b</w:t></w:r></w:p>"
+        "<w:p><w:pPr><w:sectPr><w:type w:val='nextPage'/></w:sectPr></w:pPr><w:r><w:t>end of "
+        "section</w:t></w:r></w:p>"
+        "<w:p><w:r><w:t>next section</w:t></w:r></w:p>");
+    const auto imported = parseDocx(opc::write(word));
+    std::vector<std::pair<std::u16string, bool>> got;
+    for (const auto &paragraph : imported.document.paragraphs)
+        got.emplace_back(paragraph.text(), paragraph.pageBreakBefore);
+    const std::vector<std::pair<std::u16string, bool>> expected{
+        // As in Word, the paragraph holding only the break starts the new page.
+        {u"one", false}, {u"", true}, {u"two", false}, {u"a", false}, {u"b", true},
+        {u"end of section", false}, {u"next section", true}};
+    EXPECT_EQ(got, expected);
+    for (const auto &warning : imported.warnings)
+        EXPECT_EQ(warning.find("Inline breaks"), std::string::npos) << warning;
+}

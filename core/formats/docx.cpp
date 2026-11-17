@@ -305,7 +305,8 @@ void paragraphProperties(pugi::xml_node properties, Paragraph &paragraph,
             if (!attr(node, "hanging").empty() || !attr(node, "firstLine").empty() ||
                 !attr(node, "right").empty())
                 warn(warnings, "Hanging/first-line/right indents are not preserved.");
-        } else if (!is(node, "pStyle") && !is(node, "numPr") && !is(node, "rPr"))
+        } else if (!is(node, "pStyle") && !is(node, "numPr") && !is(node, "rPr") &&
+                   !is(node, "sectPr"))
             warn(warnings, "Some paragraph options are not supported: " + local(node.name()));
     }
 }
@@ -1100,6 +1101,9 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                                description},
                               style);
     };
+    // A page break that ended a paragraph (or a next-page section break) starts the next
+    // body paragraph on a new page.
+    bool pendingBreak = false;
     std::function<void(pugi::xml_node, const std::optional<TableCell> &)> readParagraph =
         [&](pugi::xml_node node, const std::optional<TableCell> &cell) {
         Paragraph paragraph = defaultParagraph;
@@ -1117,6 +1121,9 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         if (cell) {
             paragraph.cell = cell;
             paragraph.pageBreakBefore = false; // not allowed inside a table
+        } else if (pendingBreak) {
+            paragraph.pageBreakBefore = true;
+            pendingBreak = false;
         }
         // Resolve numbering through the same base -> derived -> direct cascade as styles.
         std::vector<pugi::xml_node> propertyChain{properties};
@@ -1245,6 +1252,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                                     text += utf16(chunk.value());
                         } else if (is(item, "tab"))
                             text += u'\t';
+                        else if (is(item, "br") && attr(item, "type") == "page")
+                            text += u'\f'; // a page break: the rest starts a new page
                         else if (is(item, "br") || is(item, "cr")) {
                             text += u'\n';
                             warn(warnings, "Inline breaks are converted to paragraph breaks; "
@@ -1281,7 +1290,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             }
             std::size_t start = 0;
             for (;;) {
-                const auto end = run.text().find(u'\n', start);
+                const auto end = run.text().find_first_of(u"\n\f", start);
                 split.runs.push_back(
                     {run.text().substr(start, end == std::u16string::npos ? end : end - start),
                      run.style});
@@ -1292,11 +1301,21 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                 }
                 if (end == std::u16string::npos)
                     break;
+                const bool pageBreak = !cell && run.text()[end] == u'\f';
+                start = end + 1;
+                // A page break before any content: this paragraph itself starts the page.
+                if (pageBreak && segments.size() == 1 &&
+                    std::all_of(split.runs.begin(), split.runs.end(),
+                                [](const Run &piece) { return piece.text().empty(); })) {
+                    split.pageBreakBefore = true;
+                    split.runs.clear();
+                    segments.back().second = absolute + start;
+                    continue;
+                }
                 document.paragraphs.push_back(split);
                 split.id = document.allocateId();
-                split.pageBreakBefore = false;
+                split.pageBreakBefore = pageBreak;
                 split.runs.clear();
-                start = end + 1;
                 segments.emplace_back(split.id, absolute + start);
             }
             absolute += run.text().size();
@@ -1304,13 +1323,22 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         if (split.runs.empty())
             split.runs.push_back({u"", base});
         document.paragraphs.push_back(std::move(split));
+        // A section break that starts a new page; other section settings are not kept.
+        if (const auto section = child(properties, "sectPr"); section && !cell) {
+            const auto type = val(child(section, "type"));
+            if (type != "continuous" && type != "nextColumn")
+                pendingBreak = true;
+            warn(warnings, "Section breaks become page breaks; settings of earlier sections "
+                           "(orientation, columns, margins) are not kept.");
+        }
         for (auto &mark : marks) {
             auto segment = segments.begin();
             for (auto it = segments.begin(); it != segments.end(); ++it)
                 if (it->second <= mark.offset)
                     segment = it;
             mark.paragraph = segment->first;
-            mark.offset -= segment->second;
+            // A mark before a leading page break lands at the paragraph's start.
+            mark.offset = mark.offset > segment->second ? mark.offset - segment->second : 0;
             commentMarks.push_back(std::move(mark));
         }
         };
