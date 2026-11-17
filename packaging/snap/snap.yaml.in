@@ -1,10 +1,11 @@
 name: wordforge
 title: Wordforge - Office Word Processor
 version: '0.6.6-preview'
-summary: Office word processor and document writer - DOCX, PDF, offline and private
+summary: Office word processor, document editor and writer - DOCX, PDF, rich text
 description: |
-  Wordforge is a fast, native office word processor and document writer for Linux. It
-  runs fully offline: no account, no cloud, no browser engine inside.
+  Wordforge is a fast, native office word processor, document editor and rich text
+  writer for Linux. It runs fully offline and private: no account, no cloud, no browser
+  engine inside.
 
   Write with real page layout, paragraph styles (Normal, Title, Headings),
   bullets and numbering, tables, pictures, bookmarks, find and replace, and
@@ -20,8 +21,10 @@ description: |
   exchange files with people who use them. A lightweight, offline office writer
   for letters, reports, notes and assignments.
 
-  This is a developer preview: headers and footers, comments and track changes
-  are still to come. Built with C++20, Qt 6 and Skia; open source under
+  Review documents with comments and tracked changes (accept or reject), add
+  footnotes, headers and footers with page numbers, and tables with merged cells.
+  This is a developer preview: some advanced Word features (sections, columns,
+  fields, endnotes) are not supported yet. Built with C++20, Qt 6 and Skia; open source under
   Apache-2.0. Also available for Windows.
 base: core24
 grade: stable

@@ -128,6 +128,12 @@ tables/images, broader desktop testing and recovery across upgrades remain open.
   the name, title and summary. Title changed to "Wordforge - Office Word Processor" and
   summary to "Office word processor and document writer - DOCX, PDF, offline and
   private" (snap.yaml.in); the listing updates with the next upload.
+* 2026-11-16: Store search ranked Wordforge #1 for "wordforge", #3 "word processor", #5
+  "word" and "writer", #6 "docx", #52 "text editor", #91 "office"; not listed for
+  "document", "editor" or "rich text". Summary changed to "Office word processor,
+  document editor and writer - DOCX, PDF, rich text" and the description now names
+  comments, tracked changes, footnotes and headers/footers (snap.yaml.in); the listing
+  updates with the next upload.
 * Still not done: an interactive strict-confinement session on a real Ubuntu
   desktop (X11 and Wayland, dialogs, printing to a real printer). The CI test is
   headless.
