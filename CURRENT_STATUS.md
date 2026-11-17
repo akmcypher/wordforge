@@ -1,5 +1,13 @@
 # Current status
 
+2026-11-17 — Microsoft Word fidelity harness (Milestone 1). tools/fidelity builds 114
+documents with Word itself, round-trips them through Wordforge and compares both in Word
+(text, structure counts, paragraph and character formatting, page counts); see
+docs/WORD_FIDELITY.md. Word opened all 114 Wordforge files and kept all body text. First
+score 79/100; after fixing page breaks (lost), theme fonts (Aptos became Arial) and
+automatic text colour (became #202631) it is 95/100. Next: first-line/hanging/right
+indents and lists, justified text, heading theme colours. LibreOffice not tested yet.
+
 2026-11-16 — Table borders and shading (0.6.7). Format → Table → Borders… sets one
 width (0 = no borders, up to 6 pt) and colour for every line of the table; Cell
 shading… fills the selected cells (a merged cell as a whole), No cell shading clears

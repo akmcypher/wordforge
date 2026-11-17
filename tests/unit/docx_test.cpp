@@ -1102,3 +1102,53 @@ TEST(Docx, TableBordersAndShadingBothWays) {
     EXPECT_TRUE(warned("single cells"));
     EXPECT_FALSE(warned("shading"));
 }
+
+TEST(Docx, WordPageAndSectionBreaksStartNewPages) {
+    const auto word = wordDocument(
+        "<w:p><w:r><w:t>one</w:t></w:r></w:p>"
+        "<w:p><w:r><w:br w:type='page'/></w:r></w:p>"
+        "<w:p><w:r><w:t>two</w:t></w:r></w:p>"
+        "<w:p><w:r><w:t>a</w:t><w:br w:type='page'/><w:t>b</w:t></w:r></w:p>"
+        "<w:p><w:pPr><w:sectPr><w:type w:val='nextPage'/></w:sectPr></w:pPr><w:r><w:t>end of "
+        "section</w:t></w:r></w:p>"
+        "<w:p><w:r><w:t>next section</w:t></w:r></w:p>");
+    const auto imported = parseDocx(opc::write(word));
+    std::vector<std::pair<std::u16string, bool>> got;
+    for (const auto &paragraph : imported.document.paragraphs)
+        got.emplace_back(paragraph.text(), paragraph.pageBreakBefore);
+    const std::vector<std::pair<std::u16string, bool>> expected{
+        // As in Word, the paragraph holding only the break starts the new page.
+        {u"one", false}, {u"", true}, {u"two", false}, {u"a", false}, {u"b", true},
+        {u"end of section", false}, {u"next section", true}};
+    EXPECT_EQ(got, expected);
+    for (const auto &warning : imported.warnings)
+        EXPECT_EQ(warning.find("Inline breaks"), std::string::npos) << warning;
+}
+
+TEST(Docx, ThemeFontsAndAutomaticColourSurvive) {
+    const std::string rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
+    auto word = wordDocument(
+        "<w:p><w:r><w:rPr><w:rFonts w:asciiTheme='minorHAnsi' w:hAnsiTheme='minorHAnsi'/>"
+        "<w:color w:val='auto'/></w:rPr><w:t>body</w:t></w:r></w:p>"
+        "<w:p><w:r><w:rPr><w:rFonts w:asciiTheme='majorHAnsi'/></w:rPr><w:t>heading</w:t></w:r></w:p>",
+        "<Relationship Id='t' Type='" + rel + "theme' Target='theme/theme1.xml'/>");
+    word["word/theme/theme1.xml"] =
+        "<a:theme xmlns:a='http://schemas.openxmlformats.org/drawingml/2006/main' name='T'>"
+        "<a:themeElements><a:fontScheme name='F'><a:majorFont><a:latin typeface='Aptos Display'/>"
+        "</a:majorFont><a:minorFont><a:latin typeface='Aptos'/></a:minorFont></a:fontScheme>"
+        "</a:themeElements></a:theme>";
+    auto &types = word["[Content_Types].xml"];
+    types.insert(types.rfind("</Types>"),
+                 "<Override PartName='/word/theme/theme1.xml' ContentType='application/"
+                 "vnd.openxmlformats-officedocument.theme+xml'/>");
+    const auto imported = parseDocx(opc::write(word));
+    ASSERT_GE(imported.document.paragraphs.size(), 2u);
+    EXPECT_EQ(imported.document.paragraphs[0].runs[0].style.family, "Aptos");
+    EXPECT_EQ(imported.document.paragraphs[1].runs[0].style.family, "Aptos Display");
+    EXPECT_EQ(imported.document.paragraphs[0].runs[0].style.color, CharacterStyle{}.color);
+    for (const auto &warning : imported.warnings)
+        EXPECT_EQ(warning.find("Theme fonts"), std::string::npos) << warning;
+    // The default ink goes back out as Word's automatic colour.
+    const auto parts = opc::read(serializeDocx(imported.document));
+    EXPECT_NE(parts.at("word/document.xml").find("w:color w:val=\"auto\""), std::string::npos);
+}
