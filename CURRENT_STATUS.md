@@ -1,5 +1,9 @@
 # Current status
 
+2026-11-17 — v0.6.7 prepared: table borders and shading, indents and justification, Word
+fidelity fixes, Strict OOXML/.docm/.dotx and any-encoding text (entries below). Notes:
+docs/releases/v0.6.7.md.
+
 2026-11-17 — Indents, justified text and other formats (Milestone 1, 0.6.7). Paragraphs
 gain first-line/hanging and right indents (Format panel: First line, Right indent) and
 justified alignment (Ctrl+J; Format menu and ribbon). Layout stretches spaces on every line

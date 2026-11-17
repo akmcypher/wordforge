@@ -1,6 +1,6 @@
 name: wordforge
 title: Wordforge - Office Word Processor
-version: '0.6.6-preview'
+version: '0.6.7-preview'
 summary: Office word processor, document editor and writer - DOCX, PDF, rich text
 description: |
   Wordforge is a fast, native office word processor, document editor and rich text
