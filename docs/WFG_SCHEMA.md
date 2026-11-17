@@ -1,9 +1,13 @@
 # Native WFG schema and migration
 
-**WFG11 (table borders and shading)** is written only when a table has non-default borders
-or shaded cells. `table` may carry `borderWidth` (0–6 points; 0 = no borders) and
-`borderColor` (opaque ARGB); children `shade` (`row`, `column`, `color`: opaque ARGB) fill
-one cell each (a merged cell's top-left), at most once per cell.
+**WFG11 (table borders and shading; indents and justification)** is written only when a
+table has non-default borders or shaded cells, or a paragraph or paragraph style uses a
+first-line or right indent or justified alignment. `table` may carry `borderWidth` (0–6
+points; 0 = no borders) and `borderColor` (opaque ARGB); children `shade` (`row`, `column`,
+`color`: opaque ARGB) fill one cell each (a merged cell's top-left), at most once per cell.
+`p` and `style` may carry `firstLine` (−360…360 points; negative is a hanging indent, never
+left of the margin: `indent + firstLine ≥ 0`) and `rightIndent` (0–360 points); `align` may
+be 3 (justified). For a list paragraph `firstLine` moves the bullet or number.
 
 **WFG10 (tracked changes)** is written only when Track Changes is on or the document holds
 tracked changes; other documents keep their earlier version. The root may carry

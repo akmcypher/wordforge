@@ -39,22 +39,26 @@ writes, not every document people have.
 
 2026-11-17, Microsoft Word 16.0 (build 16.0.20527), 114 documents:
 
-| Measure | First run | After fixes |
-|---|---|---|
-| Opened in Word after Wordforge saved them | 114/114 | 114/114 |
-| Body text kept | 100% | 100% |
-| Header, footer, note and comment text kept | 95.9% | 95.9% |
-| Paragraph formatting the same | 90.6% | 90.7% |
-| Character formatting the same | 0% | 89.5% |
-| Same page count | 86.8% | 97.4% |
-| Structure counts unchanged | 97.9% | 97.9% |
-| Score | 79/100 | 95/100 |
+| Measure | First run | Page breaks, fonts, colour | Indents, justification |
+|---|---|---|---|
+| Opened in Word after Wordforge saved them | 114/114 | 114/114 | 114/114 |
+| Body text kept | 100% | 100% | 100% |
+| Header, footer, note and comment text kept | 95.9% | 95.9% | 95.9% |
+| Paragraph formatting the same | 90.6% | 90.7% | 100% |
+| Character formatting the same | 0% | 89.5% | 89.5% |
+| Same page count | 86.8% | 97.4% | 100% |
+| Structure counts unchanged | 97.9% | 97.9% | 97.9% |
+| Score | 79/100 | 95/100 | 97/100 |
 
 Fixed from the first run: Word page breaks and next-page section breaks became plain
 paragraph breaks; theme fonts (Aptos) became Arial; automatic text colour became #202631.
+Then first-line, hanging and right indents (including each list level's indent from Word's
+numbering definitions) and justified text, which had made lists match 52%, indents 64%,
+multilevel lists 67% and justified paragraphs 80%.
 
-Still lost, worst first (share of paragraphs matching): bullet/numbered lists 52%, indents
-64% and multilevel lists 67% (first-line, hanging and right indents are dropped), justified
-alignment 80%, heading theme colours and some title fonts; endnotes, fields (table of
-contents, page numbers inside text), hyperlink targets and section settings (orientation,
-columns).
+Still lost: heading theme colours and some title fonts (character formatting 89.5%);
+endnotes, fields (table of contents, page numbers inside text), hyperlink targets and
+section settings (orientation, columns). Nested list levels keep their indent but show one
+marker style.
+
+Other formats and languages: see [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md).

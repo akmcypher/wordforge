@@ -9,7 +9,8 @@
 - `main` = v0.6.5 plus docs only. No open PRs, no uncommitted work.
 
 **In 0.6.5:** DOCX package-part preservation (#22, WFG9), footnotes (#23), comments
-(#24). Tracked changes (#27, WFG10, in 0.6.6). For 0.6.7: table borders and shading (#29, WFG11), then a navigation pane and deleted text left out of word count/find/text export. Next: the P1 list
+(#24). Tracked changes (#27, WFG10, in 0.6.6). For 0.6.7: table borders and shading (#29, WFG11), indents/justification, Strict OOXML,
+.docm/.dotx and any-encoding text (WFG11; docs/FORMAT_COMPATIBILITY.md), then a navigation pane and deleted text left out of word count/find/text export. Next: the P1 list
 (incremental pagination, navigation pane,
 accessibility).
 

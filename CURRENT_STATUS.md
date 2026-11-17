@@ -1,5 +1,22 @@
 # Current status
 
+2026-11-17 — Indents, justified text and other formats (Milestone 1, 0.6.7). Paragraphs
+gain first-line/hanging and right indents (Format panel: First line, Right indent) and
+justified alignment (Ctrl+J; Format menu and ribbon). Layout stretches spaces on every line
+but the last, keeps carets on the widened spaces and hangs the last space past the right
+edge. Saved in WFG11. DOCX reads and writes w:ind (left/start, right/end, firstLine,
+hanging) and jc both (distribute/kashida become justified with a warning), takes each list
+level's indent from Word's numbering definitions (nested levels now show indented), clamps
+indents into the margin with a warning and narrows indents too wide for a table column.
+Word fidelity (114 documents): paragraph formatting 90.7% -> 100%, page counts 97.4% ->
+100%, score 95 -> 97. Also: Word Strict Open XML (lengths such as "36pt"), .docm/.dotx/
+.dotm (macros removed) and plain text in any common encoding (BOMs, unmarked UTF-16, ICU
+detection of Shift_JIS, GB18030, Big5, EUC-KR, windows-125x, KOI8-R, plus Thai
+windows-874) now open. tools/fidelity/format-compat.ps1 checks 33 Word-written files in 23
+languages: every supported file keeps all its text; .doc, .odt, .rtf, .xml, .htm and .pdf
+are refused (docs/FORMAT_COMPATIBILITY.md). Windows ARM64: all 6 suites pass; Ubuntu by CI.
+LibreOffice not tested.
+
 2026-11-17 — Microsoft Word fidelity harness (Milestone 1). tools/fidelity builds 114
 documents with Word itself, round-trips them through Wordforge and compares both in Word
 (text, structure counts, paragraph and character formatting, page counts); see
