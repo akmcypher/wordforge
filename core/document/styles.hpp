@@ -22,6 +22,7 @@ struct ParagraphProperties {
     std::optional<Alignment> alignment;
     std::optional<ListKind> list;
     std::optional<double> indentLeft, spaceBefore, spaceAfter, lineSpacing;
+    std::optional<double> indentFirstLine, indentRight;
     bool operator==(const ParagraphProperties &) const = default;
 };
 
@@ -85,7 +86,7 @@ enum CharacterField : std::uint16_t {
 enum ParagraphField : std::uint16_t {
     AlignmentField = 1 << 0,
     ListField = 1 << 1,
-    IndentField = 1 << 2,
+    IndentField = 1 << 2, // left, first-line and right indents together
     SpaceBeforeField = 1 << 3,
     SpaceAfterField = 1 << 4,
     LineSpacingField = 1 << 5,

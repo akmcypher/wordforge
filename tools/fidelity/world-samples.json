@@ -1,0 +1,27 @@
+{
+  "languages": [
+    { "name": "English", "codepages": [1252], "lines": ["The quick brown fox jumps over the lazy dog near the river bank.", "Wordforge opens documents written anywhere in the world.", "Every sentence here checks that text survives the round trip."] },
+    { "name": "French", "codepages": [1252], "lines": ["Le café était très agréable et la crème brûlée était délicieuse.", "Où êtes-vous allés pendant les vacances d'été ?", "À bientôt, chère amie, et merci pour ce délicieux gâteau."] },
+    { "name": "German", "codepages": [1252], "lines": ["Die Größe der Straße überrascht jeden Besucher im Frühling.", "Schöne Grüße aus München und vielen Dank für Ihre Hilfe.", "Der Bäcker öffnet um sieben Uhr morgens."] },
+    { "name": "Spanish", "codepages": [1252], "lines": ["El niño comió una manzana mañana por la mañana en España.", "¿Dónde está la biblioteca más cercana, por favor?", "La canción fue un éxito en toda Latinoamérica."] },
+    { "name": "Polish", "codepages": [1250], "lines": ["Zażółć gęślą jaźń, pisze student w Łodzi każdego dnia.", "Pogoda w Krakowie jest dziś bardzo ładna.", "Dziękujemy za szybką odpowiedź i życzliwość."] },
+    { "name": "Czech", "codepages": [1250], "lines": ["Příliš žluťoučký kůň úpěl ďábelské ódy v Praze.", "Děkujeme vám za rychlou odpověď a pomoc.", "Řeka Vltava teče přes celé hlavní město."] },
+    { "name": "Turkish", "codepages": [1254], "lines": ["Pijamalı hasta yağız şoföre çabucak güvendi İstanbul'da.", "Bugün hava çok güzel ve güneşli görünüyor.", "Öğrenciler kütüphanede sessizce çalışıyorlar."] },
+    { "name": "Greek", "codepages": [1253], "lines": ["Η γρήγορη καφέ αλεπού πηδά πάνω από τον τεμπέλη σκύλο.", "Ο καιρός στην Αθήνα είναι πολύ ωραίος σήμερα.", "Ευχαριστούμε για τη γρήγορη απάντησή σας."] },
+    { "name": "Russian", "codepages": [1251, 20866], "lines": ["Съешь же ещё этих мягких французских булок да выпей чаю.", "Сегодня в Москве хорошая погода и светит солнце.", "Спасибо за быстрый ответ и вашу помощь."] },
+    { "name": "Ukrainian", "codepages": [1251], "lines": ["Чуєш їх, доцю, га? Кумедна ж ти, прощайся без ґольфів!", "Сьогодні у Києві тепла та сонячна погода.", "Дякуємо за швидку відповідь і допомогу."] },
+    { "name": "Arabic", "codepages": [1256], "lines": ["نص حكيم له سر قاطع وذو شأن عظيم مكتوب على ثوب أخضر.", "الطقس في القاهرة جميل جدا اليوم.", "شكرا لكم على الرد السريع والمساعدة."] },
+    { "name": "Hebrew", "codepages": [1255], "lines": ["דג סקרן שט בים מאוכזב ולפתע מצא חברה נחמדה.", "מזג האוויר בירושלים נעים מאוד היום.", "תודה רבה על התשובה המהירה ועל העזרה."] },
+    { "name": "Persian", "codepages": [], "lines": ["هوای تهران امروز بسیار خوب و آفتابی است.", "از پاسخ سریع و کمک شما سپاسگزاریم.", "دانشجویان در کتابخانه به آرامی درس می‌خوانند."] },
+    { "name": "Hindi", "codepages": [], "lines": ["आज दिल्ली में मौसम बहुत सुहावना और धूपदार है।", "आपके तेज़ उत्तर और मदद के लिए धन्यवाद।", "विद्यार्थी पुस्तकालय में चुपचाप पढ़ रहे हैं।"] },
+    { "name": "Bengali", "codepages": [], "lines": ["আজ ঢাকার আবহাওয়া খুব সুন্দর এবং রৌদ্রোজ্জ্বল।", "আপনার দ্রুত উত্তর এবং সাহায্যের জন্য ধন্যবাদ।", "ছাত্ররা গ্রন্থাগারে চুপচাপ পড়াশোনা করছে।"] },
+    { "name": "Tamil", "codepages": [], "lines": ["இன்று சென்னையில் வானிலை மிகவும் இனிமையாக உள்ளது.", "உங்கள் விரைவான பதிலுக்கும் உதவிக்கும் நன்றி.", "மாணவர்கள் நூலகத்தில் அமைதியாகப் படிக்கிறார்கள்."] },
+    { "name": "Thai", "codepages": [874], "lines": ["วันนี้อากาศที่กรุงเทพดีมากและมีแดดจัด", "ขอบคุณสำหรับคำตอบที่รวดเร็วและความช่วยเหลือ", "นักเรียนกำลังอ่านหนังสืออย่างเงียบ ๆ ในห้องสมุด"] },
+    { "name": "Vietnamese", "codepages": [], "lines": ["Hôm nay thời tiết ở Hà Nội rất đẹp và nắng ấm.", "Cảm ơn bạn đã trả lời nhanh chóng và giúp đỡ.", "Các sinh viên đang học bài trong thư viện."] },
+    { "name": "Chinese (Simplified)", "codepages": [54936], "lines": ["今天北京的天气非常好，阳光明媚。", "感谢您的快速回复和帮助。", "学生们正在图书馆里安静地学习。"] },
+    { "name": "Chinese (Traditional)", "codepages": [950], "lines": ["今天臺北的天氣非常好，陽光明媚。", "感謝您的快速回覆和幫助。", "學生們正在圖書館裡安靜地學習。"] },
+    { "name": "Japanese", "codepages": [932, 51932], "lines": ["今日の東京の天気はとても良く、晴れています。", "迅速なご返信とご協力をありがとうございます。", "学生たちは図書館で静かに勉強しています。"] },
+    { "name": "Korean", "codepages": [949], "lines": ["오늘 서울의 날씨는 매우 좋고 화창합니다.", "빠른 답변과 도움에 감사드립니다.", "학생들이 도서관에서 조용히 공부하고 있습니다."] },
+    { "name": "Emoji", "codepages": [], "lines": ["Thumbs up 👍, party 🎉, family 👨‍👩‍👧 and flags 🇮🇳 🇯🇵 🇧🇷."] }
+  ]
+}

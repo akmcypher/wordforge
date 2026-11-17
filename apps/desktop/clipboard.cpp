@@ -55,14 +55,16 @@ QString fragmentToHtml(const std::vector<Paragraph> &fragment) {
                             : p.style == "Heading1"                       ? "h1"
                             : p.style == "Heading2"                       ? "h2"
                                                                      : "p";
-        const char *align[] = {"left", "center", "right"};
+        const char *align[] = {"left", "center", "right", "justify"};
         html += QString("<%1 style=\"text-align:%2;margin-top:%3pt;margin-bottom:%4pt;"
-                        "margin-left:%5pt;line-height:%6%;\">")
+                        "margin-left:%5pt;margin-right:%6pt;text-indent:%7pt;line-height:%8%;\">")
                     .arg(tag)
                     .arg(align[static_cast<int>(p.alignment)])
                     .arg(p.spaceBefore)
                     .arg(p.spaceAfter)
                     .arg(p.indentLeft)
+                    .arg(p.indentRight)
+                    .arg(p.indentFirstLine)
                     .arg(std::lround(p.lineSpacing * 100));
         for (const auto &run : p.runs)
             if (!run.atom() && !run.text().empty())
@@ -86,9 +88,10 @@ std::vector<Paragraph> fragmentFromHtml(const QString &html, const CharacterStyl
         p.runs.clear();
         const auto format = block.blockFormat();
         const auto horizontal = format.alignment() & Qt::AlignHorizontal_Mask;
-        p.alignment = horizontal & Qt::AlignHCenter ? Alignment::Center
-                      : horizontal & Qt::AlignRight ? Alignment::Right
-                                                    : Alignment::Left;
+        p.alignment = (horizontal & Qt::AlignJustify) == Qt::AlignJustify ? Alignment::Justify
+                      : horizontal & Qt::AlignHCenter                    ? Alignment::Center
+                      : horizontal & Qt::AlignRight                      ? Alignment::Right
+                                                                         : Alignment::Left;
         if (auto *list = block.textList()) {
             const auto style = list->format().style();
             p.list = style == QTextListFormat::ListDecimal ||
@@ -107,6 +110,8 @@ std::vector<Paragraph> fragmentFromHtml(const QString &html, const CharacterStyl
         p.spaceBefore = clamp(format.topMargin() * 0.75, 0, 200);
         p.spaceAfter = clamp(format.bottomMargin() * 0.75, 0, 200);
         p.indentLeft = clamp(format.leftMargin() * 0.75, 0, 144);
+        p.indentRight = clamp(format.rightMargin() * 0.75, 0, 144);
+        p.indentFirstLine = clamp(format.textIndent() * 0.75, -p.indentLeft, 144);
         if (format.lineHeightType() == QTextBlockFormat::ProportionalHeight)
             p.lineSpacing = clamp(format.lineHeight() / 100.0, 1, 3);
         for (auto it = block.begin(); !it.atEnd(); ++it) {

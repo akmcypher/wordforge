@@ -10,6 +10,42 @@
 #include <unordered_set>
 namespace wf {
 namespace {
+// Justified lines: spreads `extra` points over the line's spaces before `end` (trailing
+// spaces excluded), moving every glyph, picture and run right of each widened space.
+void justify(ShapedLine &line, const std::u16string &text, std::size_t end, double extra) {
+    auto trailing = end;
+    while (trailing > 0 && text[trailing - 1] == u' ')
+        --trailing;
+    auto stretches = [&](const Glyph &glyph) {
+        return glyph.cluster < trailing && text[glyph.cluster] == u' ';
+    };
+    std::vector<double> spaces; // left edges of the stretchable spaces, in line coordinates
+    for (const auto &run : line.runs)
+        for (const auto &glyph : run.glyphs)
+            if (stretches(glyph))
+                spaces.push_back(run.x + glyph.x);
+    if (spaces.empty() || extra <= 0)
+        return;
+    std::sort(spaces.begin(), spaces.end());
+    const double each = extra / static_cast<double>(spaces.size());
+    auto shift = [&](double x) { // total widening of the spaces that start left of x
+        const auto count = std::lower_bound(spaces.begin(), spaces.end(), x - 1e-6) - spaces.begin();
+        return each * static_cast<double>(count);
+    };
+    for (auto &run : line.runs) {
+        const double oldX = run.x;
+        run.x = oldX + shift(oldX + 1e-6);
+        for (auto &glyph : run.glyphs) {
+            const double at = oldX + glyph.x;
+            glyph.x = at + shift(at) - run.x;
+            if (stretches(glyph)) {
+                glyph.advance += each;
+                run.width += each;
+            }
+        }
+    }
+    line.width += extra;
+}
 void stops(Line &line, const std::vector<std::size_t> &paragraphBoundaries) {
     struct Cluster {
         double left = std::numeric_limits<double>::max(), right = 0;
@@ -96,8 +132,18 @@ Layout LayoutEngine::compose(const Document &document) {
                 marker = shaper_.shape(label, 0, markerText.size());
             }
             const double markerWidth = markerText.empty() ? 0 : std::max(18.0, marker.width + 4);
-            const double textLeft = paragraph.indentLeft + markerWidth;
-            const double textWidth = width - textLeft;
+            // A list's first-line indent moves its bullet or number (and the text after it);
+            // otherwise it moves the first line's text. Negative values hang.
+            const double first = paragraph.indentFirstLine;
+            const double markerLeft = paragraph.indentLeft + first;
+            const double firstLeft =
+                markerText.empty() ? paragraph.indentLeft + first
+                                   : paragraph.indentLeft + std::max(0.0, first) + markerWidth;
+            const double otherLeft = paragraph.indentLeft + markerWidth;
+            const double right = width - paragraph.indentRight;
+            auto lineLeft = [&](std::size_t from) { return from == 0 ? firstLeft : otherLeft; };
+            auto lineWidth = [&](std::size_t from) { return right - lineLeft(from); };
+            const double textWidth = std::min(right - firstLeft, right - otherLeft);
             for (const auto &run : paragraph.runs)
                 if (run.image() && run.image()->width > textWidth)
                     throw std::runtime_error("Picture is wider than this paragraph's writing area");
@@ -112,8 +158,9 @@ Layout LayoutEngine::compose(const Document &document) {
                 throw std::runtime_error(u_errorName(error));
             std::size_t start = 0;
             auto complete = shapeRange(0, text.size());
-            const bool singleLine = complete.width <= textWidth;
+            const bool singleLine = complete.width <= lineWidth(0);
             do {
+                const double available = lineWidth(start);
                 std::size_t fit = start;
                 ShapedLine fitted = shapeRange(start, start);
                 if (singleLine) {
@@ -126,7 +173,7 @@ Layout LayoutEngine::compose(const Document &document) {
                      boundary != UBRK_DONE; boundary = ubrk_next(breaks.get())) {
                     auto candidate =
                         shapeRange(start, static_cast<std::size_t>(boundary));
-                    if (candidate.width > textWidth)
+                    if (candidate.width > available)
                         break;
                     fit = static_cast<std::size_t>(boundary);
                     fitted = std::move(candidate);
@@ -134,11 +181,11 @@ Layout LayoutEngine::compose(const Document &document) {
                 if (fit == start && start < text.size()) {
                     for (auto boundary = nextGrapheme(paragraph, start); boundary <= text.size();) {
                         auto candidate = shapeRange(start, boundary);
-                        if (candidate.width > textWidth && fit != start)
+                        if (candidate.width > available && fit != start)
                             break;
                         fit = boundary;
                         fitted = std::move(candidate);
-                        if (boundary == text.size() || fitted.width > textWidth)
+                        if (boundary == text.size() || fitted.width > available)
                             break;
                         boundary = nextGrapheme(paragraph, boundary);
                     }
@@ -148,14 +195,24 @@ Layout LayoutEngine::compose(const Document &document) {
                 line.end = fit;
                 line.shaped = std::move(fitted);
                 line.height = (line.shaped.ascent + line.shaped.descent) * paragraph.lineSpacing;
-                const double remaining = std::max(0.0, textWidth - line.shaped.width);
-                line.x = textLeft + (paragraph.alignment == Alignment::Center  ? remaining / 2
-                                     : paragraph.alignment == Alignment::Right ? remaining
-                                                                               : 0);
+                const double remaining = std::max(0.0, available - line.shaped.width);
+                if (paragraph.alignment == Alignment::Justify && fit < text.size()) {
+                    // The space ending the line hangs past the right edge, as in Word.
+                    double hanging = 0;
+                    for (const auto &run : line.shaped.runs)
+                        for (const auto &glyph : run.glyphs)
+                            if (glyph.cluster + 1 == fit && text[glyph.cluster] == u' ')
+                                hanging += glyph.advance;
+                    justify(line.shaped, text, fit, remaining + hanging);
+                }
+                line.x = lineLeft(start) +
+                         (paragraph.alignment == Alignment::Center  ? remaining / 2
+                          : paragraph.alignment == Alignment::Right ? remaining
+                                                                    : 0);
                 if (start == 0 && !markerText.empty()) {
                     line.markerText = markerText;
                     line.marker = std::move(marker);
-                    line.markerX = paragraph.indentLeft + markerWidth - 4 - line.marker.width;
+                    line.markerX = markerLeft + markerWidth - 4 - line.marker.width;
                 }
                 stops(line, paragraphBoundaries);
                 lines.push_back(std::move(line));

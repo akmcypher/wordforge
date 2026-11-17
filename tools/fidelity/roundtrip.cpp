@@ -1,4 +1,5 @@
-// Opens a DOCX the way Wordforge does, saves it back to DOCX and writes a JSON report of
+// Opens a DOCX (or .docm/.dotx/.dotm, or a plain-text file in any common encoding) the way
+// Wordforge does, saves it back to DOCX and writes a JSON report of
 // what Wordforge understood (counts, warnings, page count). Used by
 // tools/fidelity/word-fidelity.ps1 to compare Wordforge's output with the original in
 // Microsoft Word.
@@ -6,6 +7,7 @@
 //   wordforge_roundtrip input.docx output.docx report.json
 #include "apps/desktop/pictures.hpp"
 #include "core/formats/docx.hpp"
+#include "core/formats/plain_text.hpp"
 #include "core/layout/layout.hpp"
 #include <QCoreApplication>
 #include <fstream>
@@ -43,7 +45,17 @@ int main(int argc, char **argv) {
         if (!input)
             throw std::runtime_error("cannot read the input");
         const std::string bytes((std::istreambuf_iterator<char>(input)), {});
-        const auto imported = wf::parseDocx(bytes, wf::pictureToPng);
+        const std::string inputPath = argv[1];
+        wf::DocxImport imported;
+        std::string encoding;
+        if (inputPath.ends_with(".txt") || inputPath.ends_with(".TXT")) {
+            const auto decoded = wf::decodePlainText(bytes);
+            encoding = decoded.encoding;
+            wf::Editor editor;
+            editor.replace(decoded.text);
+            imported.document = std::move(editor.document);
+        } else
+            imported = wf::parseDocx(bytes, wf::pictureToPng);
         const auto &document = imported.document;
         const auto saved = wf::serializeDocx(document);
         std::ofstream(argv[2], std::ios::binary) << saved;
@@ -75,7 +87,8 @@ int main(int argc, char **argv) {
                << ",\"comments\":" << document.comments.size()
                << ",\"revisions\":" << document.revisions.size() << ",\"trackedRuns\":" << tracked
                << ",\"words\":" << count.words << ",\"pages\":" << pages
-               << ",\"layoutError\":" << json(layoutError) << ",\"warnings\":[";
+               << ",\"layoutError\":" << json(layoutError) << ",\"encoding\":" << json(encoding)
+               << ",\"warnings\":[";
         for (std::size_t i = 0; i < imported.warnings.size(); ++i)
             report << (i ? "," : "") << json(imported.warnings[i]);
         report << "]}";

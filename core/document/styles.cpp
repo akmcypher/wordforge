@@ -37,6 +37,10 @@ void apply(ParagraphFormat &target, const ParagraphProperties &properties) {
         target.list = *properties.list;
     if (properties.indentLeft)
         target.indentLeft = *properties.indentLeft;
+    if (properties.indentFirstLine)
+        target.indentFirstLine = *properties.indentFirstLine;
+    if (properties.indentRight)
+        target.indentRight = *properties.indentRight;
     if (properties.spaceBefore)
         target.spaceBefore = *properties.spaceBefore;
     if (properties.spaceAfter)
@@ -136,6 +140,8 @@ void fillUnset(ParagraphProperties &target, const ParagraphProperties &fallback)
     fill(target.alignment, fallback.alignment);
     fill(target.list, fallback.list);
     fill(target.indentLeft, fallback.indentLeft);
+    fill(target.indentFirstLine, fallback.indentFirstLine);
+    fill(target.indentRight, fallback.indentRight);
     fill(target.spaceBefore, fallback.spaceBefore);
     fill(target.spaceAfter, fallback.spaceAfter);
     fill(target.lineSpacing, fallback.lineSpacing);
@@ -264,7 +270,8 @@ ParagraphMask differingFields(const ParagraphFormat &a, const ParagraphFormat &b
         mask |= AlignmentField;
     if (a.list != b.list)
         mask |= ListField;
-    if (a.indentLeft != b.indentLeft)
+    if (a.indentLeft != b.indentLeft || a.indentFirstLine != b.indentFirstLine ||
+        a.indentRight != b.indentRight)
         mask |= IndentField;
     if (a.spaceBefore != b.spaceBefore)
         mask |= SpaceBeforeField;
@@ -299,8 +306,11 @@ void inheritFields(ParagraphFormat &target, const ParagraphFormat &source, Parag
         target.alignment = source.alignment;
     if (!(keep & ListField))
         target.list = source.list;
-    if (!(keep & IndentField))
+    if (!(keep & IndentField)) {
         target.indentLeft = source.indentLeft;
+        target.indentFirstLine = source.indentFirstLine;
+        target.indentRight = source.indentRight;
+    }
     if (!(keep & SpaceBeforeField))
         target.spaceBefore = source.spaceBefore;
     if (!(keep & SpaceAfterField))
@@ -338,6 +348,10 @@ ParagraphProperties propertiesFor(const ParagraphFormat &base, const ParagraphFo
         result.list = value.list;
     if (base.indentLeft != value.indentLeft)
         result.indentLeft = value.indentLeft;
+    if (base.indentFirstLine != value.indentFirstLine)
+        result.indentFirstLine = value.indentFirstLine;
+    if (base.indentRight != value.indentRight)
+        result.indentRight = value.indentRight;
     if (base.spaceBefore != value.spaceBefore)
         result.spaceBefore = value.spaceBefore;
     if (base.spaceAfter != value.spaceAfter)

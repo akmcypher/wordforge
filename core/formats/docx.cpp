@@ -73,6 +73,22 @@ double number(const std::string &text) {
         throw std::runtime_error("Invalid OOXML numeric value");
     return value;
 }
+// A length in `perPoint` units per point (twips: 20, half-points: 2), or a Strict OOXML
+// universal measure with its own unit ("36pt", "0.5in", "2.54cm", "12mm", "3pc").
+double measure(const std::string &text, double perPoint) {
+    static const std::pair<std::string_view, double> units[] = {
+        {"pt", 1}, {"in", 72}, {"cm", 72 / 2.54}, {"mm", 72 / 25.4}, {"pc", 12}, {"pi", 12}};
+    for (const auto &[suffix, points] : units)
+        if (text.size() > suffix.size() && text.ends_with(suffix))
+            return number(text.substr(0, text.size() - suffix.size())) * points * perPoint;
+    return number(text);
+}
+double twips(const std::string &text) {
+    return measure(text, 20);
+}
+double halfPoints(const std::string &text) {
+    return measure(text, 2);
+}
 std::uint32_t color(const std::string &text) {
     if (text.size() != 6)
         throw std::runtime_error("Invalid OOXML color");
@@ -222,7 +238,7 @@ void runProperties(pugi::xml_node properties, CharacterStyle &style,
         else if (is(node, "strike"))
             style.strike = toggle(style.strike, node);
         else if (is(node, "sz"))
-            style.size = number(val(node)) / 2;
+            style.size = halfPoints(val(node)) / 2;
         else if (is(node, "u")) {
             style.underline = val(node) != "none";
             if (val(node) != "single" && val(node) != "none" && !val(node).empty())
@@ -275,11 +291,33 @@ void runProperties(pugi::xml_node properties, CharacterStyle &style,
     }
     if (auto cs = child(properties, "szCs")) {
         if (!child(properties, "sz")) {
-            style.size = number(val(cs)) / 2;
+            style.size = halfPoints(val(cs)) / 2;
             warn(warnings, "Complex-script-only font size is applied to the entire run.");
         } else if (val(cs) != val(child(properties, "sz")))
             warn(warnings, "Different Latin and complex-script font sizes are approximated.");
     }
+}
+// Word's w:ind in Word's terms (left edge, first-line offset, right edge; points). List
+// paragraphs are converted to Wordforge's list geometry once the paragraph is complete.
+void readIndent(pugi::xml_node node, ParagraphFormat &paragraph,
+                std::vector<std::string> &warnings) {
+    auto either = [&](const char *a, const char *b) {
+        return attr(node, a).empty() ? attr(node, b) : attr(node, a);
+    };
+    if (const auto left = either("left", "start"); !left.empty())
+        paragraph.indentLeft = twips(left) / 20;
+    if (const auto right = either("right", "end"); !right.empty())
+        paragraph.indentRight = twips(right) / 20;
+    if (!attr(node, "hanging").empty())
+        paragraph.indentFirstLine = -twips(attr(node, "hanging")) / 20;
+    else if (!attr(node, "firstLine").empty())
+        paragraph.indentFirstLine = twips(attr(node, "firstLine")) / 20;
+    for (const char *chars : {"leftChars", "startChars", "rightChars", "endChars", "hangingChars",
+                              "firstLineChars"})
+        if (!attr(node, chars).empty() && attr(node, chars) != "0") {
+            warn(warnings, "Indents measured in characters are approximated in points.");
+            break;
+        }
 }
 void paragraphProperties(pugi::xml_node properties, Paragraph &paragraph,
                          std::vector<std::string> &warnings) {
@@ -294,29 +332,30 @@ void paragraphProperties(pugi::xml_node properties, Paragraph &paragraph,
                 paragraph.alignment = Alignment::Right;
             else if (alignment == "left" || alignment == "start")
                 paragraph.alignment = Alignment::Left;
-            else
-                warn(warnings, "Justified/distributed alignment is not supported yet.");
+            else if (alignment == "both")
+                paragraph.alignment = Alignment::Justify;
+            else if (alignment == "distribute" || alignment == "thaiDistribute" ||
+                     alignment.ends_with("Kashida")) {
+                paragraph.alignment = Alignment::Justify;
+                warn(warnings, "Distributed and kashida justification are shown as justified.");
+            } else
+                warn(warnings, "Some paragraph alignments are not supported: " + alignment);
         } else if (is(node, "pageBreakBefore"))
             paragraph.pageBreakBefore = enabled(node);
         else if (is(node, "spacing")) {
             if (!attr(node, "before").empty())
-                paragraph.spaceBefore = number(attr(node, "before")) / 20;
+                paragraph.spaceBefore = twips(attr(node, "before")) / 20;
             if (!attr(node, "after").empty())
-                paragraph.spaceAfter = number(attr(node, "after")) / 20;
+                paragraph.spaceAfter = twips(attr(node, "after")) / 20;
             if (!attr(node, "line").empty()) {
                 if (attr(node, "lineRule").empty() || attr(node, "lineRule") == "auto")
-                    paragraph.lineSpacing = number(attr(node, "line")) / 240;
+                    paragraph.lineSpacing = twips(attr(node, "line")) / 240;
                 else
                     warn(warnings, "Fixed-height line spacing is approximated.");
             }
-        } else if (is(node, "ind")) {
-            const auto left = attr(node, "left").empty() ? attr(node, "start") : attr(node, "left");
-            if (!left.empty())
-                paragraph.indentLeft = number(left) / 20;
-            if (!attr(node, "hanging").empty() || !attr(node, "firstLine").empty() ||
-                !attr(node, "right").empty())
-                warn(warnings, "Hanging/first-line/right indents are not preserved.");
-        } else if (!is(node, "pStyle") && !is(node, "numPr") && !is(node, "rPr") &&
+        } else if (is(node, "ind"))
+            readIndent(node, paragraph, warnings);
+        else if (!is(node, "pStyle") && !is(node, "numPr") && !is(node, "rPr") &&
                    !is(node, "sectPr"))
             warn(warnings, "Some paragraph options are not supported: " + local(node.name()));
     }
@@ -644,6 +683,26 @@ void writeCharacter(pugi::xml_node rpr, const CharacterStyle &value, const Chara
         set(shading, "fill", hex(value.highlight));
     }
 }
+std::string jcValue(Alignment alignment) {
+    return alignment == Alignment::Center    ? "center"
+           : alignment == Alignment::Right   ? "right"
+           : alignment == Alignment::Justify ? "both"
+                                             : "left";
+}
+// w:ind in Word's terms. A list paragraph's number sits at indentLeft + indentFirstLine and
+// its text 18 pt after indentLeft (see the import).
+void writeIndent(pugi::xml_node ind, const ParagraphFormat &value) {
+    const bool listed = value.list != ListKind::None;
+    const double left = value.indentLeft + (listed ? 18 : 0);
+    const double first = value.indentFirstLine - (listed ? 18 : 0);
+    set(ind, "left", left * 20);
+    if (value.indentRight)
+        set(ind, "right", value.indentRight * 20);
+    if (first < 0)
+        set(ind, "hanging", -first * 20);
+    else if (first > 0)
+        set(ind, "firstLine", first * 20);
+}
 // Paragraph counterpart of writeCharacter (lists are written on paragraphs only).
 void writeParagraph(pugi::xml_node ppr, const ParagraphFormat &value, const ParagraphFormat *base) {
     auto differs = [&](auto member) { return !base || value.*member != base->*member; };
@@ -659,12 +718,11 @@ void writeParagraph(pugi::xml_node ppr, const ParagraphFormat &value, const Para
             set(spacing, "lineRule", std::string("auto"));
         }
     }
-    if (differs(&ParagraphFormat::indentLeft))
-        set(element(ppr, "ind"), "left", value.indentLeft * 20);
+    if (differs(&ParagraphFormat::indentLeft) || differs(&ParagraphFormat::indentFirstLine) ||
+        differs(&ParagraphFormat::indentRight))
+        writeIndent(element(ppr, "ind"), value);
     if (differs(&ParagraphFormat::alignment))
-        property(ppr, "jc", std::string(value.alignment == Alignment::Center  ? "center"
-                                        : value.alignment == Alignment::Right ? "right"
-                                                                              : "left"));
+        property(ppr, "jc", jcValue(value.alignment));
 }
 // Word recognises its built-in headings by these names (navigation pane, outline).
 std::string wordStyleName(const ParagraphStyle &style) {
@@ -921,6 +979,9 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
     };
     std::map<std::string, ListKind> numbering;
     std::map<std::string, bool> approximateNumbering;
+    // Each list level's w:ind by numId then ilvl (copies kept in `levelIndentStore`).
+    pugi::xml_document levelIndentStore;
+    std::map<std::string, std::map<std::string, pugi::xml_node>> levelIndents;
     const auto numberingPart = relationship(parts, main, "numbering");
     if (!numberingPart.empty()) {
         if (!parts.contains(numberingPart))
@@ -928,6 +989,12 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         auto definitions = xml(parts.at(numberingPart));
         std::map<std::string, ListKind> abstracts;
         std::map<std::string, bool> approximate;
+        std::map<std::string, std::map<std::string, pugi::xml_node>> abstractIndents;
+        // Copies keep the numbering part's namespace declarations.
+        auto indentHolder = levelIndentStore.append_child(definitions.document_element().name());
+        for (auto attribute : definitions.document_element().attributes())
+            if (std::string_view(attribute.name()).starts_with("xmlns"))
+                indentHolder.append_attribute(attribute.name()) = attribute.value();
         for (auto node : definitions.document_element().children())
             if (is(node, "abstractNum")) {
                 auto level = child(node, "lvl");
@@ -936,16 +1003,28 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                                                          : format == "decimal" ? ListKind::Decimal
                                                                                : ListKind::None;
                 const auto expectedLabel = format == "bullet" ? "•" : "%1.";
+                // Level indents are kept; other level paragraph options are not.
+                bool otherOptions = false;
+                for (auto option : child(level, "pPr").children())
+                    if (option.type() == pugi::node_element && !is(option, "ind") &&
+                        !is(option, "tabs"))
+                        otherOptions = true;
                 approximate[attr(node, "abstractNumId")] =
                     val(child(level, "start")) != "1" ||
-                    val(child(level, "lvlText")) != expectedLabel || bool(child(level, "pPr")) ||
+                    val(child(level, "lvlText")) != expectedLabel || otherOptions ||
                     bool(child(level, "rPr"));
+                for (auto lvl : node.children())
+                    if (is(lvl, "lvl"))
+                        if (auto ind = child(child(lvl, "pPr"), "ind"))
+                            abstractIndents[attr(node, "abstractNumId")][attr(lvl, "ilvl")] =
+                                indentHolder.append_copy(ind);
             }
         for (auto node : definitions.document_element().children())
             if (is(node, "num")) {
                 const auto id = attr(node, "numId");
                 const auto abstract = val(child(node, "abstractNumId"));
                 numbering[id] = abstracts[abstract];
+                levelIndents[id] = abstractIndents[abstract];
                 approximateNumbering[id] =
                     approximate[abstract] || bool(child(node, "lvlOverride"));
             }
@@ -1192,9 +1271,34 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             const auto &level = numberLevel;
             if (!level.empty() && level != "0")
                 warn(warnings, "Nested lists are shown at a single level.");
+            // Word: the paragraph's own indent, else its list level's, else its style's.
+            if (paragraph.list != ListKind::None && !child(properties, "ind")) {
+                const auto &levels = levelIndents[id];
+                if (auto found = levels.find(level.empty() ? "0" : level); found != levels.end())
+                    readIndent(found->second, paragraph, warnings);
+            }
             previousNum = id;
         } else
             previousNum.clear();
+        if (paragraph.list != ListKind::None) {
+            // Word puts the number at left + firstLine and the text at left; Wordforge puts
+            // the number at indentLeft + indentFirstLine and the text 18 pt after indentLeft.
+            const double numberAt = paragraph.indentLeft + paragraph.indentFirstLine;
+            paragraph.indentLeft = std::max(0.0, paragraph.indentLeft - 18);
+            paragraph.indentFirstLine = numberAt - paragraph.indentLeft;
+        }
+        if (paragraph.indentLeft < 0 || paragraph.indentRight < 0) {
+            warn(warnings, "Indents into the page margin are shown at the margin.");
+            paragraph.indentLeft = std::max(0.0, paragraph.indentLeft);
+            paragraph.indentRight = std::max(0.0, paragraph.indentRight);
+        }
+        if (paragraph.indentFirstLine < -paragraph.indentLeft) {
+            warn(warnings, "Hanging indents into the page margin are shown at the margin.");
+            paragraph.indentFirstLine = -paragraph.indentLeft;
+        }
+        paragraph.indentLeft = std::min(paragraph.indentLeft, 360.0);
+        paragraph.indentRight = std::min(paragraph.indentRight, 360.0);
+        paragraph.indentFirstLine = std::clamp(paragraph.indentFirstLine, -paragraph.indentLeft, 360.0);
         std::vector<CommentMark> marks; // offsets in this paragraph before line-break splits
         std::function<void(pugi::xml_node, unsigned)> readRuns = [&](pugi::xml_node parent,
                                                                      unsigned depth) {
@@ -1566,7 +1670,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         for (auto column : child(table, "tblGrid").children())
             if (is(column, "gridCol")) {
                 const auto w = attr(column, "w");
-                widths.push_back(w.empty() ? 0 : number(w) / 20);
+                widths.push_back(w.empty() ? 0 : twips(w) / 20);
             }
         if (widths.size() == columns &&
             std::all_of(widths.begin(), widths.end(),
@@ -1724,14 +1828,14 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             continue;
         if (is(node, "sectPr")) {
             if (auto size = child(node, "pgSz")) {
-                document.page.width = number(attr(size, "w")) / 20;
-                document.page.height = number(attr(size, "h")) / 20;
+                document.page.width = twips(attr(size, "w")) / 20;
+                document.page.height = twips(attr(size, "h")) / 20;
             }
             if (auto margin = child(node, "pgMar")) {
-                const auto top = number(attr(margin, "top")) / 20;
+                const auto top = twips(attr(margin, "top")) / 20;
                 document.page.margin = top;
                 for (auto side : {"left", "right", "bottom"})
-                    if (number(attr(margin, side)) / 20 != top)
+                    if (twips(attr(margin, side)) / 20 != top)
                         warn(warnings, "Unequal page margins are approximated by the top margin.");
             }
             readBands(node);
@@ -1758,6 +1862,33 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         document.paragraphs.push_back(emptyParagraph(std::nullopt));
     if (document.paragraphs.empty())
         document.paragraphs.emplace_back(document.allocateId());
+    // Indents that leave less than 54 pt to write in (a narrow table column, say) would not
+    // lay out: shrink them in proportion.
+    {
+        const double content = document.page.width - 2 * document.page.margin;
+        std::map<std::uint64_t, std::size_t> columns;
+        for (const auto &table : document.tables)
+            columns[table.id] = table.columns;
+        bool shrunk = false;
+        for (auto &paragraph : document.paragraphs) {
+            const double available =
+                paragraph.cell ? content / static_cast<double>(columns.at(paragraph.cell->tableId)) - 8
+                               : content;
+            const double marker = paragraph.list != ListKind::None ? 18 : 0;
+            const double used = paragraph.indentLeft + std::max(0.0, paragraph.indentFirstLine) +
+                                paragraph.indentRight + marker;
+            const double room = std::max(0.0, available - 54 - marker);
+            if (used - marker > room && used > marker) {
+                const double scale = room / (used - marker);
+                paragraph.indentLeft *= scale;
+                paragraph.indentFirstLine *= scale;
+                paragraph.indentRight *= scale;
+                shrunk = true;
+            }
+        }
+        if (shrunk)
+            warn(warnings, "Indents too wide for their page or table column were narrowed.");
+    }
     // Pictures larger than their column or the page would not lay out: scale them down.
     if (!document.images.empty()) {
         const double content = document.page.width - 2 * document.page.margin;
@@ -1767,7 +1898,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         for (auto &paragraph : document.paragraphs) {
             double available = paragraph.cell ? content / tableColumns.at(paragraph.cell->tableId) - 8
                                               : content;
-            available -= paragraph.indentLeft + (paragraph.list != ListKind::None ? 40 : 0) + 1;
+            available -= paragraph.indentLeft + std::max(0.0, paragraph.indentFirstLine) +
+                         paragraph.indentRight + (paragraph.list != ListKind::None ? 40 : 0) + 1;
             double tallest = 0;
             for (const auto &run : paragraph.runs)
                 tallest = std::max(tallest, run.style.size);
@@ -1895,6 +2027,9 @@ std::string serializeDocx(const Document &document) {
         property(level, "numFmt", std::string(kind ? "decimal" : "bullet"));
         property(level, "lvlText", std::string(kind ? "%1." : "•"));
         property(level, "lvlJc", std::string("left"));
+        auto indent = element(element(level, "pPr"), "ind");
+        set(indent, "left", 360);
+        set(indent, "hanging", 360);
     }
     ListKind previous = ListKind::None;
     int numId = 0;
@@ -2052,11 +2187,8 @@ std::string serializeDocx(const Document &document) {
         set(spacing, "after", paragraph.spaceAfter * 20);
         set(spacing, "line", paragraph.lineSpacing * 240);
         set(spacing, "lineRule", std::string("auto"));
-        set(element(ppr, "ind"), "left", paragraph.indentLeft * 20);
-        property(ppr, "jc",
-                 std::string(paragraph.alignment == Alignment::Center  ? "center"
-                             : paragraph.alignment == Alignment::Right ? "right"
-                                                                       : "left"));
+        writeIndent(element(ppr, "ind"), paragraph);
+        property(ppr, "jc", jcValue(paragraph.alignment));
         // Runs split where comment ranges start or end, with the markers between them.
         const auto paragraphIndex = static_cast<std::size_t>(&paragraph - document.paragraphs.data());
         const auto paragraphMarkers = markers.find(paragraphIndex);

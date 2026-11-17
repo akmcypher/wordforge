@@ -424,3 +424,53 @@ TEST(Layout, CellsCarryTheirFillAndTableBorder) {
     for (const auto &cell : layout.cells)
         EXPECT_EQ(cell.border, (TableBorder{2, 0xff336699}));
 }
+TEST(Layout, FirstLineHangingAndRightIndentsAndJustifiedLines) {
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    Editor e;
+    std::u16string text;
+    for (int n = 0; n < 40; ++n)
+        text += u"justified words wrap ";
+    e.replace(text);
+    e.formatParagraph([](auto &p) {
+        p.indentLeft = 36;
+        p.indentFirstLine = -18; // hanging
+        p.indentRight = 72;
+        p.alignment = Alignment::Justify;
+    });
+    const auto layout = engine.compose(e.document);
+    ASSERT_GT(layout.lines.size(), 3u);
+    const double margin = e.document.page.margin;
+    const double right = e.document.page.width - margin - 72;
+    EXPECT_DOUBLE_EQ(layout.lines[0].x, margin + 18);
+    EXPECT_DOUBLE_EQ(layout.lines[1].x, margin + 36);
+    for (std::size_t n = 0; n + 1 < layout.lines.size(); ++n) {
+        // Justified: every line but the last reaches the right indent (its last space hangs).
+        const auto &line = layout.lines[n];
+        double hanging = 0;
+        for (const auto &run : line.shaped.runs)
+            for (const auto &glyph : run.glyphs)
+                if (glyph.cluster + 1 == line.end)
+                    hanging = glyph.advance;
+        EXPECT_NEAR(line.x + line.shaped.width - hanging, right, 0.5) << n;
+    }
+    const auto &last = layout.lines.back();
+    EXPECT_LT(last.x + last.shaped.width, right - 1);
+    // Carets follow the widened spaces.
+    const auto &second = layout.lines[1];
+    EXPECT_NEAR(layout.caret({0, second.end - 1}).x, right, 0.5);
+    // A first-line indent and a list's moved bullet.
+    e.formatParagraph([](auto &p) {
+        p.indentLeft = 0;
+        p.indentFirstLine = 24;
+        p.alignment = Alignment::Left;
+    });
+    const auto indented = engine.compose(e.document);
+    EXPECT_DOUBLE_EQ(indented.lines[0].x, margin + 24);
+    EXPECT_DOUBLE_EQ(indented.lines[1].x, margin);
+    e.formatParagraph([](auto &p) { p.list = ListKind::Bullet; });
+    const auto listed = engine.compose(e.document);
+    EXPECT_GT(listed.lines[0].markerX, margin + 24);
+    EXPECT_DOUBLE_EQ(listed.lines[1].x, margin + 18);
+    EXPECT_THROW(e.formatParagraph([](auto &p) { p.indentFirstLine = -1; }), std::exception);
+}

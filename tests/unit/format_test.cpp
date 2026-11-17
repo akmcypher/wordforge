@@ -1,4 +1,6 @@
 #include "core/formats/native.hpp"
+#include "core/formats/plain_text.hpp"
+#include <unicode/ucnv.h>
 #include "core/formats/zip_package.hpp"
 #include <filesystem>
 #include <fstream>
@@ -530,4 +532,89 @@ TEST(NativeFormat, TableBordersAndShadingRoundTripInV11) {
     };
     EXPECT_THROW(parseNative(variant("<shade ", "<shade tint=\"1\" ")), std::exception);
     EXPECT_THROW(parseNative(variant("version=\"11\"", "version=\"10\"")), std::exception);
+}
+
+TEST(NativeFormat, IndentsAndJustificationRoundTripInV11) {
+    Editor e;
+    e.replace(u"text");
+    auto xml = [](const std::string &bytes) {
+        return bytes.starts_with("PK") ? opc::read(bytes).at("document.xml") : bytes;
+    };
+    EXPECT_EQ(xml(serializeNative(e.document)).find("version=\"11\""), std::string::npos);
+    e.formatParagraph([](auto &p) {
+        p.indentLeft = 36;
+        p.indentFirstLine = -18;
+        p.indentRight = 12;
+        p.alignment = Alignment::Justify;
+    });
+    const auto bytes = serializeNative(e.document);
+    EXPECT_NE(xml(bytes).find("version=\"11\""), std::string::npos);
+    const auto restored = parseNative(bytes);
+    EXPECT_EQ(static_cast<const ParagraphFormat &>(restored.paragraphs[0]),
+              static_cast<const ParagraphFormat &>(e.document.paragraphs[0]));
+    // Earlier versions do not know these attributes.
+    ASSERT_FALSE(bytes.starts_with("PK")); // plain text travels as XML
+    auto older = bytes;
+    older.replace(older.find("version=\"11\""), 12, "version=\"10\"");
+    EXPECT_THROW(parseNative(older), std::exception);
+}
+
+namespace {
+std::string encode(const std::u16string &text, const char *encoding) {
+    UErrorCode error = U_ZERO_ERROR;
+    auto *converter = ucnv_open(encoding, &error);
+    std::string out(text.size() * 4 + 8, '\0');
+    const auto length = ucnv_fromUChars(converter, out.data(), static_cast<int32_t>(out.size()),
+                                        reinterpret_cast<const UChar *>(text.data()),
+                                        static_cast<int32_t>(text.size()), &error);
+    ucnv_close(converter);
+    EXPECT_TRUE(U_SUCCESS(error)) << encoding;
+    out.resize(static_cast<std::size_t>(length));
+    return out;
+}
+} // namespace
+
+TEST(PlainText, DecodesTheWorldsCommonEncodings) {
+    // Marked and unmarked Unicode, with Windows and old Mac line endings.
+    const std::u16string mixed = u"English, Ελληνικά, Русский, العربية, עברית, हिन्दी, ไทย, "
+                                 u"中文, 日本語, 한국어 🙂";
+    for (const char *encoding : {"UTF-8", "UTF-16LE", "UTF-16BE"}) {
+        const auto plain = encode(mixed + u"\r\nsecond\rthird", encoding);
+        const auto decoded = decodePlainText(plain);
+        EXPECT_EQ(decoded.text, mixed + u"\nsecond\nthird") << encoding;
+        EXPECT_EQ(decoded.encoding, encoding);
+    }
+    EXPECT_EQ(decodePlainText("\xef\xbb\xbf" "caf\xc3\xa9").text, u"café");
+    EXPECT_EQ(decodePlainText("\xff\xfe" + encode(u"Ω", "UTF-16LE")).encoding, "UTF-16LE");
+    EXPECT_EQ(decodePlainText(std::string("\xff\xfe\0\0", 4) + encode(u"Ω", "UTF-32LE")).text, u"Ω");
+    // Legacy code pages, detected from the bytes.
+    struct Sample {
+        const char *encoding;
+        std::u16string text;
+    };
+    const std::vector<Sample> samples{
+        {"Shift_JIS", u"日本語の文章です。これは文字コードの判定を確かめるための長めの文章で、"
+                      u"ひらがなとカタカナと漢字を含んでいます。東京都の天気は晴れです。"},
+        {"GB18030", u"这是一段用于检测字符编码的中文文本。我们希望软件能够正确地识别简体中文，"
+                    u"并且显示所有的汉字。北京的天气很好，大家都很高兴。"},
+        {"Big5", u"這是一段用於檢測字元編碼的繁體中文文字。我們希望軟體能夠正確地識別繁體中文，"
+                 u"並且顯示所有的漢字。臺北的天氣很好，大家都很高興。"},
+        {"EUC-KR", u"이것은 문자 인코딩을 확인하기 위한 한국어 문장입니다. 프로그램이 한글을 "
+                   u"올바르게 인식하고 표시하기를 바랍니다. 서울의 날씨는 맑습니다."},
+        {"windows-1251", u"Это русский текст для проверки определения кодировки. Программа "
+                         u"должна правильно распознать кириллицу и показать все буквы. "
+                         u"Сегодня в Москве хорошая погода, и все люди очень довольны."},
+        // Short Big5 text, once taken for Thai.
+        {"Big5", u"今天臺北的天氣非常好，陽光明媚。\n感謝您的快速回覆和幫助。\n學生們正在圖書館裡安靜地學習。"},
+        {"windows-874", u"วันนี้อากาศที่กรุงเทพดีมากและมีแดดจัด ขอบคุณสำหรับคำตอบที่รวดเร็วและความช่วยเหลือ "
+                        u"นักเรียนกำลังอ่านหนังสืออย่างเงียบ ๆ ในห้องสมุด"},
+        {"windows-1252", u"Le café était très agréable, et la crème brûlée était délicieuse. "
+                         u"Où êtes-vous allés pendant les vacances d'été ? À bientôt !"},
+    };
+    for (const auto &sample : samples) {
+        const auto decoded = decodePlainText(encode(sample.text, sample.encoding));
+        EXPECT_EQ(decoded.text, sample.text) << sample.encoding << " detected as " << decoded.encoding;
+    }
+    // Control characters other than tabs and line breaks are dropped.
+    EXPECT_EQ(decodePlainText(std::string("a\0b\tc\fd", 7)).text, u"ab\tc\nd");
 }

@@ -182,7 +182,10 @@ void validateParagraphFormat(const ParagraphFormat &value) {
         !std::isfinite(value.spaceBefore) || value.spaceBefore < 0 || value.spaceBefore > 200 ||
         !std::isfinite(value.spaceAfter) || value.spaceAfter < 0 || value.spaceAfter > 200 ||
         !std::isfinite(value.lineSpacing) || value.lineSpacing < 1 || value.lineSpacing > 3 ||
-        static_cast<unsigned>(value.alignment) > 2 || static_cast<unsigned>(value.list) > 2)
+        !std::isfinite(value.indentFirstLine) || value.indentFirstLine < -value.indentLeft ||
+        value.indentFirstLine > 360 || !std::isfinite(value.indentRight) ||
+        value.indentRight < 0 || value.indentRight > 360 ||
+        static_cast<unsigned>(value.alignment) > 3 || static_cast<unsigned>(value.list) > 2)
         throw std::invalid_argument("Invalid paragraph formatting");
 }
 void validatePage(const PageStyle &page) {

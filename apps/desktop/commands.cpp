@@ -421,15 +421,20 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
     create("bullets", "Bulleted list", "Paragraph", list(ListKind::Bullet));
     create("numbering", "Numbered list", "Paragraph", list(ListKind::Decimal));
     create("decreaseIndent", "Decrease indent", "Paragraph", [view] {
-        view->formatParagraph([](auto &p) { p.indentLeft = std::max(0.0, p.indentLeft - 18); });
+        view->formatParagraph([](auto &p) {
+            p.indentLeft = std::max(0.0, p.indentLeft - 18);
+            p.indentFirstLine = std::max(p.indentFirstLine, -p.indentLeft);
+        });
     });
     create("increaseIndent", "Increase indent", "Paragraph", [view] {
         view->formatParagraph([](auto &p) { p.indentLeft += 18; });
     });
-    const QStringList alignments{"Left", "Center", "Right"};
-    for (int index = 0; index < 3; ++index)
+    const QStringList alignments{"Left", "Center", "Right", "Justify"};
+    for (int index = 0; index < 4; ++index)
         create("align" + alignments[index],
-               index == 1 ? QString("Center") : "Align " + alignments[index].toLower(),
+               index == 1   ? QString("Center")
+               : index == 3 ? QString("Justify")
+                            : "Align " + alignments[index].toLower(),
                "Paragraph", [view, index] { view->align(static_cast<Alignment>(index)); });
     for (double value : {1.0, 1.15, 1.5, 2.0})
         create("lineSpacing" + QString::number(value).remove('.'),
@@ -547,6 +552,7 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
         ->setIconText("Track");
     get("trackChanges")->setCheckable(true);
     get("trackChanges")->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E)); // as in Word
+    get("alignJustify")->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_J)); // as in Word
     create("nextChange", "Next change", "Review", [view] { view->nextChange(); })
         ->setIconText("Next change");
     create("acceptChange", "Accept change", "Review", [view] {
@@ -605,7 +611,8 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
     });
 
     for (const auto &id : {"bold", "italic", "underline", "strike", "highlight", "bullets",
-                           "numbering", "alignLeft", "alignCenter", "alignRight", "styleNormal",
+                           "numbering", "alignLeft", "alignCenter", "alignRight",
+                           "alignJustify", "styleNormal",
                            "styleTitle", "styleHeading1", "styleHeading2", "lineSpacing1",
                            "lineSpacing115", "lineSpacing15", "lineSpacing2"})
         get(id)->setCheckable(true);
@@ -620,8 +627,8 @@ void Commands::refreshIcons() {
     const QStringList paragraph{"bullets", "numbering", "decreaseIndent", "increaseIndent"};
     for (int n = 0; n < 4; ++n)
         get(paragraph[n])->setIcon(paragraphIcon(n, ink));
-    const QStringList alignments{"alignLeft", "alignCenter", "alignRight"};
-    for (int n = 0; n < 3; ++n)
+    const QStringList alignments{"alignLeft", "alignCenter", "alignRight", "alignJustify"};
+    for (int n = 0; n < 4; ++n)
         get(alignments[n])->setIcon(alignmentIcon(n, ink));
     get("picture")->setIcon(pictureIcon(ink));
 }
@@ -635,8 +642,8 @@ void Commands::sync() {
     get("highlight")->setChecked(s.highlight != 0);
     get("bullets")->setChecked(selectedList(view_, ListKind::Bullet));
     get("numbering")->setChecked(selectedList(view_, ListKind::Decimal));
-    const QStringList alignments{"alignLeft", "alignCenter", "alignRight"};
-    for (int n = 0; n < 3; ++n)
+    const QStringList alignments{"alignLeft", "alignCenter", "alignRight", "alignJustify"};
+    for (int n = 0; n < 4; ++n)
         get(alignments[n])->setChecked(static_cast<int>(p.alignment) == n);
     const QStringList styles{"styleNormal", "styleTitle", "styleHeading1", "styleHeading2"};
     for (int n = 0; n < 4; ++n)
@@ -662,6 +669,7 @@ void Commands::sync() {
     get("decreaseIndent")->setEnabled(p.indentLeft > 0);
     get("increaseIndent")
         ->setEnabled(page.width - 2 * page.margin - p.indentLeft -
+                             std::max(0.0, p.indentFirstLine) - p.indentRight -
                              (p.list == ListKind::None ? 0 : 18) >=
                          54 &&
                      p.indentLeft < 360);

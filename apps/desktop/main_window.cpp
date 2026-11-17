@@ -8,6 +8,7 @@
 #include "apps/desktop/spelling.hpp"
 #include "core/formats/docx.hpp"
 #include "core/formats/native.hpp"
+#include "core/formats/plain_text.hpp"
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
@@ -174,15 +175,21 @@ void MainWindow::openFile(const QString &path) {
         throw std::runtime_error("Document exceeds the current 16 MiB file limit");
     const auto bytes = file.readAll();
     Document document;
-    if (QFileInfo(path).suffix().compare("txt", Qt::CaseInsensitive) == 0) {
-        auto text = bytes.toStdString();
-        if (text.starts_with("\xef\xbb\xbf"))
-            text.erase(0, 3);
+    const auto suffix = QFileInfo(path).suffix().toLower();
+    // Word documents, macro-enabled documents and templates share the DOCX reader and open as
+    // editable copies. Macros are never run or kept.
+    const bool wordFile =
+        suffix == "docx" || suffix == "docm" || suffix == "dotx" || suffix == "dotm";
+    if (suffix == "txt") {
+        // Any common encoding: UTF-8/16/32, Shift_JIS, GB18030, Big5, windows-125x...
         Editor imported;
-        imported.replace(utf16(text));
+        imported.replace(decodePlainText(bytes.toStdString()).text);
         document = std::move(imported.document);
-    } else if (QFileInfo(path).suffix().compare("docx", Qt::CaseInsensitive) == 0) {
+    } else if (wordFile) {
         auto imported = parseDocx(bytes.toStdString(), pictureToPng);
+        if (suffix == "docm" || suffix == "dotm")
+            imported.warnings.insert(imported.warnings.begin(),
+                                     "Macros are not run and are removed.");
         if (!imported.warnings.empty()) {
             QStringList warnings;
             for (const auto &warning : imported.warnings)
@@ -200,9 +207,8 @@ void MainWindow::openFile(const QString &path) {
     } else
         document = parseNative(bytes.toStdString());
     view_->setDocument(std::move(document));
-    const bool importedDocx = QFileInfo(path).suffix().compare("docx", Qt::CaseInsensitive) == 0;
-    path_ = importedDocx ? QString{} : path;
-    dirty_ = importedDocx;
+    path_ = wordFile ? QString{} : path;
+    dirty_ = wordFile;
     clearRecovery();
     updateStatus();
 }
@@ -317,7 +323,7 @@ void MainWindow::buildUi() {
         if (!confirmDiscard())
             return;
         auto path = QFileDialog::getOpenFileName(this, "Open document", {},
-                                                 "Documents (*.wfg *.docx *.txt)");
+                                                 "Documents (*.wfg *.docx *.docm *.dotx *.dotm *.txt)");
         if (path.isEmpty())
             return;
         try {
@@ -434,7 +440,8 @@ void MainWindow::buildUi() {
     auto *format = new QMenu("F&ormat", this);
     fill(format, {"bold", "italic", "underline", "strike", "highlight", "fontColor",
                   "clearFormatting", "", "bullets", "numbering", "decreaseIndent",
-                  "increaseIndent", "", "alignLeft", "alignCenter", "alignRight"});
+                  "increaseIndent", "", "alignLeft", "alignCenter", "alignRight",
+                  "alignJustify"});
     fill(format->addMenu("Line spacing"),
          {"lineSpacing1", "lineSpacing115", "lineSpacing15", "lineSpacing2"});
     fill(format->addMenu("Styles"),

@@ -1152,3 +1152,88 @@ TEST(Docx, ThemeFontsAndAutomaticColourSurvive) {
     const auto parts = opc::read(serializeDocx(imported.document));
     EXPECT_NE(parts.at("word/document.xml").find("w:color w:val=\"auto\""), std::string::npos);
 }
+
+TEST(Docx, IndentsAndJustificationBothWays) {
+    const auto word = wordDocument(
+        "<w:p><w:pPr><w:ind w:left='720' w:hanging='360' w:right='1440'/><w:jc w:val='both'/>"
+        "</w:pPr><w:r><w:t>hanging</w:t></w:r></w:p>"
+        "<w:p><w:pPr><w:ind w:start='0' w:firstLine='480' w:end='240'/><w:jc w:val='distribute'/>"
+        "</w:pPr><w:r><w:t>first</w:t></w:r></w:p>"
+        "<w:p><w:pPr><w:ind w:left='-200'/></w:pPr><w:r><w:t>margin</w:t></w:r></w:p>");
+    const auto imported = parseDocx(opc::write(word));
+    const auto &p = imported.document.paragraphs;
+    ASSERT_EQ(p.size(), 3u);
+    EXPECT_EQ(p[0].indentLeft, 36);
+    EXPECT_EQ(p[0].indentFirstLine, -18);
+    EXPECT_EQ(p[0].indentRight, 72);
+    EXPECT_EQ(p[0].alignment, Alignment::Justify);
+    EXPECT_EQ(p[1].indentFirstLine, 24);
+    EXPECT_EQ(p[1].indentRight, 12);
+    EXPECT_EQ(p[1].alignment, Alignment::Justify);
+    EXPECT_EQ(p[2].indentLeft, 0);
+    auto warned = [&](const char *text) {
+        return std::any_of(imported.warnings.begin(), imported.warnings.end(),
+                           [&](const auto &w) { return w.find(text) != std::string::npos; });
+    };
+    EXPECT_TRUE(warned("Distributed"));
+    EXPECT_TRUE(warned("page margin"));
+    EXPECT_FALSE(warned("not preserved"));
+    const auto back = parseDocx(serializeDocx(imported.document));
+    for (std::size_t n = 0; n < 3; ++n) {
+        EXPECT_EQ(back.document.paragraphs[n].indentLeft, p[n].indentLeft) << n;
+        EXPECT_EQ(back.document.paragraphs[n].indentFirstLine, p[n].indentFirstLine) << n;
+        EXPECT_EQ(back.document.paragraphs[n].indentRight, p[n].indentRight) << n;
+        EXPECT_EQ(back.document.paragraphs[n].alignment, p[n].alignment) << n;
+    }
+    const auto xml = opc::read(serializeDocx(imported.document)).at("word/document.xml");
+    EXPECT_NE(xml.find("w:hanging=\"360\""), std::string::npos);
+    EXPECT_NE(xml.find("w:val=\"both\""), std::string::npos);
+}
+
+TEST(Docx, WordListIndentsComeFromTheirLevel) {
+    auto parts = wordDocument(
+        "<w:p><w:pPr><w:numPr><w:ilvl w:val='0'/><w:numId w:val='9'/></w:numPr></w:pPr>"
+        "<w:r><w:t>one</w:t></w:r></w:p>"
+        "<w:p><w:pPr><w:numPr><w:ilvl w:val='1'/><w:numId w:val='9'/></w:numPr></w:pPr>"
+        "<w:r><w:t>nested</w:t></w:r></w:p>");
+    parts["word/numbering.xml"] =
+        "<w:numbering xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'>"
+        "<w:abstractNum w:abstractNumId='0'>"
+        "<w:lvl w:ilvl='0'><w:start w:val='1'/><w:numFmt w:val='bullet'/><w:lvlText w:val='•'/>"
+        "<w:pPr><w:ind w:left='720' w:hanging='360'/></w:pPr></w:lvl>"
+        "<w:lvl w:ilvl='1'><w:start w:val='1'/><w:numFmt w:val='bullet'/><w:lvlText w:val='o'/>"
+        "<w:pPr><w:ind w:left='1440' w:hanging='360'/></w:pPr></w:lvl></w:abstractNum>"
+        "<w:num w:numId='9'><w:abstractNumId w:val='0'/></w:num></w:numbering>";
+    const auto imported = parseDocx(opc::write(parts));
+    const auto &p = imported.document.paragraphs;
+    ASSERT_EQ(p.size(), 2u);
+    EXPECT_EQ(p[0].list, ListKind::Bullet);
+    EXPECT_EQ(p[0].indentLeft, 18); // bullet at 18 pt, text at 36 pt, as in Word
+    EXPECT_EQ(p[0].indentFirstLine, 0);
+    EXPECT_EQ(p[1].indentLeft, 54); // the nested level shows indented
+    for (const auto &w : imported.warnings)
+        EXPECT_EQ(w.find("approximated"), std::string::npos) << w;
+    const auto xml = opc::read(serializeDocx(imported.document)).at("word/document.xml");
+    EXPECT_NE(xml.find("w:left=\"720\" w:hanging=\"360\""), std::string::npos);
+    EXPECT_NE(xml.find("w:left=\"1440\" w:hanging=\"360\""), std::string::npos);
+}
+
+TEST(Docx, StrictOpenXmlLengthsWithUnits) {
+    // Word's "Strict Open XML" writes universal measures instead of twips.
+    const auto word = wordDocument(
+        "<w:p><w:pPr><w:spacing w:before='6pt' w:after='0pt' w:line='13.8pt' w:lineRule='auto'/>"
+        "<w:ind w:start='0.5in' w:hanging='18pt' w:end='1.27cm'/></w:pPr>"
+        "<w:r><w:rPr><w:sz w:val='14pt'/></w:rPr><w:t>strict</w:t></w:r></w:p>"
+        "<w:sectPr><w:pgSz w:w='595.3pt' w:h='841.9pt'/></w:sectPr>");
+    const auto imported = parseDocx(opc::write(word));
+    const auto &p = imported.document.paragraphs[0];
+    EXPECT_EQ(p.spaceBefore, 6);
+    EXPECT_NEAR(p.lineSpacing, 1.15, 0.001); // 240ths of a line, written as 13.8pt
+    EXPECT_EQ(p.indentLeft, 36);
+    EXPECT_EQ(p.indentFirstLine, -18);
+    EXPECT_NEAR(p.indentRight, 36, 0.01);
+    EXPECT_EQ(p.runs[0].style.size, 14);
+    EXPECT_NEAR(imported.document.page.width, 595.3, 0.01);
+    EXPECT_THROW(parseDocx(opc::write(wordDocument("<w:p><w:pPr><w:ind w:start='3furlongs'/></w:pPr></w:p>"))),
+                 std::runtime_error);
+}

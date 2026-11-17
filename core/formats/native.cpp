@@ -86,6 +86,10 @@ void writeStyle(pugi::xml_node root, const ParagraphStyle &style) {
         node.append_attribute("list") = static_cast<int>(*p.list);
     if (p.indentLeft)
         node.append_attribute("indent") = *p.indentLeft;
+    if (p.indentFirstLine)
+        node.append_attribute("firstLine") = *p.indentFirstLine;
+    if (p.indentRight)
+        node.append_attribute("rightIndent") = *p.indentRight;
     if (p.spaceBefore)
         node.append_attribute("before") = *p.spaceBefore;
     if (p.spaceAfter)
@@ -143,10 +147,16 @@ CharacterProperties readCharacterProperties(pugi::xml_node node) {
     character.highlight = whole<std::uint32_t>(node, "highlight", 4294967295.0);
     return character;
 }
-ParagraphStyle readStyle(pugi::xml_node node) {
-    attributes(node, {"id", "name", "basedOn", "next", "align", "list", "indent", "before", "after",
-                      "line", "family", "size", "bold", "italic", "underline", "strike", "color",
-                      "highlight"});
+// `indented`: WFG11, which adds first-line and right indents and justified alignment.
+ParagraphStyle readStyle(pugi::xml_node node, bool indented) {
+    if (indented)
+        attributes(node, {"id", "name", "basedOn", "next", "align", "list", "indent", "firstLine",
+                          "rightIndent", "before", "after", "line", "family", "size", "bold",
+                          "italic", "underline", "strike", "color", "highlight"});
+    else
+        attributes(node, {"id", "name", "basedOn", "next", "align", "list", "indent", "before",
+                          "after", "line", "family", "size", "bold", "italic", "underline",
+                          "strike", "color", "highlight"});
     for (auto child : node.children())
         if (!indentation(child))
             throw std::runtime_error("Unexpected style content");
@@ -155,9 +165,11 @@ ParagraphStyle readStyle(pugi::xml_node node) {
     style.name = node.attribute("name").value();
     style.basedOn = node.attribute("basedOn").value();
     style.next = node.attribute("next").value();
-    style.paragraph.alignment = whole<Alignment>(node, "align", 2);
+    style.paragraph.alignment = whole<Alignment>(node, "align", indented ? 3 : 2);
     style.paragraph.list = whole<ListKind>(node, "list", 2);
     style.paragraph.indentLeft = real(node, "indent", 0, 360);
+    style.paragraph.indentFirstLine = real(node, "firstLine", -360, 360);
+    style.paragraph.indentRight = real(node, "rightIndent", 0, 360);
     style.paragraph.spaceBefore = real(node, "before", 0, 200);
     style.paragraph.spaceAfter = real(node, "after", 0, 200);
     style.paragraph.lineSpacing = real(node, "line", 1, 3);
@@ -200,11 +212,20 @@ std::string serializeNative(const Document &document) {
     const bool noted = !document.footnotes.empty() || !document.comments.empty();
     // WFG10 only for tracked changes, so other files stay readable by 0.6.5.
     const bool reviewed = document.trackChanges || !document.revisions.empty();
-    // WFG11 only for table borders or cell shading, so other files stay readable by 0.6.6.
+    // WFG11 only for table borders, cell shading, first-line or right indents or justified
+    // text, so other files stay readable by 0.6.6.
+    auto indented = [](const auto &p) {
+        return p.indentFirstLine != decltype(p.indentFirstLine){} ||
+               p.indentRight != decltype(p.indentRight){} ||
+               p.alignment == decltype(p.alignment){Alignment::Justify};
+    };
     const bool decorated =
-        std::any_of(document.tables.begin(), document.tables.end(), [](const Table &t) {
-            return t.border != TableBorder{} || !t.shading.empty();
-        });
+        std::any_of(document.tables.begin(), document.tables.end(),
+                    [](const Table &t) { return t.border != TableBorder{} || !t.shading.empty(); }) ||
+        std::any_of(document.paragraphs.begin(), document.paragraphs.end(),
+                    [&](const Paragraph &p) { return indented(p); }) ||
+        std::any_of(document.styles.paragraphStyles.begin(), document.styles.paragraphStyles.end(),
+                    [&](const ParagraphStyle &s) { return indented(s.paragraph); });
     const bool packaged = tables || !imageIds.empty() || preserving;
     // WFG6 only when styles were customized; built-in styles keep files readable by 0.6.0.
     const bool styled = document.styles != builtinStyles();
@@ -361,6 +382,10 @@ std::string serializeNative(const Document &document) {
             paragraph.append_attribute("preset") = static_cast<int>(*preset);
         if (p.indentLeft)
             paragraph.append_attribute("indent") = p.indentLeft;
+        if (p.indentFirstLine)
+            paragraph.append_attribute("firstLine") = p.indentFirstLine;
+        if (p.indentRight)
+            paragraph.append_attribute("rightIndent") = p.indentRight;
         if (p.spaceBefore)
             paragraph.append_attribute("before") = p.spaceBefore;
         if (p.lineSpacing != 1.15)
@@ -572,7 +597,7 @@ Document parseNative(const std::string &input) {
             continue;
         }
         if (v6 && std::string_view(p.name()) == "style") {
-            document.styles.paragraphStyles.push_back(readStyle(p));
+            document.styles.paragraphStyles.push_back(readStyle(p, v11));
             continue;
         }
         if (v7 && std::string_view(p.name()) == "charStyle") {
@@ -665,6 +690,10 @@ Document parseNative(const std::string &input) {
         if (version == "1")
             attributes(p,
                        {"align", "after", "list", "preset", "indent", "before", "line", "break"});
+        else if (v11)
+            attributes(p, {"align", "after", "list", "style", "direct", "indent", "firstLine",
+                           "rightIndent", "before", "line", "break", "id", "table", "row",
+                           "column"});
         else if (v6)
             attributes(p, {"align", "after", "list", "style", "direct", "indent", "before", "line",
                            "break", "id", "table", "row", "column"});
@@ -679,7 +708,7 @@ Document parseNative(const std::string &input) {
         if (p.attribute("table") || p.attribute("row") || p.attribute("column"))
             paragraph.cell =
                 TableCell{identifier(p, "table"), index(p, "row", true), index(p, "column", true)};
-        auto alignment = number(p, "align", 0, 0, 2);
+        auto alignment = number(p, "align", 0, 0, v11 ? 3 : 2);
         if (std::floor(alignment) != alignment)
             throw std::runtime_error("Invalid alignment");
         paragraph.alignment = static_cast<Alignment>(static_cast<int>(alignment));
@@ -696,6 +725,8 @@ Document parseNative(const std::string &input) {
         } else
             paragraph.style = presetStyleId(static_cast<ParagraphPreset>(static_cast<int>(preset)));
         paragraph.indentLeft = number(p, "indent", 0, 0, 360);
+        paragraph.indentFirstLine = number(p, "firstLine", 0, -360, 360);
+        paragraph.indentRight = number(p, "rightIndent", 0, 0, 360);
         paragraph.spaceBefore = number(p, "before", 0, 0, 200);
         paragraph.lineSpacing = number(p, "line", 1.15, 1, 3);
         paragraph.pageBreakBefore = boolean(p, "break");

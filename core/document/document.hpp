@@ -21,13 +21,17 @@ struct CharacterStyle {
     bool operator==(const CharacterStyle &) const = default;
 };
 void validateCharacterStyle(const CharacterStyle &);
-enum class Alignment { Left, Center, Right };
+enum class Alignment { Left, Center, Right, Justify };
 enum class ListKind { None, Bullet, Decimal };
 enum class ParagraphPreset { Normal, Title, Heading1, Heading2 };
 struct ParagraphFormat {
     Alignment alignment = Alignment::Left;
     ListKind list = ListKind::None;
     double indentLeft = 0, spaceBefore = 0, spaceAfter = 8, lineSpacing = 1.15;
+    // Points: the first line starts this far right of indentLeft (negative: a hanging
+    // indent, never left of the margin); the right edge sits indentRight inside the margin.
+    // For a list paragraph the first-line indent moves the bullet or number.
+    double indentFirstLine = 0, indentRight = 0;
     bool pageBreakBefore = false;
     bool operator==(const ParagraphFormat &) const = default;
 };

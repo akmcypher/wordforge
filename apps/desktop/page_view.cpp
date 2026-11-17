@@ -363,7 +363,8 @@ double PageView::writingWidth() const {
         if (table != document().tables.end())
             width = width / static_cast<double>(table->columns) - 8; // 4 pt cell padding
     }
-    return width - paragraph.indentLeft - (paragraph.list == ListKind::None ? 0 : 36);
+    return width - paragraph.indentLeft - std::max(0.0, paragraph.indentFirstLine) -
+           paragraph.indentRight - (paragraph.list == ListKind::None ? 0 : 36);
 }
 bool PageView::resizePicture(double width, double height) {
     return change([&](Editor &candidate) { candidate.resizeImage(width, height); });

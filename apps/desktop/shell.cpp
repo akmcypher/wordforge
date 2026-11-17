@@ -95,7 +95,7 @@ CompactToolbar::CompactToolbar(PageView *view, Commands &commands, QMenu *insert
     for (const auto &id : {"bullets", "numbering", "decreaseIndent", "increaseIndent"})
         add(id);
     addSeparator();
-    for (const auto &id : {"alignLeft", "alignCenter", "alignRight"})
+    for (const auto &id : {"alignLeft", "alignCenter", "alignRight", "alignJustify"})
         add(id);
     addSeparator();
     auto *insertButton = new QToolButton;
@@ -232,11 +232,12 @@ FormatPanel::FormatPanel(PageView *view, Commands &commands, QWidget *parent)
     connect(spacing, &QComboBox::activated, this,
             [&commands](int index) { commands.get(spacingId(spacings[index]))->trigger(); });
     auto spin = [&](const QString &name, const QString &label, double maximum, double step,
-                    const std::function<void(ParagraphFormat &, double)> &apply) {
+                    const std::function<void(ParagraphFormat &, double)> &apply,
+                    double minimum = 0) {
         auto *box = new QDoubleSpinBox;
         box->setObjectName(name);
         box->setAccessibleName(label);
-        box->setRange(0, maximum);
+        box->setRange(minimum, maximum);
         box->setSingleStep(step);
         box->setDecimals(0);
         box->setSuffix(" pt");
@@ -246,8 +247,17 @@ FormatPanel::FormatPanel(PageView *view, Commands &commands, QWidget *parent)
         });
         return box;
     };
-    auto *indent = spin("panelIndent", "Left indent", 360, 18,
-                        [](auto &p, double value) { p.indentLeft = value; });
+    auto *indent = spin("panelIndent", "Left indent", 360, 18, [](auto &p, double value) {
+        p.indentLeft = value;
+        p.indentFirstLine = std::max(p.indentFirstLine, -value);
+    });
+    // Negative: a hanging indent (the first line starts left of the others).
+    auto *firstLine = spin(
+        "panelFirstLine", "First line", 360, 18,
+        [](auto &p, double value) { p.indentFirstLine = std::max(value, -p.indentLeft); }, -360);
+    firstLine->setToolTip("Negative values make a hanging indent");
+    auto *rightIndent = spin("panelRightIndent", "Right indent", 360, 18,
+                             [](auto &p, double value) { p.indentRight = value; });
     auto *before = spin("panelSpaceBefore", "Space before", 200, 6,
                         [](auto &p, double value) { p.spaceBefore = value; });
     auto *after = spin("panelSpaceAfter", "Space after", 200, 6,
@@ -315,10 +325,12 @@ FormatPanel::FormatPanel(PageView *view, Commands &commands, QWidget *parent)
     auto sync = [=] {
         const auto &p = view->document().paragraphs[selectedParagraphs(view->selection()).first];
         const auto &page = view->document().page;
-        QSignalBlocker s(spacing), i(indent), b(before), a(after), m(margins), o(orientation),
-            pa(paper);
+        QSignalBlocker s(spacing), i(indent), fl(firstLine), ri(rightIndent), b(before),
+            a(after), m(margins), o(orientation), pa(paper);
         spacing->setCurrentIndex(spacing->findData(p.lineSpacing));
         indent->setValue(p.indentLeft);
+        firstLine->setValue(p.indentFirstLine);
+        rightIndent->setValue(p.indentRight);
         before->setValue(p.spaceBefore);
         after->setValue(p.spaceAfter);
         const QList<double> marginValues{56.7, 72, 54, 36};

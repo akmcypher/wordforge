@@ -17,7 +17,7 @@ QIcon alignmentIcon(int kind, QColor color) {
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setPen(QPen(color, 1.5));
     for (int i = 0; i < 4; ++i) {
-        const double width = (i % 2) ? 10 : 16;
+        const double width = kind == 3 && i < 3 ? 16 : (i % 2) ? 10 : 16;
         const double x = kind == 0 ? 2 : kind == 1 ? (20 - width) / 2 : 18 - width;
         painter.drawLine(QPointF(x, 4 + i * 4), QPointF(x + width, 4 + i * 4));
     }
