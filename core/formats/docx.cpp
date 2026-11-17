@@ -188,6 +188,11 @@ std::string bandPart(bool header, const PageBand &band, double width) {
     }
     return saved(part);
 }
+// The document theme's heading (major) and body (minor) Latin fonts, when it names them.
+struct ThemeFonts {
+    std::string major, minor;
+};
+thread_local ThemeFonts themeFonts; // set for the duration of one parseDocx
 void runProperties(pugi::xml_node properties, CharacterStyle &style,
                    std::vector<std::string> &warnings, bool styleDefinition = false) {
     auto toggle = [styleDefinition](bool previous, pugi::xml_node node) {
@@ -202,8 +207,14 @@ void runProperties(pugi::xml_node properties, CharacterStyle &style,
                 family = attr(node, "hAnsi");
             if (!family.empty())
                 style.family = family;
-            if (!attr(node, "asciiTheme").empty())
-                warn(warnings, "Theme fonts use a local fallback.");
+            if (const auto theme = attr(node, "asciiTheme"); !theme.empty()) {
+                // majorHAnsi / minorHAnsi... name the theme's heading or body font.
+                const auto &named = theme.starts_with("major") ? themeFonts.major : themeFonts.minor;
+                if (!named.empty())
+                    style.family = named;
+                else
+                    warn(warnings, "Theme fonts use a local fallback.");
+            }
         } else if (is(node, "b"))
             style.bold = toggle(style.bold, node);
         else if (is(node, "i"))
@@ -217,8 +228,8 @@ void runProperties(pugi::xml_node properties, CharacterStyle &style,
             if (val(node) != "single" && val(node) != "none" && !val(node).empty())
                 warn(warnings, "Underline patterns are shown as a single line.");
         } else if (is(node, "color")) {
-            if (val(node) != "auto")
-                style.color = color(val(node));
+            // "auto" (Word's automatic colour) is Wordforge's default ink.
+            style.color = val(node) == "auto" ? CharacterStyle{}.color : color(val(node));
             if (!attr(node, "themeColor").empty())
                 warn(warnings, "Theme colors use their saved fallback values.");
         } else if (is(node, "shd")) {
@@ -614,7 +625,8 @@ void writeCharacter(pugi::xml_node rpr, const CharacterStyle &value, const Chara
     toggle(&CharacterStyle::strike, "strike", nullptr);
     if (differs(&CharacterStyle::color)) {
         opaque(value.color);
-        property(rpr, "color", hex(value.color));
+        property(rpr, "color", value.color == CharacterStyle{}.color ? std::string("auto")
+                                                                     : hex(value.color));
     }
     if (differs(&CharacterStyle::size)) {
         property(rpr, "sz", value.size * 2);
@@ -706,6 +718,23 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
     if (!is(content.document_element(), "document"))
         throw std::runtime_error("Unsupported DOCX document namespace");
     auto body = child(content.document_element(), "body");
+    // Theme fonts (Word's default body font, Aptos or Calibri, comes from the theme).
+    themeFonts = {};
+    if (const auto themePath = relationship(parts, main, "theme");
+        !themePath.empty() && parts.contains(themePath)) {
+        pugi::xml_document theme;
+        if (theme.load_buffer(parts.at(themePath).data(), parts.at(themePath).size()))
+            for (auto scheme : theme.select_nodes("//*[local-name()='fontScheme']")) {
+                auto font = [&](const char *which) {
+                    auto latin = scheme.node().select_node(
+                        (std::string("*[local-name()='") + which + "']/*[local-name()='latin']")
+                            .c_str());
+                    std::string name = latin.node().attribute("typeface").value();
+                    return name.size() <= 256 ? name : std::string();
+                };
+                themeFonts = {font("majorFont"), font("minorFont")};
+            }
+    }
     // Footnote texts by id, as plain text (paragraphs joined by spaces).
     std::map<std::string, std::u16string> footnoteTexts;
     bool simplifiedNotes = false;
@@ -2024,7 +2053,10 @@ std::string serializeDocx(const Document &document) {
                 (run.style.highlight && (run.style.highlight >> 24) != 255))
                 throw std::runtime_error(
                     "DOCX export cannot preserve transparent text colors; save as .wfg");
-            property(rpr, "color", hex(run.style.color));
+            // Wordforge's default ink is Word's automatic text colour.
+            property(rpr, "color", run.style.color == CharacterStyle{}.color
+                                       ? std::string("auto")
+                                       : hex(run.style.color));
             property(rpr, "sz", run.style.size * 2);
             property(rpr, "szCs", run.style.size * 2);
             if (!run.style.highlight) // override a highlight the paragraph style may set
