@@ -869,3 +869,45 @@ TEST(Fields, MustNestAndHaveValidInstructions) {
     document.fields[1].instruction = "bad\tinstruction";
     EXPECT_THROW(validateDocument(document), std::invalid_argument);
 }
+TEST(Sections, InsertSetAndRemoveBreaks) {
+    Editor e;
+    e.replace(u"first second");
+    e.selection = {{0, 5}, {0, 5}};
+    e.insertSectionBreak(false);
+    ASSERT_EQ(e.document.paragraphs.size(), 2u);
+    EXPECT_EQ(e.document.paragraphs[0].text(), u"first");
+    ASSERT_TRUE(e.document.paragraphs[0].sectionBreak);
+    EXPECT_FALSE(e.document.paragraphs[1].sectionBreak);
+    // Page settings go to the caret's section only.
+    e.selection = {{0, 0}, {0, 0}};
+    auto page = e.sectionPage();
+    page.columns = 3;
+    page.header.center = u"{PAGE}";
+    e.setPage(page);
+    EXPECT_EQ(e.document.paragraphs[0].sectionBreak->page.columns, 3u);
+    EXPECT_EQ(e.document.page.columns, 1u);
+    EXPECT_EQ(e.document.page.header.center, u"{PAGE}"); // headers stay document-wide
+    EXPECT_TRUE(e.document.paragraphs[0].sectionBreak->page.header.empty());
+    EXPECT_EQ(sectionPage(e.document, 1).columns, 1u);
+    EXPECT_EQ(sectionPage(e.document, 0).header.center, u"{PAGE}");
+    EXPECT_NO_THROW(validateDocument(e.document));
+    // Joining the paragraphs keeps the surviving mark's (the second's) settings: no break.
+    e.selection = {{0, 5}, {1, 0}};
+    e.replace(u" ");
+    EXPECT_EQ(e.document.paragraphs.size(), 1u);
+    EXPECT_FALSE(e.document.paragraphs[0].sectionBreak);
+    e.undo();
+    ASSERT_TRUE(e.document.paragraphs[0].sectionBreak);
+    e.selection = {{0, 2}, {0, 2}};
+    EXPECT_TRUE(e.removeSectionBreak());
+    EXPECT_FALSE(e.document.paragraphs[0].sectionBreak);
+    EXPECT_FALSE(e.removeSectionBreak());
+    // Invalid: a break inside a table, or one that carries its own header.
+    auto document = e.document;
+    document.paragraphs[0].sectionBreak = SectionBreak{};
+    document.paragraphs[0].sectionBreak->page.header.left = u"x";
+    EXPECT_THROW(validateDocument(document), std::invalid_argument);
+    page = PageStyle{};
+    page.columns = 7;
+    EXPECT_THROW(validatePage(page), std::invalid_argument);
+}

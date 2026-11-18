@@ -1292,9 +1292,52 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                                description},
                               style);
     };
-    // A page break that ended a paragraph (or a next-page section break) starts the next
-    // body paragraph on a new page.
+    // A page break that ended a paragraph starts the next body paragraph on a new page.
     bool pendingBreak = false;
+    // A section's size, margins and columns; other section settings are reported.
+    auto readGeometry = [&](pugi::xml_node section, PageStyle &page) {
+        if (auto size = child(section, "pgSz")) {
+            page.width = twips(attr(size, "w")) / 20;
+            page.height = twips(attr(size, "h")) / 20;
+        }
+        if (auto margin = child(section, "pgMar")) {
+            const auto top = twips(attr(margin, "top")) / 20;
+            page.margin = top;
+            for (auto side : {"left", "right", "bottom"})
+                if (twips(attr(margin, side)) / 20 != top)
+                    warn(warnings, "Unequal page margins are approximated by the top margin.");
+        }
+        page.columns = 1;
+        page.columnGap = 36;
+        if (auto columns = child(section, "cols")) {
+            const auto number = std::atoi(attr(columns, "num").c_str());
+            if (number > 1)
+                page.columns = static_cast<std::size_t>(std::min(number, 6));
+            if (!attr(columns, "space").empty())
+                page.columnGap = std::clamp(twips(attr(columns, "space")) / 20, 0.0, 144.0);
+            if (number > 6 || attr(columns, "equalWidth") == "0" || attr(columns, "sep") == "1" ||
+                attr(columns, "sep") == "true")
+                warn(warnings, "Unequal columns and column lines are shown as equal columns.");
+        }
+        for (auto propertyNode : section.children())
+            if (propertyNode.type() == pugi::node_element && !is(propertyNode, "pgSz") &&
+                !is(propertyNode, "pgMar") && !is(propertyNode, "headerReference") &&
+                !is(propertyNode, "footerReference") && !is(propertyNode, "titlePg") &&
+                !is(propertyNode, "cols") && !is(propertyNode, "type"))
+                warn(warnings, "Section features are not preserved: " + local(propertyNode.name()));
+        const auto type = val(child(section, "type"));
+        if (type == "evenPage" || type == "oddPage" || type == "nextColumn")
+            warn(warnings, "Even-page, odd-page and next-column section starts begin a new page.");
+        try {
+            validatePage(page);
+        } catch (const std::exception &) {
+            warn(warnings, "A section's page settings are invalid; the document's are used.");
+            page = document.page;
+        }
+    };
+    // Each section break's paragraph, and how each section starts (w:type), in order.
+    std::vector<std::size_t> breakParagraphs;
+    std::vector<std::string> sectionStarts;
     std::function<void(pugi::xml_node, const std::optional<TableCell> &)> readParagraph =
         [&](pugi::xml_node node, const std::optional<TableCell> &cell) {
         Paragraph paragraph = defaultParagraph;
@@ -1595,13 +1638,18 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         if (split.runs.empty())
             split.runs.push_back({u"", base});
         document.paragraphs.push_back(std::move(split));
-        // A section break that starts a new page; other section settings are not kept.
+        // A section ends with this paragraph: its own size, margins and columns.
         if (const auto section = child(properties, "sectPr"); section && !cell) {
-            const auto type = val(child(section, "type"));
-            if (type != "continuous" && type != "nextColumn")
-                pendingBreak = true;
-            warn(warnings, "Section breaks become page breaks; settings of earlier sections "
-                           "(orientation, columns, margins) are not kept.");
+            SectionBreak end;
+            end.page = document.page;
+            end.page.header = end.page.footer = {};
+            end.page.differentFirstPage = false;
+            readGeometry(section, end.page);
+            end.page.header = end.page.footer = {};
+            end.page.differentFirstPage = false;
+            document.paragraphs.back().sectionBreak = end;
+            breakParagraphs.push_back(document.paragraphs.size() - 1);
+            sectionStarts.push_back(val(child(section, "type")));
         }
         for (auto &mark : marks) {
             auto segment = segments.begin();
@@ -1966,24 +2014,15 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         if (node.type() != pugi::node_element)
             continue;
         if (is(node, "sectPr")) {
-            if (auto size = child(node, "pgSz")) {
-                document.page.width = twips(attr(size, "w")) / 20;
-                document.page.height = twips(attr(size, "h")) / 20;
-            }
-            if (auto margin = child(node, "pgMar")) {
-                const auto top = twips(attr(margin, "top")) / 20;
-                document.page.margin = top;
-                for (auto side : {"left", "right", "bottom"})
-                    if (twips(attr(margin, side)) / 20 != top)
-                        warn(warnings, "Unequal page margins are approximated by the top margin.");
-            }
+            auto page = document.page;
+            readGeometry(node, page);
+            document.page.width = page.width;
+            document.page.height = page.height;
+            document.page.margin = page.margin;
+            document.page.columns = page.columns;
+            document.page.columnGap = page.columnGap;
             readBands(node);
-            for (auto propertyNode : node.children())
-                if (propertyNode.type() == pugi::node_element && !is(propertyNode, "pgSz") &&
-                    !is(propertyNode, "pgMar") && !is(propertyNode, "headerReference") &&
-                    !is(propertyNode, "footerReference") && !is(propertyNode, "titlePg"))
-                    warn(warnings,
-                         "Section features are not preserved: " + local(propertyNode.name()));
+            sectionStarts.push_back(val(child(node, "type")));
             continue;
         }
         if (is(node, "tbl")) {
@@ -1996,6 +2035,15 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         }
         readParagraph(node, std::nullopt);
     }
+    // A section break is continuous when the section after it starts that way (Word records
+    // how each section starts in that section's own w:type).
+    for (std::size_t k = 0; k < breakParagraphs.size(); ++k)
+        document.paragraphs[breakParagraphs[k]].sectionBreak->continuous =
+            k + 1 < sectionStarts.size() && sectionStarts[k + 1] == "continuous";
+    // The last section has no break; a break on the last paragraph would end an empty one.
+    if (!document.paragraphs.empty() && document.paragraphs.back().sectionBreak &&
+        breakParagraphs.size() + 1 > sectionStarts.size())
+        document.paragraphs.back().sectionBreak.reset();
     // A table must be followed by a body paragraph.
     if (!document.paragraphs.empty() && document.paragraphs.back().cell)
         document.paragraphs.push_back(emptyParagraph(std::nullopt));
@@ -2301,6 +2349,48 @@ std::string serializeDocx(const Document &document) {
                 return a.field && (a.end ? a.id > b.id : a.id < b.id);
             });
     }
+    // A section's sectPr: header/footer references (paragraph sections name the parts the
+    // final section creates), how it starts, size, margins, columns and first-page setting.
+    bool previousContinuous = false; // how the section being written starts
+    bool wroteSection = false;
+    auto writeSection = [&](pugi::xml_node section, const PageStyle &page, bool continuous,
+                            bool references) {
+        if (references && (!document.page.header.empty() || !document.page.footer.empty())) {
+            for (const bool header : {true, false}) {
+                auto node = element(section, header ? "headerReference" : "footerReference");
+                set(node, "type", std::string("default"));
+                node.append_attribute("r:id") = header ? "header" : "footer";
+            }
+            if (document.page.differentFirstPage)
+                for (const bool header : {true, false}) {
+                    auto node = element(section, header ? "headerReference" : "footerReference");
+                    set(node, "type", std::string("first"));
+                    node.append_attribute("r:id") = header ? "headerFirst" : "footerFirst";
+                }
+        }
+        if (continuous)
+            property(section, "type", std::string("continuous"));
+        auto size = element(section, "pgSz");
+        set(size, "w", page.width * 20);
+        set(size, "h", page.height * 20);
+        if (page.width > page.height)
+            set(size, "orient", std::string("landscape"));
+        auto margin = element(section, "pgMar");
+        for (auto side : {"top", "bottom", "left", "right"})
+            set(margin, side, page.margin * 20);
+        for (auto side : {"header", "footer"}) // where Wordforge draws them: mid-margin
+            set(margin, side, page.margin * 10);
+        if (page.columns > 1) {
+            auto columns = element(section, "cols");
+            set(columns, "num", static_cast<double>(page.columns));
+            set(columns, "space", page.columnGap * 20);
+        }
+        // Wordforge leaves out the header and footer on the document's first page only,
+        // which in Word is the first section's title page.
+        if (document.page.differentFirstPage && !wroteSection)
+            element(section, "titlePg");
+        wroteSection = true;
+    };
     std::optional<TableCell> previousCell;
     pugi::xml_node tableNode, rowNode, cellNode;
     std::vector<double> edges;
@@ -2418,6 +2508,10 @@ std::string serializeDocx(const Document &document) {
         set(spacing, "lineRule", std::string("auto"));
         writeIndent(element(ppr, "ind"), paragraph);
         property(ppr, "jc", jcValue(paragraph.alignment));
+        if (const auto &end = paragraph.sectionBreak) {
+            writeSection(element(ppr, "sectPr"), end->page, previousContinuous, true);
+            previousContinuous = end->continuous;
+        }
         // Runs split where comment ranges start or end, with the markers between them.
         const auto paragraphIndex = static_cast<std::size_t>(&paragraph - document.paragraphs.data());
         const auto paragraphMarkers = markers.find(paragraphIndex);
@@ -2636,18 +2730,7 @@ std::string serializeDocx(const Document &document) {
             reference(false, true, {});
         }
     }
-    auto size = element(section, "pgSz");
-    set(size, "w", document.page.width * 20);
-    set(size, "h", document.page.height * 20);
-    if (document.page.width > document.page.height)
-        set(size, "orient", std::string("landscape"));
-    auto margin = element(section, "pgMar");
-    for (auto side : {"top", "bottom", "left", "right"})
-        set(margin, side, document.page.margin * 20);
-    for (auto side : {"header", "footer"}) // where Wordforge draws them: mid-margin
-        set(margin, side, document.page.margin * 10);
-    if (document.page.differentFirstPage)
-        element(section, "titlePg");
+    writeSection(section, document.page, previousContinuous, false);
     pugi::xml_document styles;
     auto styleRoot = styles.append_child("w:styles");
     styleRoot.append_attribute("xmlns:w") = wordNs;

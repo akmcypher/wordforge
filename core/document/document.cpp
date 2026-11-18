@@ -199,6 +199,13 @@ void validateDocument(const Document &document) {
             throw std::invalid_argument("Fields overlap without nesting");
         open.push_back(end);
     }
+    for (const auto &paragraph : document.paragraphs)
+        if (const auto &end = paragraph.sectionBreak) {
+            if (paragraph.cell || !end->page.header.empty() || !end->page.footer.empty() ||
+                end->page.differentFirstPage)
+                throw std::invalid_argument("Invalid section break");
+            validatePage(end->page);
+        }
     for (const auto &bookmark : document.bookmarks) {
         validateBookmarkName(bookmark.name);
         if (!bookmark.id || bookmark.id >= document.nextId || !ids.insert(bookmark.id).second ||
@@ -220,7 +227,10 @@ void validateParagraphFormat(const ParagraphFormat &value) {
 void validatePage(const PageStyle &page) {
     if (!std::isfinite(page.width) || !std::isfinite(page.height) || !std::isfinite(page.margin) ||
         page.width < 72 || page.width > 2880 || page.height < 72 || page.height > 2880 ||
-        page.margin < 0 || page.width - 2 * page.margin < 36 || page.height - 2 * page.margin < 36)
+        page.margin < 0 || page.width - 2 * page.margin < 36 || page.height - 2 * page.margin < 36 ||
+        page.columns < 1 || page.columns > 6 || !std::isfinite(page.columnGap) ||
+        page.columnGap < 0 || page.columnGap > 144 ||
+        (page.width - 2 * page.margin - (page.columns - 1) * page.columnGap) / page.columns < 36)
         throw std::invalid_argument("Invalid page geometry");
     for (const auto *band : {&page.header, &page.footer})
         for (const auto *text : {&band->left, &band->center, &band->right}) {
@@ -245,11 +255,72 @@ std::u16string bandText(const std::u16string &text, std::size_t number, std::siz
     }
     return result;
 }
+PageStyle sectionPage(const Document &document, std::size_t index) {
+    for (auto i = index; i < document.paragraphs.size(); ++i)
+        if (const auto &end = document.paragraphs[i].sectionBreak) {
+            auto page = end->page;
+            page.header = document.page.header;
+            page.footer = document.page.footer;
+            page.differentFirstPage = document.page.differentFirstPage;
+            return page;
+        }
+    return document.page;
+}
+PageStyle Editor::sectionPage() const {
+    return wf::sectionPage(document, selection.focus.paragraph);
+}
 void Editor::setPage(PageStyle page) {
     validatePage(page);
     checkpoint();
-    document.page = page;
+    auto geometry = page;
+    geometry.header = geometry.footer = {};
+    geometry.differentFirstPage = false;
+    bool own = false;
+    for (auto i = selection.focus.paragraph; i < document.paragraphs.size(); ++i)
+        if (auto &end = document.paragraphs[i].sectionBreak) {
+            end->page = geometry;
+            document.paragraphs[i].revision = serial_ + 1;
+            own = true;
+            break;
+        }
+    if (own) {
+        document.page.header = page.header;
+        document.page.footer = page.footer;
+        document.page.differentFirstPage = page.differentFirstPage;
+    } else
+        document.page = page;
     document.revision = ++serial_;
+}
+void Editor::insertSectionBreak(bool continuous) {
+    auto command = [&](Editor &e) {
+        e.replace(u"");
+        const auto at = e.selection.focus;
+        if (e.document.paragraphs[at.paragraph].cell)
+            throw std::invalid_argument("Section breaks cannot go inside a table");
+        auto page = e.sectionPage();
+        page.header = page.footer = {};
+        page.differentFirstPage = false;
+        e.replace(u"\n"); // the break ends the first part; the next section starts after it
+        const auto ending = at.paragraph;
+        e.document.paragraphs[ending].sectionBreak = SectionBreak{page, continuous};
+        e.document.paragraphs[ending].revision = e.serial_ + 1;
+        e.document.revision = ++e.serial_;
+    };
+    if (inTransaction_)
+        command(*this);
+    else
+        transact(command);
+}
+bool Editor::removeSectionBreak() {
+    for (auto i = selection.focus.paragraph; i < document.paragraphs.size(); ++i)
+        if (document.paragraphs[i].sectionBreak) {
+            checkpoint();
+            document.paragraphs[i].sectionBreak.reset();
+            document.paragraphs[i].revision = serial_ + 1;
+            document.revision = ++serial_;
+            return true;
+        }
+    return false;
 }
 namespace {
 using BreakIterator = std::unique_ptr<UBreakIterator, decltype(&ubrk_close)>;
@@ -569,6 +640,9 @@ void Editor::replaceRange(const std::u16string &input, Selection range, const Ru
     auto suffix = slice(document.paragraphs[end.paragraph], end.offset,
                         document.paragraphs[end.paragraph].text().size());
     Paragraph prototype = document.paragraphs[start.paragraph];
+    // The paragraph mark that survives is the last one: it keeps the section break.
+    const auto endingBreak = document.paragraphs[end.paragraph].sectionBreak;
+    prototype.sectionBreak.reset();
     const auto inherited = resolveStyle(document.styles, prototype.style).character;
     // Text joining from another paragraph keeps its look under this paragraph's style.
     if (end.paragraph != start.paragraph)
@@ -629,9 +703,11 @@ void Editor::replaceRange(const std::u16string &input, Selection range, const Ru
             append(p.runs, std::move(typed));
         }
         const auto caretOffset = (replacement.empty() ? start.offset : 0) + split - offset;
-        if (last)
+        if (last) {
             for (auto &run : suffix)
                 append(p.runs, std::move(run));
+            p.sectionBreak = endingBreak;
+        }
         if (p.runs.empty())
             p.runs.push_back(styledRun(u"", typingStyle, inherited));
         replacement.push_back(std::move(p));

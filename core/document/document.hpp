@@ -140,17 +140,6 @@ constexpr double minimumColumnWidth = 44;
 // Left edges of the columns plus the right edge, fitting `width`; narrow columns are
 // widened to the minimum at the expense of the others. Throws if they cannot fit.
 std::vector<double> columnEdges(const Table &, double width);
-struct Paragraph : ParagraphFormat {
-    Paragraph(std::uint64_t identifier = 0) : id(identifier) {}
-    std::uint64_t id = 0, revision = 0;
-    std::string style = "Normal";
-    ParagraphMask direct = 0; // ParagraphFormat fields set directly, not inherited from `style`
-    std::vector<Run> runs{{u"", {}}};
-    std::optional<TableCell> cell;
-    std::u16string text() const;
-    std::vector<std::size_t> boundaries() const;
-    bool operator==(const Paragraph &) const = default;
-};
 // Text repeated at the top or bottom of every page, in three tab-like positions.
 // "{PAGE}" and "{NUMPAGES}" are replaced by the page number and the page count.
 struct PageBand {
@@ -162,6 +151,9 @@ struct PageBand {
 };
 struct PageStyle {
     double width = 595.28, height = 841.89, margin = 56.7;
+    // Newspaper-style columns: text fills each column top to bottom, left to right.
+    std::size_t columns = 1;
+    double columnGap = 36;
     PageBand header, footer;
     bool differentFirstPage = false; // no header or footer on the first page
     bool operator==(const PageStyle &) const = default;
@@ -169,6 +161,27 @@ struct PageStyle {
 // The band's text on page `number` (1-based) of `count`, fields substituted.
 std::u16string bandText(const std::u16string &, std::size_t number, std::size_t count);
 void validatePage(const PageStyle &);
+// Ends a section at the end of its paragraph. The section (from the previous break, or the
+// document's start) uses `page`'s size, margins and columns; header, footer and first-page
+// settings are the document's (document.page), so `page` leaves them empty. The last
+// section uses document.page.
+struct SectionBreak {
+    PageStyle page;
+    bool continuous = false; // the next section starts on the same page (Word's "continuous")
+    bool operator==(const SectionBreak &) const = default;
+};
+struct Paragraph : ParagraphFormat {
+    Paragraph(std::uint64_t identifier = 0) : id(identifier) {}
+    std::uint64_t id = 0, revision = 0;
+    std::string style = "Normal";
+    ParagraphMask direct = 0; // ParagraphFormat fields set directly, not inherited from `style`
+    std::vector<Run> runs{{u"", {}}};
+    std::optional<TableCell> cell;
+    std::optional<SectionBreak> sectionBreak; // never in a table cell
+    std::u16string text() const;
+    std::vector<std::size_t> boundaries() const;
+    bool operator==(const Paragraph &) const = default;
+};
 struct Position {
     std::size_t paragraph = 0, offset = 0;
     auto operator<=>(const Position &) const = default;
@@ -249,6 +262,10 @@ struct Revision {
 CharacterStyle shownStyle(const Run &);
 constexpr std::size_t maxPreservedBytes = 16 * 1024 * 1024, maxPreservedParts = 256;
 void validatePreserved(const PreservedPackage &);
+struct Document;
+// The page settings of the section holding paragraph `index` (header and footer from
+// document.page).
+PageStyle sectionPage(const Document &, std::size_t index);
 struct Document {
     std::vector<Paragraph> paragraphs{{1}};
     std::shared_ptr<const PreservedPackage> preserved; // set by DOCX import
@@ -374,7 +391,17 @@ class Editor {
     void clearCharacterFormatting();
     void insertParagraphBreak();
     void insertPageBreak();
+    // Size, margins and columns go to the caret's section; header, footer and first-page
+    // settings to the whole document.
     void setPage(PageStyle);
+    // The caret's section's page (with the document's header and footer).
+    PageStyle sectionPage() const;
+    // Ends the caret's section at the caret: the paragraph splits there and the next section
+    // starts with the second part. Both sections keep the current page settings.
+    void insertSectionBreak(bool continuous);
+    // Joins the caret's section with the next one, which keeps its settings. False if the
+    // caret is in the last section.
+    bool removeSectionBreak();
     bool undo();
     bool redo();
     void reset(Document);

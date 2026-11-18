@@ -27,7 +27,12 @@ struct Layout {
     // The rule above each page's footnotes: (page, y).
     std::vector<std::pair<std::size_t, double>> noteSeparators;
     std::size_t pageCount = 1, measuredParagraphs = 0;
-    PageStyle page;
+    PageStyle page; // the first page's
+    // Each page's size, margins and columns (sections can differ); pageCount entries.
+    std::vector<PageStyle> pageStyles;
+    const PageStyle &pageStyle(std::size_t index) const {
+        return index < pageStyles.size() ? pageStyles[index] : page;
+    }
     ImageResources images;
     Position hitTest(double x, double y, std::size_t pageIndex) const;
     struct Caret {

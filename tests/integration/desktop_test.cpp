@@ -158,7 +158,7 @@ class DesktopTest : public QObject {
         auto *query = palette->findChild<QLineEdit *>("paletteQuery");
         auto *results = palette->findChild<QListWidget *>("paletteResults");
         QTest::keyClicks(query, "insert page brea");
-        QCOMPARE(results->count(), 1);
+        QCOMPARE(results->count(), 2); // and "Section break (next page)"
         QVERIFY(results->item(0)->text().startsWith("Page break"));
         QTest::keyClick(query, Qt::Key_Return);
         QVERIFY(!palette->isVisible());

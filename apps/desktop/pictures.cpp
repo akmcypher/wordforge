@@ -54,7 +54,7 @@ void pictureSizeDialog(PageView *view, QWidget *parent) {
     auto *height = new QDoubleSpinBox;
     width->setObjectName("pictureWidth");
     height->setObjectName("pictureHeight");
-    const auto &page = view->document().page;
+    const auto page = view->sectionPage();
     for (auto *spin : {width, height}) {
         spin->setRange(1, 2880);
         spin->setDecimals(1);

@@ -1121,8 +1121,12 @@ TEST(Docx, WordPageAndSectionBreaksStartNewPages) {
     const std::vector<std::pair<std::u16string, bool>> expected{
         // As in Word, the paragraph holding only the break starts the new page.
         {u"one", false}, {u"", true}, {u"two", false}, {u"a", false}, {u"b", true},
-        {u"end of section", false}, {u"next section", true}};
+        {u"end of section", false}, {u"next section", false}};
     EXPECT_EQ(got, expected);
+    // The section ends at its paragraph; the next one starts on a new page.
+    const auto &end = imported.document.paragraphs[5].sectionBreak;
+    ASSERT_TRUE(end);
+    EXPECT_FALSE(end->continuous);
     for (const auto &warning : imported.warnings)
         EXPECT_EQ(warning.find("Inline breaks"), std::string::npos) << warning;
 }
@@ -1423,4 +1427,44 @@ TEST(Docx, FieldsAndTablesOfContentsBothWays) {
     }
     EXPECT_EQ(again.paragraphs[0].runs.back().link, "#_Toc1");
     EXPECT_NO_THROW(validateDocument(again));
+}
+TEST(Docx, SectionsWithOrientationAndColumnsBothWays) {
+    Editor e;
+    e.replace(u"Portrait");
+    e.insertSectionBreak(false);
+    e.selection = {{1, 0}, {1, 0}};
+    e.replace(u"Landscape in two columns");
+    auto page = e.sectionPage();
+    std::swap(page.width, page.height);
+    page.columns = 2;
+    page.columnGap = 18;
+    e.setPage(page);
+    e.insertSectionBreak(true);
+    e.selection = {{2, 0}, {2, 0}};
+    e.replace(u"Continuous, one column");
+    auto last = e.sectionPage(); // landscape, from the section it was split from
+    last.columns = 1;
+    e.setPage(last);
+    const auto parts = opc::read(serializeDocx(e.document));
+    pugi::xml_document body;
+    ASSERT_TRUE(body.load_string(parts.at("word/document.xml").c_str()));
+    EXPECT_EQ(body.select_nodes("//w:p/w:pPr/w:sectPr").size(), 2u);
+    EXPECT_EQ(body.select_nodes("//w:sectPr/w:cols[@w:num='2']").size(), 1u);
+    EXPECT_EQ(body.select_nodes("//w:sectPr/w:pgSz[@w:orient='landscape']").size(), 2u);
+    // The third section starts continuously: its own (body) sectPr says so.
+    EXPECT_EQ(body.select_nodes("/w:document/w:body/w:sectPr/w:type[@w:val='continuous']").size(), 1u);
+    const auto imported = parseDocx(opc::write(parts));
+    const auto &paragraphs = imported.document.paragraphs;
+    ASSERT_EQ(paragraphs.size(), 3u);
+    ASSERT_TRUE(paragraphs[0].sectionBreak && paragraphs[1].sectionBreak);
+    EXPECT_FALSE(paragraphs[0].sectionBreak->continuous);
+    EXPECT_TRUE(paragraphs[1].sectionBreak->continuous);
+    EXPECT_EQ(paragraphs[1].sectionBreak->page.columns, 2u);
+    EXPECT_EQ(paragraphs[1].sectionBreak->page.columnGap, 18);
+    EXPECT_GT(paragraphs[1].sectionBreak->page.width, paragraphs[1].sectionBreak->page.height);
+    EXPECT_LT(paragraphs[0].sectionBreak->page.width, paragraphs[0].sectionBreak->page.height);
+    EXPECT_FALSE(paragraphs[2].sectionBreak);
+    EXPECT_GT(imported.document.page.width, imported.document.page.height);
+    for (const auto &warning : imported.warnings)
+        EXPECT_EQ(warning.find("Section"), std::string::npos) << warning;
 }

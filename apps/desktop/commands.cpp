@@ -316,7 +316,7 @@ void headerFooterDialog(PageView *view, QWidget *parent) {
     dialog.setWindowTitle("Header and footer");
     dialog.setObjectName("headerFooterDialog");
     auto *layout = new QGridLayout(&dialog);
-    auto page = view->document().page;
+    auto page = view->sectionPage();
     const char *columns[] = {"Left", "Centre", "Right"};
     for (int column = 0; column < 3; ++column)
         layout->addWidget(new QLabel(columns[column]), 0, column + 1);
@@ -380,7 +380,7 @@ void headerFooterDialog(PageView *view, QWidget *parent) {
         *targets[i] = text.find_first_not_of(u' ') == std::u16string::npos ? u"" : text;
     }
     page.differentFirstPage = first->isChecked();
-    if (page != view->document().page)
+    if (page != view->sectionPage())
         view->setPage(page);
 }
 } // namespace
@@ -647,7 +647,7 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
     // Page setup.
     auto page = [view](const std::function<void(PageStyle &)> &change) {
         return [view, change] {
-            auto p = view->document().page;
+            auto p = view->sectionPage();
             change(p);
             view->setPage(p);
         };
@@ -664,6 +664,22 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
                    if ((p.width > p.height) != landscape)
                        std::swap(p.width, p.height);
                }));
+    for (std::size_t count : {1, 2, 3})
+        create(QString("columns%1").arg(count),
+               count == 1 ? QString("Columns: one") : QString("Columns: %1").arg(count == 2 ? "two" : "three"),
+               "Page", page([count](auto &p) {
+                   p.columns = count;
+                   p.columnGap = 36;
+               }));
+    create("sectionBreakNextPage", "Section break (next page)", "Insert",
+           [view] { view->insertSectionBreak(false); })
+        ->setIconText("Section break");
+    create("sectionBreakContinuous", "Section break (continuous)", "Insert",
+           [view] { view->insertSectionBreak(true); })
+        ->setIconText("Continuous break");
+    create("removeSectionBreak", "Remove section break", "Insert",
+           [view] { view->removeSectionBreak(); })
+        ->setIconText("Remove break");
     create("paperA4", "Paper: A4 (210 × 297 mm)", "Page", page([](auto &p) {
                const bool landscape = p.width > p.height;
                p.width = landscape ? 841.89 : 595.28;
@@ -678,7 +694,7 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
     // View.
     create("zoom100", "Zoom 100%", "View", [view] { view->setZoom(1); });
     create("zoomPageWidth", "Zoom to page width", "View", [view] {
-        view->setZoom((view->viewport()->width() - 64) / (view->document().page.width * 96 / 72));
+        view->setZoom((view->viewport()->width() - 64) / (view->sectionPage().width * 96 / 72));
     });
 
     for (const auto &id : {"bold", "italic", "underline", "strike", "highlight", "bullets",
@@ -736,7 +752,7 @@ void Commands::sync() {
     for (double value : {1.0, 1.15, 1.5, 2.0})
         get("lineSpacing" + QString::number(value).remove('.'))
             ->setChecked(std::abs(p.lineSpacing - value) < 0.001);
-    const auto &page = view_->document().page;
+    const auto page = view_->sectionPage();
     get("decreaseIndent")->setEnabled(p.indentLeft > 0);
     get("increaseIndent")
         ->setEnabled(page.width - 2 * page.margin - p.indentLeft -
@@ -747,6 +763,13 @@ void Commands::sync() {
     get("pictureSize")->setEnabled(view_->selectedImage().has_value());
     get("editFootnote")->setEnabled(view_->selectedFootnote().has_value());
     get("updateTableOfContents")->setEnabled(view_->hasTableOfContents());
+    {
+        bool laterBreak = false;
+        const auto &paragraphs = view_->document().paragraphs;
+        for (auto i = view_->selection().focus.paragraph; i < paragraphs.size() && !laterBreak; ++i)
+            laterBreak = paragraphs[i].sectionBreak.has_value();
+        get("removeSectionBreak")->setEnabled(laterBreak);
+    }
     get("removeLink")->setEnabled(!view_->linkAtCaret().empty() ||
                                   view_->selection().anchor != view_->selection().focus);
     const bool inComment = view_->commentAtCaret().has_value();

@@ -424,7 +424,8 @@ void MainWindow::buildUi() {
         named(edit->addAction("&Replace…", QKeySequence::Replace), "replace"), "Edit");
 
     auto *insert = new QMenu("&Insert", this);
-    fill(insert, {"pageBreak", "picture", "table", "date", "", "tableOfContents",
+    fill(insert, {"pageBreak", "sectionBreakNextPage", "sectionBreakContinuous",
+                  "removeSectionBreak", "", "picture", "table", "date", "", "tableOfContents",
                   "updateTableOfContents", "", "link", "removeLink", "",
                   "footnote", "endnote", "editFootnote", "comment", "editComment", "deleteComment", "",
                   "headerFooter"});
@@ -459,7 +460,8 @@ void MainWindow::buildUi() {
                                     "tableBorders", "tableShading", "tableNoShading"});
     fill(format->addMenu("Page setup"), {"marginsDefault", "marginsNormal", "marginsModerate",
                                          "marginsNarrow", "",
-                                         "portrait", "landscape", "", "paperA4", "paperLetter"});
+                                         "portrait", "landscape", "", "paperA4", "paperLetter", "",
+                                         "columns1", "columns2", "columns3"});
 
     auto *panel = new FormatPanel(view_, *commands, this);
     addDockWidget(Qt::RightDockWidgetArea, panel);

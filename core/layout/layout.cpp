@@ -86,18 +86,45 @@ void stops(Line &line, const std::vector<std::size_t> &paragraphBoundaries) {
 }
 } // namespace
 Layout LayoutEngine::compose(const Document &document) {
-    const auto &page = document.page;
-    validatePage(page);
-    const double width = page.width - 2 * page.margin,
-                 availableHeight = page.height - 2 * page.margin;
-    if (!std::isfinite(width) || !std::isfinite(availableHeight) || width < 36 ||
-        availableHeight < 36)
-        throw std::runtime_error("Page margins leave insufficient writing space");
+    validatePage(document.page);
+    // Each paragraph's section settings, from the section break that ends its section.
+    std::vector<PageStyle> sections(document.paragraphs.size());
+    {
+        auto current = document.page;
+        for (auto i = document.paragraphs.size(); i-- > 0;) {
+            if (document.paragraphs[i].sectionBreak)
+                current = sectionPage(document, i);
+            sections[i] = current;
+        }
+    }
+    // The current section's page: text width, column width and height of the writing area.
+    PageStyle page;
+    double width = 0, columnWidth = 0, availableHeight = 0;
+    auto useSection = [&](const PageStyle &style) {
+        validatePage(style);
+        page = style;
+        width = page.width - 2 * page.margin;
+        availableHeight = page.height - 2 * page.margin;
+        columnWidth = (width - static_cast<double>(page.columns - 1) * page.columnGap) /
+                      static_cast<double>(page.columns);
+        if (!std::isfinite(width) || !std::isfinite(availableHeight) || columnWidth < 36 ||
+            availableHeight < 36)
+            throw std::runtime_error("Page margins leave insufficient writing space");
+    };
+    useSection(sections.empty() ? document.page : sections.front());
     Layout result;
     result.page = page;
+    result.pageStyles = {page};
     result.images = document.images;
     double y = page.margin;
     std::size_t pageIndex = 0;
+    // Columns: text fills `column` from `sectionTop` down, then the next column, then the
+    // next page. `sectionBottom` is the lowest text of the section on this page.
+    std::size_t column = 0;
+    double sectionTop = page.margin, sectionBottom = page.margin;
+    auto columnLeft = [&] {
+        return page.margin + static_cast<double>(column) * (columnWidth + page.columnGap);
+    };
     std::size_t listNumber = 0;
     std::unordered_set<std::uint64_t> liveIds;
     validateTables(document);
@@ -315,16 +342,46 @@ Layout LayoutEngine::compose(const Document &document) {
     auto newPage = [&] {
         flushNotes();
         ++pageIndex;
-        y = page.margin;
+        result.pageStyles.push_back(page);
+        y = sectionTop = sectionBottom = page.margin;
+        column = 0;
+    };
+    // Where text that does not fit goes: the next column, else the next page.
+    auto advance = [&] {
+        if (column + 1 < page.columns) {
+            ++column;
+            y = sectionTop;
+        } else
+            newPage();
     };
     for (std::size_t index = 0; index < document.paragraphs.size(); ++index) {
         const auto &paragraph = document.paragraphs[index];
+        if (index && document.paragraphs[index - 1].sectionBreak) {
+            const auto &next = sections[index];
+            const bool sameSheet = next.width == page.width && next.height == page.height &&
+                                   next.margin == page.margin;
+            if (document.paragraphs[index - 1].sectionBreak->continuous && sameSheet) {
+                // Continues on this page below the previous section's text.
+                y = std::max(y, sectionBottom);
+                useSection(next);
+                result.pageStyles.back() = page;
+                column = 0;
+                sectionTop = sectionBottom = y;
+            } else {
+                flushNotes(); // with the previous section's page
+                useSection(next);
+                ++pageIndex;
+                result.pageStyles.push_back(page);
+                y = sectionTop = sectionBottom = page.margin;
+                column = 0;
+            }
+        }
         if (paragraph.cell) {
             const auto cell = *paragraph.cell;
             const auto &table =
                 *std::find_if(document.tables.begin(), document.tables.end(),
                               [&](const auto &value) { return value.id == cell.tableId; });
-            const auto edges = columnEdges(table, width);
+            const auto edges = columnEdges(table, columnWidth);
             // Rows tied together by a vertical merge are laid out (and paginated) together.
             auto groupEnd = cell.row + 1;
             for (bool grown = true; grown;) {
@@ -418,8 +475,8 @@ Layout LayoutEngine::compose(const Document &document) {
                                                "content or increase the page size");
             if (y + groupHeight + notesHeight + notesNeed(groupNotes) >
                     page.height - page.margin &&
-                y > page.margin)
-                newPage();
+                y > sectionTop)
+                advance();
             addNotes(groupNotes);
             for (auto &[key, box] : boxes) {
                 double top = y, height = 0;
@@ -427,15 +484,15 @@ Layout LayoutEngine::compose(const Document &document) {
                     top += heights[r - cell.row];
                 for (auto r = box.row; r < box.row + box.rows; ++r)
                     height += heights[r - cell.row];
-                result.cells.push_back({page.margin + edges[box.column], top,
+                result.cells.push_back({columnLeft() + edges[box.column], top,
                                         edges[box.column + box.columns] - edges[box.column], height,
                                         pageIndex, box.first, box.last,
                                         table.fillAt(box.row, box.column), table.border});
                 for (auto &line : box.lines) {
                     line.page = pageIndex;
                     line.box = result.cells.size() - 1;
-                    line.x += page.margin;
-                    line.markerX += page.margin;
+                    line.x += columnLeft();
+                    line.markerX += columnLeft();
                     line.baseline += top;
                     result.lines.push_back(std::move(line));
                 }
@@ -443,6 +500,7 @@ Layout LayoutEngine::compose(const Document &document) {
             y += groupHeight;
             if (groupEnd == table.rows)
                 y += 8;
+            sectionBottom = std::max(sectionBottom, y);
             index = end - 1;
             listNumber = 0;
             continue;
@@ -450,33 +508,35 @@ Layout LayoutEngine::compose(const Document &document) {
         listNumber = paragraph.list == ListKind::Decimal ? listNumber + 1 : 0;
         if (index && paragraph.pageBreakBefore)
             newPage();
-        if (y > page.margin)
+        if (y > sectionTop)
             y += paragraph.spaceBefore;
         const auto firstNote = notesSoFar + 1;
         notesSoFar += countNotes(paragraph);
         const auto firstEndnote = endnoteIds.size() + 1;
         collectEndnotes(paragraph);
-        for (auto line : measure(paragraph, width, listNumber, firstNote, firstEndnote)) {
+        for (auto line : measure(paragraph, columnWidth, listNumber, firstNote, firstEndnote)) {
             if (line.height > availableHeight)
                 throw std::runtime_error("A line is taller than the page writing area");
             auto blocks = notesIn(paragraph, firstNote, line.start, line.end);
             if (y + line.height + notesHeight + notesNeed(blocks) > page.height - page.margin &&
-                y > page.margin)
-                newPage();
+                y > sectionTop)
+                advance();
             addNotes(blocks);
             line.paragraph = index;
             line.page = pageIndex;
-            line.x += page.margin;
-            line.markerX += page.margin;
+            line.x += columnLeft();
+            line.markerX += columnLeft();
             line.baseline = y + line.shaped.ascent;
             result.lines.push_back(std::move(line));
             y += result.lines.back().height;
+            sectionBottom = std::max(sectionBottom, y);
         }
         y += paragraph.spaceAfter;
     }
     // Endnotes follow the text below a short rule, continuing onto new pages as needed
     // (footnotes keep their room at the bottom of each page).
     if (!endnoteIds.empty()) {
+        y = std::max(y, sectionBottom); // below every column
         if (y + 2 * noteGap + notesHeight > page.height - page.margin)
             newPage();
         else
@@ -498,18 +558,21 @@ Layout LayoutEngine::compose(const Document &document) {
     flushNotes();
     std::erase_if(cache_, [&](const auto &entry) { return !liveIds.contains(entry.first); });
     result.pageCount = pageIndex + 1;
+    result.pageStyles.resize(result.pageCount, page);
     // Headers and footers sit centred in the top and bottom margins (when there is room).
-    if (page.margin >= 24 && (!page.header.empty() || !page.footer.empty())) {
+    if (!document.page.header.empty() || !document.page.footer.empty()) {
         auto style = resolveStyle(document.styles, "Normal").character;
         style.size = 10;
         style.bold = style.italic = style.underline = style.strike = false;
         style.highlight = 0;
         style.color = 0xff5f6673;
         for (std::size_t number = 0; number < result.pageCount; ++number) {
-            if (number == 0 && page.differentFirstPage)
+            const auto &page = result.pageStyles[number];
+            const double width = page.width - 2 * page.margin;
+            if ((number == 0 && document.page.differentFirstPage) || page.margin < 24)
                 continue;
             for (const bool top : {true, false}) {
-                const auto &band = top ? page.header : page.footer;
+                const auto &band = top ? document.page.header : document.page.footer;
                 const std::u16string *texts[] = {&band.left, &band.center, &band.right};
                 for (int position = 0; position < 3; ++position) {
                     if (texts[position]->empty())

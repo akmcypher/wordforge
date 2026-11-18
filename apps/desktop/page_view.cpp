@@ -58,22 +58,45 @@ PageView::PageView(QWidget *parent)
 double PageView::scale() const {
     return zoom_ * 96.0 / 72.0;
 }
-double PageView::pageLeft() const {
-    return std::max(24.0, (viewport()->width() - layout_.page.width * scale()) / 2) -
-           horizontalScrollBar()->value();
+double PageView::widestPage() const {
+    double widest = layout_.page.width;
+    for (const auto &style : layout_.pageStyles)
+        widest = std::max(widest, style.width);
+    return widest;
+}
+double PageView::pageOffset(std::size_t page) const {
+    // Usually every page has the first page's height; add the differences only.
+    double offset = static_cast<double>(page) * layout_.page.height;
+    for (std::size_t i = 0; i < page && i < layout_.pageStyles.size(); ++i)
+        offset += layout_.pageStyles[i].height - layout_.page.height;
+    return offset;
+}
+double PageView::pageLeft(std::size_t page) const {
+    const double widest = widestPage();
+    return std::max(24.0, (viewport()->width() - widest * scale()) / 2) +
+           (widest - layout_.pageStyle(page).width) * scale() / 2 - horizontalScrollBar()->value();
 }
 double PageView::pageTop(std::size_t index) const {
-    return 24 + index * (layout_.page.height * scale() + 24) - verticalScrollBar()->value();
+    return 24 + pageOffset(index) * scale() + static_cast<double>(index) * 24 -
+           verticalScrollBar()->value();
+}
+std::size_t PageView::pageAtY(double viewportY) const {
+    std::size_t page = 0;
+    while (page + 1 < layout_.pageCount &&
+           pageTop(page + 1) - 12 <= viewportY)
+        ++page;
+    return page;
 }
 void PageView::updateScrollbars() {
     verticalScrollBar()->setPageStep(viewport()->height());
     horizontalScrollBar()->setPageStep(viewport()->width());
     verticalScrollBar()->setRange(
         0, std::max(
-               0, static_cast<int>(layout_.pageCount * (layout_.page.height * scale() + 24) + 24) -
+               0, static_cast<int>(pageOffset(layout_.pageCount) * scale() +
+                                   static_cast<double>(layout_.pageCount) * 24 + 24) -
                       viewport()->height()));
     horizontalScrollBar()->setRange(
-        0, std::max(0, static_cast<int>(layout_.page.width * scale() + 48) - viewport()->width()));
+        0, std::max(0, static_cast<int>(widestPage() * scale() + 48) - viewport()->width()));
 }
 void PageView::revealCaret() {
     const auto caret = layout_.caret(displayCaret_);
@@ -83,7 +106,7 @@ void PageView::revealCaret() {
     else if (bottom > viewport()->height() - 12)
         verticalScrollBar()->setValue(verticalScrollBar()->value() +
                                       static_cast<int>(bottom - viewport()->height() + 12));
-    const auto x = pageLeft() + caret.x * scale();
+    const auto x = pageLeft(caret.page) + caret.x * scale();
     if (x < 12)
         horizontalScrollBar()->setValue(horizontalScrollBar()->value() + static_cast<int>(x - 12));
     else if (x > viewport()->width() - 12)
@@ -253,7 +276,7 @@ bool PageView::insertPicture(const QString &path) {
             ImageResource{static_cast<std::uint32_t>(pixels.width()),
                           static_cast<std::uint32_t>(pixels.height()), png.toStdString()});
         validateImageResource(*resource);
-        const auto &page = document().page;
+        const auto page = sectionPage();
         const auto &paragraph = document().paragraphs[selection().focus.paragraph];
         const auto maxWidth = writingWidth();
         const auto maxHeight =
@@ -365,6 +388,14 @@ bool PageView::updateTablesOfContents() {
             [&](Editor &e) { e.updateTablesOfContents(pagesOf(shaper_, e.document)); });
     });
 }
+bool PageView::insertSectionBreak(bool continuous) {
+    return change([&](Editor &candidate) { candidate.insertSectionBreak(continuous); });
+}
+bool PageView::removeSectionBreak() {
+    bool removed = false;
+    const bool ok = change([&](Editor &candidate) { removed = candidate.removeSectionBreak(); });
+    return ok && removed;
+}
 bool PageView::hasTableOfContents() const {
     return std::any_of(editor_.document.fields.begin(), editor_.document.fields.end(),
                        [](const Field &f) { return tableOfContentsField(f.instruction); });
@@ -430,9 +461,11 @@ bool PageView::shadeCells(std::uint32_t color) {
     return change([color](Editor &candidate) { candidate.shadeCells(color); });
 }
 double PageView::writingWidth() const {
-    const auto &page = document().page;
+    const auto page = sectionPage();
     const auto &paragraph = document().paragraphs[selection().focus.paragraph];
-    double width = page.width - 2 * page.margin;
+    double width = (page.width - 2 * page.margin -
+                    static_cast<double>(page.columns - 1) * page.columnGap) /
+                   static_cast<double>(page.columns);
     if (paragraph.cell) {
         const auto table = std::find_if(document().tables.begin(), document().tables.end(),
                                         [&](const auto &t) { return t.id == paragraph.cell->tableId; });
@@ -583,7 +616,7 @@ void PageView::invalidateScene() {
 }
 QRect PageView::caretRectangle() const {
     const auto caret = layout_.caret(displayCaret_);
-    return QRectF(pageLeft() + caret.x * scale(), pageTop(caret.page) + caret.y * scale(), 1.5,
+    return QRectF(pageLeft(caret.page) + caret.x * scale(), pageTop(caret.page) + caret.y * scale(), 1.5,
                   caret.height * scale())
         .toAlignedRect()
         .adjusted(-1, -1, 1, 1);
@@ -624,29 +657,26 @@ void PageView::paintEvent(QPaintEvent *) {
             overlay->getCanvas()->clear(SK_ColorTRANSPARENT);
             overlay->getCanvas()->scale(dpr, dpr);
         }
-        const double stride = layout_.page.height * scale() + 24;
-        const auto first = static_cast<std::size_t>(
-            std::max(0.0, std::floor((verticalScrollBar()->value() - 24) / stride)));
-        const auto last =
-            std::min(layout_.pageCount,
-                     static_cast<std::size_t>(std::ceil(
-                         (verticalScrollBar()->value() + viewport()->height()) / stride)) +
-                         1);
+        const auto first = pageAtY(0);
+        auto last = first;
+        while (last < layout_.pageCount && pageTop(last) < viewport()->height())
+            ++last;
         for (auto page = first; page < last; ++page) {
             const auto top = pageTop(page);
+            const auto &sheet = layout_.pageStyle(page);
+            const auto left = pageLeft(page);
             auto transform = [&](SkCanvas *canvas) {
                 canvas->save();
-                canvas->translate(pageLeft(), top);
+                canvas->translate(left, top);
                 canvas->scale(scale(), scale());
-                canvas->clipRect(SkRect::MakeWH(layout_.page.width, layout_.page.height));
+                canvas->clipRect(SkRect::MakeWH(sheet.width, sheet.height));
             };
             if (surface) {
                 auto *canvas = surface->getCanvas();
                 SkPaint shadow;
                 shadow.setColor(0x18000000);
-                canvas->drawRect(SkRect::MakeXYWH(pageLeft() + 2, top + 3,
-                                                  layout_.page.width * scale(),
-                                                  layout_.page.height * scale()),
+                canvas->drawRect(SkRect::MakeXYWH(left + 2, top + 3, sheet.width * scale(),
+                                                  sheet.height * scale()),
                                  shadow);
                 transform(canvas);
                 renderer_.drawPage(*canvas, page);
@@ -677,7 +707,7 @@ void PageView::paintEvent(QPaintEvent *) {
     paintSpelling(painter);
     if (hasFocus() && caretVisible_ && !selected) {
         const auto caret = layout_.caret(displayCaret_);
-        painter.fillRect(QRectF(pageLeft() + caret.x * scale(),
+        painter.fillRect(QRectF(pageLeft(caret.page) + caret.x * scale(),
                                 pageTop(caret.page) + caret.y * scale(), 1.2,
                                 caret.height * scale()),
                          palette().color(QPalette::Highlight));
@@ -737,8 +767,8 @@ void PageView::paintSpelling(QPainter &painter) {
                 continue;
             if (x1 > x2)
                 std::swap(x1, x2);
-            const double left = pageLeft() + (line.x + x1) * scale(),
-                         right = pageLeft() + (line.x + x2) * scale();
+            const double left = pageLeft(line.page) + (line.x + x1) * scale(),
+                         right = pageLeft(line.page) + (line.x + x2) * scale();
             const double step = std::max(2.0, 2.0 * scale());
             QPainterPath wave(QPointF(left, y));
             bool up = true;
@@ -944,12 +974,13 @@ void PageView::keyPressEvent(QKeyEvent *event) {
         const int direction = event->key() == Qt::Key_Up ? -1 : 1;
         auto page = caret.page;
         double y = caret.y + direction * caret.height + caret.height / 2;
-        if (y < layout_.page.margin && page) {
+        const auto &sheet = layout_.pageStyle(page);
+        if (y < sheet.margin && page) {
             --page;
-            y = layout_.page.height - layout_.page.margin - 1;
-        } else if (y > layout_.page.height - layout_.page.margin && page + 1 < layout_.pageCount) {
+            y = layout_.pageStyle(page).height - layout_.pageStyle(page).margin - 1;
+        } else if (y > sheet.height - sheet.margin && page + 1 < layout_.pageCount) {
             ++page;
-            y = layout_.page.margin;
+            y = layout_.pageStyle(page).margin;
         }
         moveCaret(layout_.hitTest(caret.x, y, page), extend);
         return;
@@ -965,11 +996,8 @@ void PageView::keyPressEvent(QKeyEvent *event) {
     QAbstractScrollArea::keyPressEvent(event);
 }
 Position PageView::positionAt(QPointF point) const {
-    const auto fullY = point.y() + verticalScrollBar()->value() - 24;
-    const auto stride = layout_.page.height * scale() + 24;
-    const auto page = static_cast<std::size_t>(
-        std::clamp(std::floor(fullY / stride), 0.0, static_cast<double>(layout_.pageCount - 1)));
-    return layout_.hitTest((point.x() - pageLeft()) / scale(),
+    const auto page = pageAtY(point.y());
+    return layout_.hitTest((point.x() - pageLeft(page)) / scale(),
                            (point.y() - pageTop(page)) / scale(), page);
 }
 void PageView::mousePressEvent(QMouseEvent *event) {
@@ -1011,7 +1039,7 @@ QVariant PageView::inputMethodQuery(Qt::InputMethodQuery query) const {
     const auto caret = layout_.caret(displayCaret_);
     switch (query) {
     case Qt::ImCursorRectangle:
-        return QRectF(pageLeft() + caret.x * scale(), pageTop(caret.page) + caret.y * scale(), 1,
+        return QRectF(pageLeft(caret.page) + caret.x * scale(), pageTop(caret.page) + caret.y * scale(), 1,
                       caret.height * scale());
     case Qt::ImSurroundingText:
         return QString::fromStdU16String(
@@ -1046,7 +1074,7 @@ void PageView::wheelEvent(QWheelEvent *event) {
         QAbstractScrollArea::wheelEvent(event);
 }
 void PageView::configurePrinter(QPrinter &printer) const {
-    const auto &page = editor_.document.page;
+    const auto &page = layout_.pageStyle(0);
     const bool landscape = page.width > page.height;
     const QPageSize size(QSizeF(std::min(page.width, page.height), std::max(page.width, page.height)),
                          QPageSize::Point, {}, QPageSize::FuzzyMatch);
@@ -1074,12 +1102,23 @@ void PageView::print(QPrinter &printer) {
         throw std::runtime_error("The printer could not be started");
     // Rasterize one page at a time; 300 dpi is ample for text and bounds memory use.
     const double dpi = std::min(300, std::max(72, printer.resolution()));
-    const QRectF target(QPointF(0, 0), QSizeF(printer.width(), printer.height()));
     for (int page = first; page <= last; ++page) {
-        if (page != first && !printer.newPage())
-            throw std::runtime_error("The printer rejected a new page");
-        QImage image(static_cast<int>(std::ceil(committed.page.width * dpi / 72)),
-                     static_cast<int>(std::ceil(committed.page.height * dpi / 72)),
+        const auto &sheet = committed.pageStyle(static_cast<std::size_t>(page - 1));
+        if (page != first) {
+            // Sections may change the paper size or orientation.
+            const bool landscape = sheet.width > sheet.height;
+            printer.setPageLayout(QPageLayout(
+                QPageSize(QSizeF(std::min(sheet.width, sheet.height),
+                                 std::max(sheet.width, sheet.height)),
+                          QPageSize::Point, {}, QPageSize::FuzzyMatch),
+                landscape ? QPageLayout::Landscape : QPageLayout::Portrait, QMarginsF(0, 0, 0, 0),
+                QPageLayout::Point));
+            if (!printer.newPage())
+                throw std::runtime_error("The printer rejected a new page");
+        }
+        const QRectF target(QPointF(0, 0), QSizeF(printer.width(), printer.height()));
+        QImage image(static_cast<int>(std::ceil(sheet.width * dpi / 72)),
+                     static_cast<int>(std::ceil(sheet.height * dpi / 72)),
                      QImage::Format_ARGB32_Premultiplied);
         image.fill(Qt::white);
         auto surface = SkSurfaces::WrapPixels(
@@ -1115,8 +1154,8 @@ void PageView::exportPdf(const QString &path) {
     if (!pdf)
         throw std::runtime_error("Skia PDF backend is unavailable");
     for (std::size_t page = 0; page < committed.pageCount; ++page) {
-        auto *canvas = pdf->beginPage(static_cast<float>(committed.page.width),
-                                      static_cast<float>(committed.page.height));
+        auto *canvas = pdf->beginPage(static_cast<float>(committed.pageStyle(page).width),
+                                      static_cast<float>(committed.pageStyle(page).height));
         renderer.drawPage(*canvas, page);
         pdf->endPage();
     }

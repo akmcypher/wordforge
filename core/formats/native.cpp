@@ -266,9 +266,15 @@ std::string serializeNative(const Document &document) {
                     [&](const ParagraphStyle &s) { return themedCharacter(s.character); }) ||
         std::any_of(document.styles.characterStyles.begin(), document.styles.characterStyles.end(),
                     [&](const NamedCharacterStyle &s) { return themedCharacter(s.character); });
+    // WFG13 only for sections or columns, so other files stay readable by 0.6.8.
+    const bool sectioned =
+        document.page.columns != 1 || document.page.columnGap != 36 ||
+        std::any_of(document.paragraphs.begin(), document.paragraphs.end(),
+                    [](const Paragraph &p) { return p.sectionBreak.has_value(); });
     const bool semantic =
-        styled || banded || preserving || noted || reviewed || decorated || themed;
-    root.append_attribute("version") = themed                       ? "12"
+        styled || banded || preserving || noted || reviewed || decorated || themed || sectioned;
+    root.append_attribute("version") = sectioned                    ? "13"
+                                       : themed                     ? "12"
                                        : decorated                  ? "11"
                                        : reviewed                   ? "10"
                                        : preserving || noted        ? "9"
@@ -294,6 +300,10 @@ std::string serializeNative(const Document &document) {
     root.append_attribute("width") = document.page.width;
     root.append_attribute("height") = document.page.height;
     root.append_attribute("margin") = document.page.margin;
+    if (document.page.columns != 1 || document.page.columnGap != 36) {
+        root.append_attribute("columns") = static_cast<unsigned long long>(document.page.columns);
+        root.append_attribute("columnGap") = document.page.columnGap;
+    }
     if (document.page.differentFirstPage)
         root.append_attribute("differentFirstPage") = "true";
     if (document.trackChanges)
@@ -432,6 +442,15 @@ std::string serializeNative(const Document &document) {
             paragraph.append_attribute("line") = p.lineSpacing;
         if (p.pageBreakBefore)
             paragraph.append_attribute("break") = true;
+        if (const auto &end = p.sectionBreak) {
+            paragraph.append_attribute("section") = end->continuous ? "continuous" : "page";
+            paragraph.append_attribute("sectionWidth") = end->page.width;
+            paragraph.append_attribute("sectionHeight") = end->page.height;
+            paragraph.append_attribute("sectionMargin") = end->page.margin;
+            paragraph.append_attribute("sectionColumns") =
+                static_cast<unsigned long long>(end->page.columns);
+            paragraph.append_attribute("sectionGap") = end->page.columnGap;
+        }
         for (const auto &r : p.runs) {
             const auto *image = r.image();
             auto run = paragraph.append_child(image ? "image" : r.note() ? "note" : "r");
@@ -522,11 +541,12 @@ Document parseNative(const std::string &input) {
     if (std::string_view(root.name()) != "wordforge" ||
         (version != "1" && version != "2" && version != "3" && version != "4" && version != "5" &&
          version != "6" && version != "7" && version != "8" && version != "9" &&
-         version != "10" && version != "11" && version != "12"))
+         version != "10" && version != "11" && version != "12" && version != "13"))
         throw std::runtime_error("Unsupported native document version");
     // WFG7 is WFG6 plus character styles; WFG8 adds headers and footers.
     // WFG9 adds DOCX package parts kept from an imported file.
-    const bool v12 = version == "12";
+    const bool v13 = version == "13";
+    const bool v12 = version == "12" || v13;
     const bool v11 = version == "11" || v12;
     const bool v10 = version == "10" || v11;
     const bool v9 = version == "9" || v10;
@@ -537,6 +557,9 @@ Document parseNative(const std::string &input) {
         throw std::runtime_error("WFG4/5 require ZIP transport; legacy versions require XML");
     if (version == "1")
         attributes(root, {"version", "width", "height", "margin"});
+    else if (v13)
+        attributes(root, {"version", "width", "height", "margin", "nextId", "differentFirstPage",
+                          "trackChanges", "columns", "columnGap"});
     else if (v10)
         attributes(root, {"version", "width", "height", "margin", "nextId", "differentFirstPage",
                           "trackChanges"});
@@ -558,6 +581,13 @@ Document parseNative(const std::string &input) {
         document.page.differentFirstPage = boolean(root, "differentFirstPage");
     if (v10)
         document.trackChanges = boolean(root, "trackChanges");
+    if (v13) {
+        const auto columns = number(root, "columns", 1, 1, 6);
+        if (std::floor(columns) != columns)
+            throw std::runtime_error("Invalid column count");
+        document.page.columns = static_cast<std::size_t>(columns);
+        document.page.columnGap = number(root, "columnGap", 36, 0, 144);
+    }
     for (auto p : root.children()) {
         if (indentation(p))
             continue;
@@ -759,7 +789,9 @@ Document parseNative(const std::string &input) {
         else if (v11)
             attributes(p, {"align", "after", "list", "style", "direct", "indent", "firstLine",
                            "rightIndent", "before", "line", "break", "id", "table", "row",
-                           "column"});
+                           "column", v13 ? "section" : "id", v13 ? "sectionWidth" : "id",
+                           v13 ? "sectionHeight" : "id", v13 ? "sectionMargin" : "id",
+                           v13 ? "sectionColumns" : "id", v13 ? "sectionGap" : "id"});
         else if (v6)
             attributes(p, {"align", "after", "list", "style", "direct", "indent", "before", "line",
                            "break", "id", "table", "row", "column"});
@@ -796,6 +828,22 @@ Document parseNative(const std::string &input) {
         paragraph.spaceBefore = number(p, "before", 0, 0, 200);
         paragraph.lineSpacing = number(p, "line", 1.15, 1, 3);
         paragraph.pageBreakBefore = boolean(p, "break");
+        if (p.attribute("section")) {
+            const std::string_view kind = p.attribute("section").value();
+            if (kind != "page" && kind != "continuous")
+                throw std::runtime_error("Invalid section break");
+            SectionBreak end;
+            end.continuous = kind == "continuous";
+            end.page.width = number(p, "sectionWidth", 595.28, 72, 2880);
+            end.page.height = number(p, "sectionHeight", 841.89, 72, 2880);
+            end.page.margin = number(p, "sectionMargin", 56.7, 0, 1400);
+            const auto columns = number(p, "sectionColumns", 1, 1, 6);
+            if (std::floor(columns) != columns)
+                throw std::runtime_error("Invalid column count");
+            end.page.columns = static_cast<std::size_t>(columns);
+            end.page.columnGap = number(p, "sectionGap", 36, 0, 144);
+            paragraph.sectionBreak = end;
+        }
         paragraph.runs.clear();
         for (auto r : p.children()) {
             if (indentation(r))

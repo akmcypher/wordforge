@@ -69,6 +69,12 @@ class PageView : public QAbstractScrollArea {
     }
     bool insertFootnote(const std::u16string &text, bool endnote = false);
     bool selectedNoteIsEndnote() const;
+    // The caret's section's page settings (size, margins, columns, header and footer).
+    PageStyle sectionPage() const {
+        return editor_.sectionPage();
+    }
+    bool insertSectionBreak(bool continuous);
+    bool removeSectionBreak();
     // A table of contents at the caret, with page numbers from the current layout.
     bool insertTableOfContents();
     bool updateTablesOfContents();
@@ -185,7 +191,12 @@ class PageView : public QAbstractScrollArea {
     void moveCaret(Position, bool extend);
     Position positionAt(QPointF) const;
     double scale() const;
-    double pageLeft() const;
+    // Screen position of a page's top-left corner. Pages differ in size between sections;
+    // each is centred on the widest.
+    double pageLeft(std::size_t page) const;
     double pageTop(std::size_t) const;
+    std::size_t pageAtY(double viewportY) const; // the page under (or nearest) a height
+    double pageOffset(std::size_t page) const;   // sum of the heights of earlier pages, in pt
+    double widestPage() const;
 };
 } // namespace wf

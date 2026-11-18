@@ -523,3 +523,51 @@ TEST(Layout, LongEndnotesContinueOnNewPages) {
         EXPECT_LE(line.baseline - line.shaped.ascent + line.height, bottom + 0.5);
     EXPECT_EQ(layout.furniture.back().page, layout.pageCount - 1);
 }
+TEST(Layout, SectionsChangePageSizeAndColumnsFlowLeftToRight) {
+    Editor e;
+    e.replace(u"Portrait text");
+    e.insertSectionBreak(false);
+    // The second section: landscape, two columns, enough text to fill the first column.
+    auto page = e.sectionPage();
+    std::swap(page.width, page.height);
+    page.columns = 2;
+    e.selection = {{1, 0}, {1, 0}};
+    e.setPage(page);
+    for (int i = 0; i < 60; ++i) {
+        e.replace(u"Column text that wraps across a narrow column of the landscape page.");
+        e.insertParagraphBreak();
+    }
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    const auto layout = engine.compose(e.document);
+    ASSERT_GE(layout.pageCount, 2u);
+    EXPECT_LT(layout.pageStyle(0).width, layout.pageStyle(0).height); // portrait
+    EXPECT_GT(layout.pageStyle(1).width, layout.pageStyle(1).height); // landscape
+    EXPECT_EQ(layout.pageStyle(1).columns, 2u);
+    // Page 2 holds lines in both columns: the second starts at the column top, to the right.
+    const auto &sheet = layout.pageStyle(1);
+    const double columnWidth = (sheet.width - 2 * sheet.margin - sheet.columnGap) / 2;
+    double leftTop = 1e9, rightTop = 1e9, leftMaxX = 0;
+    for (const auto &line : layout.lines) {
+        if (line.page != 1)
+            continue;
+        const double top = line.baseline - line.shaped.ascent;
+        if (line.x < sheet.margin + columnWidth) {
+            leftTop = std::min(leftTop, top);
+            leftMaxX = std::max(leftMaxX, line.x + line.shaped.width);
+        } else
+            rightTop = std::min(rightTop, top);
+    }
+    EXPECT_LE(leftMaxX, sheet.margin + columnWidth + 0.5);
+    EXPECT_LT(rightTop, 1e9);
+    EXPECT_NEAR(leftTop, rightTop, 0.5);
+    // A continuous break keeps the next section on the same page, below the text.
+    Editor c;
+    c.replace(u"Above");
+    c.insertSectionBreak(true);
+    c.selection = {{1, 0}, {1, 0}};
+    c.replace(u"Below, same page");
+    const auto same = engine.compose(c.document);
+    EXPECT_EQ(same.pageCount, 1u);
+    EXPECT_GT(same.lines[1].baseline, same.lines[0].baseline);
+}

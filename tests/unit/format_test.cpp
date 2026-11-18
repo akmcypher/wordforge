@@ -635,6 +635,26 @@ TEST(NativeFormat, FieldsRoundTripInV12) {
     EXPECT_THROW(parseNative(broken), std::exception);
 }
 
+TEST(NativeFormat, SectionsRoundTripInV13) {
+    Editor e;
+    e.replace(u"one two");
+    e.selection = {{0, 3}, {0, 3}};
+    e.insertSectionBreak(true);
+    e.selection = {{0, 0}, {0, 0}};
+    auto page = e.sectionPage();
+    page.columns = 2;
+    e.setPage(page);
+    const auto bytes = serializeNative(e.document);
+    const auto xml = bytes.starts_with("PK") ? opc::read(bytes).at("document.xml") : bytes;
+    EXPECT_NE(xml.find("version=\"13\""), std::string::npos);
+    const auto restored = parseNative(bytes);
+    EXPECT_EQ(restored.paragraphs[0].sectionBreak, e.document.paragraphs[0].sectionBreak);
+    EXPECT_EQ(restored.page, e.document.page);
+    auto older = bytes;
+    older.replace(older.find("version=\"13\""), 12, "version=\"12\"");
+    EXPECT_THROW(parseNative(older), std::exception);
+}
+
 namespace {
 std::string encode(const std::u16string &text, const char *encoding) {
     UErrorCode error = U_ZERO_ERROR;

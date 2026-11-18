@@ -40,8 +40,9 @@ template <class Callback> void paintRuns(const Line &line, Callback callback) {
 }
 std::string pageKey(const Layout &layout, std::size_t page) {
     std::string key;
-    keyValue(key, layout.page.width);
-    keyValue(key, layout.page.height);
+    keyValue(key, layout.pageStyle(page).width);
+    keyValue(key, layout.pageStyle(page).height);
+    keyValue(key, layout.pageStyle(page).margin);
     for (const auto &[notePage, noteY] : layout.noteSeparators)
         if (notePage == page)
             keyValue(key, noteY);
@@ -164,8 +165,8 @@ std::size_t PageRenderer::synchronize(const Layout &layout) {
         if (cached.picture && cached.key == key)
             continue;
         SkPictureRecorder recorder;
-        auto *canvas = recorder.beginRecording(static_cast<float>(layout.page.width),
-                                               static_cast<float>(layout.page.height));
+        auto *canvas = recorder.beginRecording(static_cast<float>(layout.pageStyle(page).width),
+                                               static_cast<float>(layout.pageStyle(page).height));
         canvas->clear(SK_ColorWHITE);
         // Cell fills first, then every border over them.
         for (const auto &cell : layout.cells)
@@ -189,7 +190,7 @@ std::size_t PageRenderer::synchronize(const Layout &layout) {
                 rule.setAntiAlias(true);
                 rule.setColor(0xff8a8f99);
                 rule.setStrokeWidth(0.6f);
-                const auto left = static_cast<float>(layout.page.margin);
+                const auto left = static_cast<float>(layout.pageStyle(page).margin);
                 canvas->drawLine(left, static_cast<float>(noteY), left + 120,
                                  static_cast<float>(noteY), rule);
             }

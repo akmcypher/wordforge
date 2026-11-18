@@ -316,6 +316,8 @@ FormatPanel::FormatPanel(PageView *view, Commands &commands, QWidget *parent)
                               {{"Portrait", "portrait"}, {"Landscape", "landscape"}});
     auto *paper = combo("panelPaper", "Paper size",
                         {{"A4 · 210 × 297 mm", "paperA4"}, {"Letter · 8.5 × 11 in", "paperLetter"}});
+    auto *columns = combo("panelColumns", "Columns",
+                          {{"One", "columns1"}, {"Two", "columns2"}, {"Three", "columns3"}});
     auto *bands = actionButton("headerFooter");
     bands->setToolButtonStyle(Qt::ToolButtonTextOnly);
     bands->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -324,9 +326,9 @@ FormatPanel::FormatPanel(PageView *view, Commands &commands, QWidget *parent)
 
     auto sync = [=] {
         const auto &p = view->document().paragraphs[selectedParagraphs(view->selection()).first];
-        const auto &page = view->document().page;
+        const auto page = view->sectionPage();
         QSignalBlocker s(spacing), i(indent), fl(firstLine), ri(rightIndent), b(before),
-            a(after), m(margins), o(orientation), pa(paper);
+            a(after), m(margins), o(orientation), pa(paper), c(columns);
         spacing->setCurrentIndex(spacing->findData(p.lineSpacing));
         indent->setValue(p.indentLeft);
         firstLine->setValue(p.indentFirstLine);
@@ -340,6 +342,9 @@ FormatPanel::FormatPanel(PageView *view, Commands &commands, QWidget *parent)
                 marginIndex = n;
         margins->setCurrentIndex(marginIndex);
         orientation->setCurrentIndex(page.width > page.height ? 1 : 0);
+        columns->setCurrentIndex(page.columns <= 3 && std::abs(page.columnGap - 36) < 0.05
+                                     ? static_cast<int>(page.columns) - 1
+                                     : -1);
         const auto shortSide = std::min(page.width, page.height);
         const auto longSide = std::max(page.width, page.height);
         paper->setCurrentIndex(std::abs(shortSide - 595.28) < 0.5 && std::abs(longSide - 841.89) < 0.5
