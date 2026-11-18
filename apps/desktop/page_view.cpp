@@ -333,8 +333,18 @@ void PageView::selectRange(Selection range) {
     moveCaret(range.focus, true);
     setFocus();
 }
-bool PageView::insertFootnote(const std::u16string &text) {
-    return change([&](Editor &candidate) { candidate.insertFootnote(text); });
+bool PageView::insertFootnote(const std::u16string &text, bool endnote) {
+    return change([&](Editor &candidate) { candidate.insertFootnote(text, endnote); });
+}
+bool PageView::selectedNoteIsEndnote() const {
+    const auto id = editor_.selectedFootnote();
+    if (!id)
+        return false;
+    for (const auto &paragraph : editor_.document.paragraphs)
+        for (const auto &run : paragraph.runs)
+            if (const auto *note = run.note(); note && note->id == *id)
+                return note->endnote;
+    return false;
 }
 bool PageView::setLink(const std::string &target, const std::u16string &text) {
     return change([&](Editor &candidate) { candidate.setLink(target, text); });

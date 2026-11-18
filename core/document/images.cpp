@@ -240,7 +240,7 @@ std::optional<std::uint64_t> noteAt(const Editor &editor) {
     return before;
 }
 } // namespace
-std::uint64_t Editor::insertFootnote(const std::u16string &text) {
+std::uint64_t Editor::insertFootnote(const std::u16string &text, bool endnote) {
     validateFootnoteText(text);
     std::uint64_t id = 0;
     auto command = [&](Editor &editor) {
@@ -249,7 +249,7 @@ std::uint64_t Editor::insertFootnote(const std::u16string &text) {
         editor.document.nextId = std::max(editor.document.nextId, editor.idHighWater_);
         id = editor.document.allocateId();
         auto style = editor.typingStyle;
-        auto run = Run::fromNote({id}, style);
+        auto run = Run::fromNote({id, endnote}, style);
         editor.document.footnotes.push_back({id, text});
         editor.replace(u""); // the selection, as a tracked deletion when tracking
         const auto start = editor.selection.focus;

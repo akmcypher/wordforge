@@ -425,7 +425,7 @@ void MainWindow::buildUi() {
 
     auto *insert = new QMenu("&Insert", this);
     fill(insert, {"pageBreak", "picture", "table", "date", "", "link", "removeLink", "",
-                  "footnote", "editFootnote", "comment", "editComment", "deleteComment", "",
+                  "footnote", "endnote", "editFootnote", "comment", "editComment", "deleteComment", "",
                   "headerFooter"});
     auto *symbols = insert->addMenu("Symbol");
     for (int index = 0; index < 7; ++index)

@@ -248,7 +248,8 @@ std::string serializeNative(const Document &document) {
         std::any_of(document.tables.begin(), document.tables.end(),
                     [](const Table &t) { return !t.widths.empty() || !t.merges.empty(); });
     // WFG6 and later store paragraph style names and direct-formatting masks.
-    // WFG12 only for Word theme colours or links, so other files stay readable by 0.6.7.
+    // WFG12 only for Word theme colours, links or endnotes, so other files stay readable by
+    // 0.6.7.
     auto themedCharacter = [](const CharacterProperties &c) {
         return c.color && c.theme && activeTheme(*c.theme, *c.color);
     };
@@ -257,7 +258,7 @@ std::string serializeNative(const Document &document) {
                     [](const Paragraph &p) {
                         return std::any_of(p.runs.begin(), p.runs.end(), [](const Run &r) {
                             return activeTheme(r.style.theme, r.style.color).has_value() ||
-                                   !r.link.empty();
+                                   !r.link.empty() || (r.note() && r.note()->endnote);
                         });
                     }) ||
         std::any_of(document.styles.paragraphStyles.begin(), document.styles.paragraphStyles.end(),
@@ -424,6 +425,8 @@ std::string serializeNative(const Document &document) {
             auto run = paragraph.append_child(image ? "image" : r.note() ? "note" : "r");
             if (r.note())
                 run.append_attribute("id") = static_cast<unsigned long long>(r.note()->id);
+            if (r.note() && r.note()->endnote)
+                run.append_attribute("endnote") = true;
             if (image) {
                 run.append_attribute("resource") =
                     static_cast<unsigned long long>(image->resourceId);
@@ -774,7 +777,8 @@ Document parseNative(const std::string &input) {
             if (note)
                 attributes(r, {"id", "family", "size", "bold", "italic", "underline", "color",
                                "strike", "highlight", "direct", "cstyle", v10 ? "ins" : "id",
-                               v10 ? "del" : "id", v12 ? "theme" : "id"});
+                               v10 ? "del" : "id", v12 ? "theme" : "id",
+                               v12 ? "endnote" : "id"});
             else if (image)
                 attributes(r, {"resource", "width", "height", "description", "family", "size",
                                "bold", "italic", "underline", "color", "strike", "highlight",
@@ -812,7 +816,7 @@ Document parseNative(const std::string &input) {
             if (r.attribute("theme"))
                 run.style.theme = parseThemeColorText(r.attribute("theme").value(), run.style.color);
             if (note)
-                run = Run::fromNote({identifier(r, "id")}, run.style);
+                run = Run::fromNote({identifier(r, "id"), boolean(r, "endnote")}, run.style);
             if (image)
                 run = Run::fromImage({identifier(r, "resource"), number(r, "width", 0, 0, 2880),
                                       number(r, "height", 0, 0, 2880),

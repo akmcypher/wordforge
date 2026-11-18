@@ -67,7 +67,8 @@ class PageView : public QAbstractScrollArea {
     std::optional<std::uint64_t> selectedFootnote() const {
         return editor_.selectedFootnote();
     }
-    bool insertFootnote(const std::u16string &text);
+    bool insertFootnote(const std::u16string &text, bool endnote = false);
+    bool selectedNoteIsEndnote() const;
     // Links: `target` on the selection (or `text` inserted at the caret); empty removes.
     bool setLink(const std::string &target, const std::u16string &text = {});
     std::string linkAtCaret() const {

@@ -621,7 +621,8 @@ std::shared_ptr<const PreservedPackage> preservePackage(const opc::Parts &parts,
         static const std::set<std::string> handled{
             "styles",     "numbering", "image",       "header",      "footer",
             "theme",      "settings",  "fontTable",   "webSettings", "customXml",
-            "hyperlink",  "stylesWithEffects", "footnotes", "comments", "commentsExtended",
+            "hyperlink",  "stylesWithEffects", "footnotes", "endnotes", "comments",
+            "commentsExtended",
             "commentsIds",
             "commentsExtensible", "people"};
         if (relation.target.empty() || handled.contains(kind))
@@ -825,10 +826,11 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                 themeFonts = {font("majorFont"), font("minorFont")};
             }
     }
-    // Footnote texts by id, as plain text (paragraphs joined by spaces).
-    std::map<std::string, std::u16string> footnoteTexts;
+    // Footnote and endnote texts by id, as plain text (paragraphs joined by spaces).
     bool simplifiedNotes = false;
-    if (const auto notesPath = relationship(parts, main, "footnotes");
+    auto loadNotes = [&](const char *kind) {
+    std::map<std::string, std::u16string> footnoteTexts;
+    if (const auto notesPath = relationship(parts, main, kind);
         !notesPath.empty() && parts.contains(notesPath)) {
         auto notes = xml(parts.at(notesPath));
         for (auto note : notes.document_element().children()) {
@@ -850,7 +852,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                         text += u' ';
                     else if (is(item, "drawing") || is(item, "tbl") || is(item, "pict"))
                         simplifiedNotes = true;
-                    else if (!is(item, "pPr") && !is(item, "rPr") && !is(item, "footnoteRef"))
+                    else if (!is(item, "pPr") && !is(item, "rPr") && !is(item, "footnoteRef") &&
+                             !is(item, "endnoteRef"))
                         collect(item);
                 }
             };
@@ -869,6 +872,10 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             footnoteTexts[attr(note, "id")] = text;
         }
     }
+    return footnoteTexts;
+    };
+    const auto footnoteTexts = loadNotes("footnotes");
+    const auto endnoteTexts = loadNotes("endnotes");
     // Comments by id: author, date and plain text (paragraphs joined by spaces).
     struct ImportedComment {
         std::string author, date;
@@ -1424,7 +1431,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                     applyStyle(val(child(child(run, "rPr"), "rStyle")), paragraph, style, runSeen);
                     // A footnote reference's own formatting (superscript, its character
                     // style) is Wordforge's to draw, so it is not reported or imported.
-                    const bool noteRun = child(run, "footnoteReference");
+                    const bool noteRun =
+                        child(run, "footnoteReference") || child(run, "endnoteReference");
                     std::vector<std::string> ignored;
                     runProperties(child(run, "rPr"), style, noteRun ? ignored : warnings);
                     std::u16string text;
@@ -1435,10 +1443,12 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                     for (auto item : run.children()) {
                         if (is(item, "commentReference") || is(item, "annotationRef")) {
                             // The comment mark; its range markers carry the position.
-                        } else if (is(item, "footnoteReference")) {
+                        } else if (is(item, "footnoteReference") || is(item, "endnoteReference")) {
                             pictures = true;
-                            const auto found = footnoteTexts.find(attr(item, "id"));
-                            if (found == footnoteTexts.end()) {
+                            const bool endnote = is(item, "endnoteReference");
+                            const auto &texts = endnote ? endnoteTexts : footnoteTexts;
+                            const auto found = texts.find(attr(item, "id"));
+                            if (found == texts.end()) {
                                 warn(warnings, "A footnote whose text is missing was omitted.");
                                 continue;
                             }
@@ -1449,7 +1459,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                             }
                             const auto id = document.allocateId();
                             document.footnotes.push_back({id, found->second});
-                            paragraph.runs.push_back(Run::fromNote({id}, style));
+                            paragraph.runs.push_back(Run::fromNote({id, endnote}, style));
                         } else if (is(item, "drawing")) {
                             pictures = true; // even when omitted: no empty run is left behind
                             if (auto picture = readPicture(item, style)) {
@@ -2122,6 +2132,7 @@ std::string serializeDocx(const Document &document) {
     for (const auto &table : document.tables)
         tables.emplace(table.id, &table);
     std::vector<std::uint64_t> footnoteOrder; // footnote ids in reference order
+    std::vector<std::uint64_t> endnoteOrder;
     // Comment range markers by paragraph index: (offset, end?, exported id).
     struct Marker {
         std::size_t offset;
@@ -2419,9 +2430,10 @@ std::string serializeDocx(const Document &document) {
             }
             if (const auto *note = run.note()) {
                 property(rpr, "vertAlign", std::string("superscript"));
-                footnoteOrder.push_back(note->id);
-                set(element(r, "footnoteReference"), "id",
-                    static_cast<double>(footnoteOrder.size()));
+                auto &order = note->endnote ? endnoteOrder : footnoteOrder;
+                order.push_back(note->id);
+                set(element(r, note->endnote ? "endnoteReference" : "footnoteReference"), "id",
+                    static_cast<double>(order.size()));
                 continue;
             }
             std::size_t begin = 0;
@@ -2667,23 +2679,27 @@ std::string serializeDocx(const Document &document) {
         parts["[Content_Types].xml"] = saved(types);
         parts["word/_rels/document.xml.rels"] = saved(relationships);
     }
-    if (!footnoteOrder.empty()) {
+    // footnotes.xml or endnotes.xml: Word's separator notes, then one note per reference.
+    auto writeNotes = [&](const std::vector<std::uint64_t> &order, const std::string &kind) {
+        if (order.empty())
+            return;
+        const auto item = kind.substr(0, kind.size() - 1); // "footnote" or "endnote"
         pugi::xml_document notes;
-        auto root = notes.append_child("w:footnotes");
+        auto root = notes.append_child(("w:" + kind).c_str());
         root.append_attribute("xmlns:w") = wordNs;
         // The separator notes Word expects, then one note per reference.
         for (auto [id, type, mark] : {std::tuple{-1, "separator", "separator"},
                                       std::tuple{0, "continuationSeparator",
                                                  "continuationSeparator"}}) {
-            auto note = element(root, "footnote");
+            auto note = element(root, item.c_str());
             set(note, "type", std::string(type));
             set(note, "id", static_cast<double>(id));
             auto p = element(note, "p");
             set(element(element(p, "pPr"), "spacing"), "after", 0.0);
             element(element(p, "r"), mark);
         }
-        for (std::size_t index = 0; index < footnoteOrder.size(); ++index) {
-            auto note = element(root, "footnote");
+        for (std::size_t index = 0; index < order.size(); ++index) {
+            auto note = element(root, item.c_str());
             set(note, "id", static_cast<double>(index + 1));
             auto p = element(note, "p");
             set(element(element(p, "pPr"), "spacing"), "after", 0.0);
@@ -2691,29 +2707,32 @@ std::string serializeDocx(const Document &document) {
             auto markProperties = element(mark, "rPr");
             property(markProperties, "sz", 20.0);
             property(markProperties, "vertAlign", std::string("superscript"));
-            element(mark, "footnoteRef");
+            element(mark, (item + "Ref").c_str());
             auto text = element(p, "r");
             property(element(text, "rPr"), "sz", 20.0);
             auto t = element(text, "t");
             t.append_attribute("xml:space") = "preserve";
-            t.text().set(utf8(u" " + document.footnote(footnoteOrder[index])->text).c_str());
+            t.text().set(utf8(u" " + document.footnote(order[index])->text).c_str());
         }
         pugi::xml_document types, relationships;
         types.load_string(parts.at("[Content_Types].xml").c_str());
         relationships.load_string(parts.at("word/_rels/document.xml.rels").c_str());
         auto entry = types.document_element().append_child("Override");
-        entry.append_attribute("PartName") = "/word/footnotes.xml";
+        entry.append_attribute("PartName") = ("/word/" + kind + ".xml").c_str();
         entry.append_attribute("ContentType") =
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml";
+            ("application/vnd.openxmlformats-officedocument.wordprocessingml." + kind + "+xml")
+                .c_str();
         auto relation = relationships.document_element().append_child("Relationship");
-        relation.append_attribute("Id") = "footnotes";
+        relation.append_attribute("Id") = kind.c_str();
         relation.append_attribute("Type") =
-            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes";
-        relation.append_attribute("Target") = "footnotes.xml";
-        parts.emplace("word/footnotes.xml", saved(notes));
+            ("http://schemas.openxmlformats.org/officeDocument/2006/relationships/" + kind).c_str();
+        relation.append_attribute("Target") = (kind + ".xml").c_str();
+        parts.emplace("word/" + kind + ".xml", saved(notes));
         parts["[Content_Types].xml"] = saved(types);
         parts["word/_rels/document.xml.rels"] = saved(relationships);
-    }
+    };
+    writeNotes(footnoteOrder, "footnotes");
+    writeNotes(endnoteOrder, "endnotes");
     const bool keptSettings =
         document.preserved &&
         std::any_of(document.preserved->parts.begin(), document.preserved->parts.end(),

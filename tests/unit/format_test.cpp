@@ -607,6 +607,17 @@ TEST(NativeFormat, LinksRoundTripInV12) {
     EXPECT_THROW(parseNative(unsafe), std::exception);
 }
 
+TEST(NativeFormat, EndnotesRoundTripInV12) {
+    Editor e;
+    e.replace(u"text");
+    e.insertFootnote(u"foot");
+    e.insertFootnote(u"end", true);
+    const auto bytes = serializeNative(e.document);
+    const auto restored = parseNative(bytes);
+    EXPECT_EQ(restored.paragraphs[0].runs, e.document.paragraphs[0].runs);
+    EXPECT_EQ(restored.footnotes, e.document.footnotes);
+}
+
 namespace {
 std::string encode(const std::u16string &text, const char *encoding) {
     UErrorCode error = U_ZERO_ERROR;

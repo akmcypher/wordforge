@@ -49,7 +49,7 @@ class LayoutEngine {
         std::uint64_t revision;
         double width;
         std::vector<Line> lines;
-        std::size_t number = 0, firstNote = 1;
+        std::size_t number = 0, firstNote = 1, firstEndnote = 1;
     };
     Shaper &shaper_;
     std::unordered_map<std::uint64_t, Cached> cache_;

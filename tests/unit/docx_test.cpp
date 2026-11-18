@@ -842,7 +842,7 @@ TEST(Docx, NamesDroppedPartsAndKeepsOnlyCompleteOnes) {
     for (const auto &warning : imported.warnings)
         if (warning.find("not kept when saving") != std::string::npos)
             named = warning;
-    EXPECT_NE(named.find("endnotes"), std::string::npos);
+    EXPECT_EQ(named.find("endnotes"), std::string::npos); // imported since 0.6.8
     EXPECT_EQ(named.find("footnotes"), std::string::npos);
     EXPECT_EQ(named.find("comments"), std::string::npos); // imported (this one has no range)
     // A document without kept parts exports exactly as before.
@@ -893,7 +893,7 @@ TEST(Docx, FootnotesRoundTripAndImportFromWord) {
                            [&](const auto &warning) { return warning.find(text) != std::string::npos; });
     };
     EXPECT_TRUE(warned("one paragraph of plain text"));
-    EXPECT_TRUE(warned("endnoteReference"));
+    EXPECT_TRUE(warned("text is missing")); // the endnote reference has no endnotes part
     EXPECT_FALSE(warned("vertAlign"));
     EXPECT_FALSE(warned("not kept when saving"));
     EXPECT_NO_THROW(validateDocument(fromWord.document));
@@ -1340,4 +1340,34 @@ TEST(Docx, HyperlinksBothWays) {
               std::string::npos);
     const auto again = parseDocx(serializeDocx(imported.document)).document;
     EXPECT_EQ(again.paragraphs[0].runs, imported.document.paragraphs[0].runs);
+}
+TEST(Docx, EndnotesRoundTripAndImportFromWord) {
+    Editor e;
+    e.replace(u"Claim");
+    e.insertFootnote(u"A footnote.");
+    e.replace(u" and more");
+    e.insertFootnote(u"First endnote & source.", true);
+    e.insertFootnote(u"Second endnote.", true);
+    const auto parts = opc::read(serializeDocx(e.document));
+    ASSERT_TRUE(parts.contains("word/endnotes.xml"));
+    pugi::xml_document notes;
+    ASSERT_TRUE(notes.load_string(parts.at("word/endnotes.xml").c_str()));
+    EXPECT_EQ(notes.select_nodes("//w:endnote").size(), 4u); // two separators + two notes
+    EXPECT_EQ(notes.select_nodes("//w:endnoteRef").size(), 2u);
+    EXPECT_NE(parts.at("word/_rels/document.xml.rels").find("relationships/endnotes"),
+              std::string::npos);
+    EXPECT_NE(parts.at("[Content_Types].xml").find("endnotes+xml"), std::string::npos);
+    pugi::xml_document body;
+    ASSERT_TRUE(body.load_string(parts.at("word/document.xml").c_str()));
+    EXPECT_EQ(body.select_nodes("//w:endnoteReference").size(), 2u);
+    EXPECT_EQ(body.select_nodes("//w:footnoteReference").size(), 1u);
+    const auto imported = parseDocx(opc::write(parts));
+    EXPECT_TRUE(imported.warnings.empty());
+    std::vector<std::pair<bool, std::u16string>> found;
+    for (const auto &run : imported.document.paragraphs[0].runs)
+        if (const auto *note = run.note())
+            found.emplace_back(note->endnote, imported.document.footnote(note->id)->text);
+    const std::vector<std::pair<bool, std::u16string>> expected{
+        {false, u"A footnote."}, {true, u"First endnote & source."}, {true, u"Second endnote."}};
+    EXPECT_EQ(found, expected);
 }

@@ -1,4 +1,5 @@
 #include "core/layout/layout.hpp"
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -473,4 +474,52 @@ TEST(Layout, FirstLineHangingAndRightIndentsAndJustifiedLines) {
     EXPECT_GT(listed.lines[0].markerX, margin + 24);
     EXPECT_DOUBLE_EQ(listed.lines[1].x, margin + 18);
     EXPECT_THROW(e.formatParagraph([](auto &p) { p.indentFirstLine = -1; }), std::exception);
+}
+TEST(Layout, EndnotesFollowTheTextNumberedInRomanNumerals) {
+    Editor e;
+    e.replace(u"Body with a footnote");
+    e.insertFootnote(u"Footnote text.");
+    e.replace(u" and endnotes");
+    e.insertFootnote(u"First endnote.", true);
+    e.insertFootnote(u"Second endnote.", true);
+    e.insertParagraphBreak();
+    e.replace(u"Last paragraph.");
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    const auto layout = engine.compose(e.document);
+    ASSERT_EQ(layout.pageCount, 1u);
+    // One rule for the endnotes, below the text, and one above the footnote.
+    ASSERT_EQ(layout.noteSeparators.size(), 2u);
+    const double lastBody = layout.lines.back().baseline;
+    const auto endnoteRule = std::min(layout.noteSeparators[0].second, layout.noteSeparators[1].second);
+    EXPECT_GT(endnoteRule, lastBody);
+    // Three note lines: two endnotes after the text, the footnote at the page bottom.
+    ASSERT_EQ(layout.furniture.size(), 3u);
+    std::vector<double> tops;
+    for (const auto &line : layout.furniture)
+        tops.push_back(line.baseline - line.shaped.ascent);
+    std::sort(tops.begin(), tops.end());
+    EXPECT_GT(tops[0], endnoteRule);
+    const auto footnoteRule = std::max(layout.noteSeparators[0].second, layout.noteSeparators[1].second);
+    EXPECT_LT(tops[1], footnoteRule);
+    EXPECT_GT(tops[2], footnoteRule);
+    EXPECT_EQ(romanNumeral(1), "i");
+    EXPECT_EQ(romanNumeral(4), "iv");
+    EXPECT_EQ(romanNumeral(1994), "mcmxciv");
+}
+TEST(Layout, LongEndnotesContinueOnNewPages) {
+    Editor e;
+    e.replace(u"Text");
+    for (int i = 0; i < 60; ++i)
+        e.insertFootnote(u"An endnote long enough to wrap onto a second line at ten points on "
+                         u"an A4 page, repeated many times.",
+                         true);
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    const auto layout = engine.compose(e.document);
+    EXPECT_GE(layout.pageCount, 2u);
+    const double bottom = e.document.page.height - e.document.page.margin;
+    for (const auto &line : layout.furniture)
+        EXPECT_LE(line.baseline - line.shaped.ascent + line.height, bottom + 0.5);
+    EXPECT_EQ(layout.furniture.back().page, layout.pageCount - 1);
 }

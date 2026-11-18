@@ -121,10 +121,14 @@ void commentDialog(PageView *view, QWidget *parent, std::optional<std::uint64_t>
     else
         view->addComment(value);
 }
-// Footnote text: one paragraph of plain text. `id` edits an existing footnote.
-void footnoteDialog(PageView *view, QWidget *parent, std::optional<std::uint64_t> id) {
+// Footnote or endnote text: one paragraph of plain text. `id` edits an existing note.
+void footnoteDialog(PageView *view, QWidget *parent, std::optional<std::uint64_t> id,
+                    bool endnote = false) {
     QDialog dialog(parent);
-    dialog.setWindowTitle(id ? "Edit footnote" : "Insert footnote");
+    if (id)
+        endnote = view->selectedNoteIsEndnote();
+    const QString kind = endnote ? "endnote" : "footnote";
+    dialog.setWindowTitle((id ? "Edit " : "Insert ") + kind);
     dialog.setObjectName("footnoteDialog");
     auto *form = new QFormLayout(&dialog);
     auto *text = new QLineEdit;
@@ -135,7 +139,7 @@ void footnoteDialog(PageView *view, QWidget *parent, std::optional<std::uint64_t
     if (id)
         if (const auto *note = view->document().footnote(*id))
             text->setText(QString::fromStdU16String(note->text));
-    form->addRow("Footnote", text);
+    form->addRow(endnote ? "Endnote" : "Footnote", text);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -149,7 +153,7 @@ void footnoteDialog(PageView *view, QWidget *parent, std::optional<std::uint64_t
     if (id)
         view->setFootnoteText(*id, value);
     else
-        view->insertFootnote(value);
+        view->insertFootnote(value, endnote);
 }
 // Insert or edit a link. With no selection it also asks for the text to show.
 void linkDialog(PageView *view, QWidget *parent) {
@@ -580,6 +584,10 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
            [this, view] { footnoteDialog(view, window_, std::nullopt); });
     get("footnote")->setIconText("Footnote");
     get("footnote")->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_F)); // as in Word
+    create("endnote", "Endnote…", "Insert",
+           [this, view] { footnoteDialog(view, window_, std::nullopt, true); });
+    get("endnote")->setIconText("Endnote");
+    get("endnote")->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_D)); // as in Word
     create("editFootnote", "Edit footnote…", "Insert", [this, view] {
         if (const auto id = view->selectedFootnote())
             footnoteDialog(view, window_, id);

@@ -56,6 +56,7 @@ void validateInlineImage(const InlineImage &);
 // The superscript mark in the text that a footnote belongs to.
 struct NoteReference {
     std::uint64_t id = 0; // a Footnote::id
+    bool endnote = false;  // listed at the end of the document, numbered i, ii, iii
     bool operator==(const NoteReference &) const = default;
 };
 class Run {
@@ -370,7 +371,7 @@ class Editor {
                               const std::string &description = {});
     std::optional<InlineImage> selectedImage() const;
     // Inserts a footnote reference at the caret (replacing the selection) with `text`.
-    std::uint64_t insertFootnote(const std::u16string &text);
+    std::uint64_t insertFootnote(const std::u16string &text, bool endnote = false);
     // The footnote whose reference is next to the caret or selected, if any.
     std::optional<std::uint64_t> selectedFootnote() const;
     void setFootnoteText(std::uint64_t id, const std::u16string &text);

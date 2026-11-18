@@ -102,15 +102,16 @@ Layout LayoutEngine::compose(const Document &document) {
     std::unordered_set<std::uint64_t> liveIds;
     validateTables(document);
     auto measure = [&](const Paragraph &paragraph, double width, std::size_t listNumber,
-                       std::size_t firstNote) -> const std::vector<Line> & {
+                       std::size_t firstNote,
+                       std::size_t firstEndnote = 1) -> const std::vector<Line> & {
         validateParagraphFormat(paragraph);
         liveIds.insert(paragraph.id);
         auto found = cache_.find(paragraph.id);
         if (found == cache_.end() || found->second.revision != paragraph.revision ||
             found->second.width != width || found->second.number != listNumber ||
-            found->second.firstNote != firstNote) {
+            found->second.firstNote != firstNote || found->second.firstEndnote != firstEndnote) {
             auto shapeRange = [&](std::size_t from, std::size_t to) {
-                return shaper_.shape(paragraph, from, to, firstNote);
+                return shaper_.shape(paragraph, from, to, firstNote, firstEndnote);
             };
             ++result.measuredParagraphs;
             std::vector<Line> lines;
@@ -220,7 +221,8 @@ Layout LayoutEngine::compose(const Document &document) {
             } while (start < text.size());
             cache_.insert_or_assign(
                 paragraph.id,
-                Cached{paragraph.revision, width, std::move(lines), listNumber, firstNote});
+                Cached{paragraph.revision, width, std::move(lines), listNumber, firstNote,
+                       firstEndnote});
             found = cache_.find(paragraph.id);
         }
         return found->second.lines;
@@ -236,15 +238,16 @@ Layout LayoutEngine::compose(const Document &document) {
     noteStyle.size = 10;
     noteStyle.bold = noteStyle.italic = noteStyle.underline = noteStyle.strike = false;
     noteStyle.highlight = 0;
-    auto noteBlock = [&](std::uint64_t id, std::size_t number) {
+    auto noteBlock = [&](std::uint64_t id, std::size_t number, bool endnote = false) {
         const auto *note = document.footnote(id);
         Paragraph text(id);
         text.revision = std::hash<std::u16string>{}(note->text);
         text.spaceBefore = text.spaceAfter = 0;
         text.lineSpacing = 1;
-        text.runs = {Run::fromNote({id}, noteStyle), Run(u" " + note->text, noteStyle)};
+        text.runs = {Run::fromNote({id, endnote}, noteStyle), Run(u" " + note->text, noteStyle)};
         NoteBlock block;
-        for (const auto &line : measure(text, width, 0, number)) {
+        for (const auto &line :
+             measure(text, width, 0, endnote ? 1 : number, endnote ? number : 1)) {
             block.height += line.height;
             block.lines.push_back(line);
         }
@@ -256,7 +259,7 @@ Layout LayoutEngine::compose(const Document &document) {
         std::vector<NoteBlock> blocks;
         std::size_t offset = 0, number = firstNote;
         for (const auto &run : p.runs) {
-            if (const auto *note = run.note()) {
+            if (const auto *note = run.note(); note && !note->endnote) {
                 if (offset >= from && offset < to)
                     blocks.push_back(noteBlock(note->id, number));
                 ++number;
@@ -265,9 +268,17 @@ Layout LayoutEngine::compose(const Document &document) {
         }
         return blocks;
     };
-    auto countNotes = [](const Paragraph &p) {
-        return static_cast<std::size_t>(
-            std::count_if(p.runs.begin(), p.runs.end(), [](const Run &r) { return r.note(); }));
+    auto countNotes = [](const Paragraph &p, bool endnotes = false) {
+        return static_cast<std::size_t>(std::count_if(p.runs.begin(), p.runs.end(), [&](const Run &r) {
+            return r.note() && r.note()->endnote == endnotes;
+        }));
+    };
+    // Endnotes: numbered in reference order, listed after the last paragraph.
+    std::vector<std::uint64_t> endnoteIds;
+    auto collectEndnotes = [&](const Paragraph &p) {
+        for (const auto &run : p.runs)
+            if (const auto *note = run.note(); note && note->endnote)
+                endnoteIds.push_back(note->id);
     };
     std::vector<NoteBlock> pageNotes;
     double notesHeight = 0;
@@ -364,7 +375,9 @@ Layout LayoutEngine::compose(const Document &document) {
                 for (auto &block : notesIn(p, firstNote, 0, p.text().size()))
                     groupNotes.push_back(std::move(block));
                 notesSoFar += countNotes(p);
-                for (auto line : measure(p, boxWidth - 8, box.number, firstNote)) {
+                const auto firstEndnote = endnoteIds.size() + 1;
+                collectEndnotes(p);
+                for (auto line : measure(p, boxWidth - 8, box.number, firstNote, firstEndnote)) {
                     line.paragraph = end;
                     line.x += 4 + edges[column];
                     line.markerX += 4 + edges[column];
@@ -441,7 +454,9 @@ Layout LayoutEngine::compose(const Document &document) {
             y += paragraph.spaceBefore;
         const auto firstNote = notesSoFar + 1;
         notesSoFar += countNotes(paragraph);
-        for (auto line : measure(paragraph, width, listNumber, firstNote)) {
+        const auto firstEndnote = endnoteIds.size() + 1;
+        collectEndnotes(paragraph);
+        for (auto line : measure(paragraph, width, listNumber, firstNote, firstEndnote)) {
             if (line.height > availableHeight)
                 throw std::runtime_error("A line is taller than the page writing area");
             auto blocks = notesIn(paragraph, firstNote, line.start, line.end);
@@ -458,6 +473,27 @@ Layout LayoutEngine::compose(const Document &document) {
             y += result.lines.back().height;
         }
         y += paragraph.spaceAfter;
+    }
+    // Endnotes follow the text below a short rule, continuing onto new pages as needed
+    // (footnotes keep their room at the bottom of each page).
+    if (!endnoteIds.empty()) {
+        if (y + 2 * noteGap + notesHeight > page.height - page.margin)
+            newPage();
+        else
+            y += noteGap;
+        result.noteSeparators.emplace_back(pageIndex, y + noteGap / 2);
+        y += noteGap;
+        for (std::size_t i = 0; i < endnoteIds.size(); ++i)
+            for (auto line : noteBlock(endnoteIds[i], i + 1, true).lines) {
+                if (y + line.height + notesHeight > page.height - page.margin && y > page.margin)
+                    newPage();
+                line.page = pageIndex;
+                line.x += page.margin;
+                line.markerX += page.margin;
+                line.baseline = y + line.shaped.ascent;
+                y += line.height;
+                result.furniture.push_back(std::move(line));
+            }
     }
     flushNotes();
     std::erase_if(cache_, [&](const auto &entry) { return !liveIds.contains(entry.first); });

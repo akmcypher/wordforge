@@ -22,15 +22,17 @@ struct ShapedLine {
     std::vector<GlyphRun> runs;
     double width = 0, ascent = 0, descent = 0;
 };
+std::string romanNumeral(std::size_t); // 4 -> "iv"
 class Shaper {
   public:
     explicit Shaper(const std::vector<std::string> &fontFiles);
     ~Shaper();
     Shaper(const Shaper &) = delete;
     Shaper &operator=(const Shaper &) = delete;
-    // `firstNote` is the number shown for the paragraph's first footnote reference.
+    // `firstNote` and `firstEndnote` are the numbers shown for the paragraph's first
+    // footnote and endnote references (endnotes as lower-case Roman numerals).
     ShapedLine shape(const Paragraph &, std::size_t start, std::size_t end,
-                     std::size_t firstNote = 1);
+                     std::size_t firstNote = 1, std::size_t firstEndnote = 1);
     std::vector<std::string> families() const;
 
   private:

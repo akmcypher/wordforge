@@ -140,8 +140,21 @@ std::vector<std::string> Shaper::families() const {
     names.erase(std::unique(names.begin(), names.end()), names.end());
     return names;
 }
+// i, ii, iii, iv... (Word's default endnote numbering).
+std::string romanNumeral(std::size_t number) {
+    static const std::pair<std::size_t, const char *> parts[] = {
+        {1000, "m"}, {900, "cm"}, {500, "d"}, {400, "cd"}, {100, "c"}, {90, "xc"}, {50, "l"},
+        {40, "xl"},  {10, "x"},   {9, "ix"},  {5, "v"},    {4, "iv"},  {1, "i"}};
+    std::string text;
+    for (const auto &[value, letters] : parts)
+        while (number >= value) {
+            text += letters;
+            number -= value;
+        }
+    return text;
+}
 ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::size_t end,
-                         std::size_t firstNote) {
+                         std::size_t firstNote, std::size_t firstEndnote) {
     const auto text = paragraph.text();
     if (start > end || end > text.size())
         throw std::out_of_range("Shaping range outside paragraph");
@@ -176,18 +189,21 @@ ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::siz
         const bool rtl = ubidi_getVisualRun(lineBidi.get(), visual, &logical, &length) == UBIDI_RTL;
         const auto a = start + logical, b = a + length;
         std::vector<Span> spans;
-        std::size_t runStart = 0, notesBefore = 0;
+        std::size_t runStart = 0, notesBefore = 0, endnotesBefore = 0;
         UScriptCode previousScript = USCRIPT_LATIN;
         for (const auto &run : paragraph.runs) {
             const auto begin = std::max(a, runStart),
                        finish = std::min(b, runStart + run.text().size());
             const auto shown = shownStyle(run); // tracked changes marked
             if (run.atom()) {
+                const bool endnote = run.note() && run.note()->endnote;
                 if (begin < finish)
                     spans.push_back({begin, finish, shown, nullptr, previousScript, false,
-                                     run.image(), run.note(), firstNote + notesBefore});
+                                     run.image(), run.note(),
+                                     endnote ? firstEndnote + endnotesBefore
+                                             : firstNote + notesBefore});
                 if (run.note())
-                    ++notesBefore;
+                    ++(endnote ? endnotesBefore : notesBefore);
                 runStart += 1;
                 continue;
             }
@@ -223,7 +239,8 @@ ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::siz
                 style.size = std::max(1.0, span.style.size * 0.62);
                 style.underline = style.strike = false;
                 Paragraph label;
-                const auto digits = utf16(std::to_string(span.number));
+                const auto digits = span.note->endnote ? utf16(romanNumeral(span.number))
+                                                       : utf16(std::to_string(span.number));
                 label.runs = {{digits, style}};
                 const auto mark = shape(label, 0, digits.size());
                 const double raise = span.style.size * 0.38;
