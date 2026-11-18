@@ -246,8 +246,22 @@ void runProperties(pugi::xml_node properties, CharacterStyle &style,
         } else if (is(node, "color")) {
             // "auto" (Word's automatic colour) is Wordforge's default ink.
             style.color = val(node) == "auto" ? CharacterStyle{}.color : color(val(node));
-            if (!attr(node, "themeColor").empty())
-                warn(warnings, "Theme colors use their saved fallback values.");
+            // A theme colour is shown as the value Word saved with it and kept for saving.
+            style.theme = {};
+            if (const auto theme = attr(node, "themeColor"); !theme.empty()) {
+                auto level = [](const std::string &text) -> std::int16_t {
+                    if (text.size() != 2 || !std::isxdigit(static_cast<unsigned char>(text[0])) ||
+                        !std::isxdigit(static_cast<unsigned char>(text[1])))
+                        return -1;
+                    return static_cast<std::int16_t>(std::stoi(text, nullptr, 16));
+                };
+                style.theme = {themeColorIndex(theme), level(attr(node, "themeShade")),
+                               level(attr(node, "themeTint")), style.color};
+                if (!style.theme.index) {
+                    style.theme = {};
+                    warn(warnings, "Theme colors use their saved fallback values.");
+                }
+            }
         } else if (is(node, "shd")) {
             const auto fill = attr(node, "fill");
             if (!fill.empty() && fill != "auto")
@@ -638,6 +652,23 @@ std::shared_ptr<const PreservedPackage> preservePackage(const opc::Parts &parts,
         return nullptr;
     return package;
 }
+// w:color: hex, or "auto" for Wordforge's default ink when `automatic`, plus the Word theme
+// colour it stands for.
+void writeColor(pugi::xml_node rpr, std::uint32_t color, const std::optional<ThemeColor> &theme,
+                bool automatic) {
+    auto node = element(rpr, "color");
+    set(node, "val",
+        automatic && color == CharacterStyle{}.color && !theme ? std::string("auto") : hex(color));
+    if (!theme)
+        return;
+    static const char *digits = "0123456789ABCDEF";
+    auto level = [](std::int16_t v) { return std::string{digits[v >> 4], digits[v & 15]}; };
+    set(node, "themeColor", std::string(themeColorName(theme->index)));
+    if (theme->shade >= 0)
+        set(node, "themeShade", level(theme->shade));
+    if (theme->tint >= 0)
+        set(node, "themeTint", level(theme->tint));
+}
 // Writes the character formatting `value` into rPr. With `base`, only what differs from
 // it, as a style definition: b/i/strike there toggle the inherited value.
 void writeCharacter(pugi::xml_node rpr, const CharacterStyle &value, const CharacterStyle *base) {
@@ -662,10 +693,11 @@ void writeCharacter(pugi::xml_node rpr, const CharacterStyle &value, const Chara
     toggle(&CharacterStyle::bold, "b", "bCs");
     toggle(&CharacterStyle::italic, "i", "iCs");
     toggle(&CharacterStyle::strike, "strike", nullptr);
-    if (differs(&CharacterStyle::color)) {
+    const auto theme = activeTheme(value.theme, value.color);
+    if (differs(&CharacterStyle::color) ||
+        (base && theme != activeTheme(base->theme, base->color))) {
         opaque(value.color);
-        property(rpr, "color", value.color == CharacterStyle{}.color ? std::string("auto")
-                                                                     : hex(value.color));
+        writeColor(rpr, value.color, theme, true);
     }
     if (differs(&CharacterStyle::size)) {
         property(rpr, "sz", value.size * 2);
@@ -1131,6 +1163,33 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         createdStyles.emplace_back(style.id, node);
         return importedStyles[id] = style.id;
     };
+    // Word's own Normal, Title and Heading definitions replace Wordforge's, so paragraphs
+    // (and their paragraph marks) keep Word's look when saved again. Normal goes first:
+    // the others are defined relative to it.
+    for (const auto *id : {"Normal", "Title", "Heading1", "Heading2"}) {
+        const auto found = styleNodes.find(id);
+        if (found == styleNodes.end() || attr(found->second, "type") != "paragraph")
+            continue;
+        Paragraph format = defaultParagraph;
+        auto character = defaultRun;
+        std::set<std::string> seen;
+        std::vector<std::string> ignored; // reported once, by the paragraphs using the style
+        std::swap(ignored, warnings);
+        applyStyle(id, format, character, seen);
+        std::swap(ignored, warnings);
+        auto trial = document.styles;
+        auto *style = trial.find(id);
+        const auto base =
+            style->basedOn.empty() ? ResolvedStyle{} : resolveStyle(trial, style->basedOn);
+        style->paragraph = propertiesFor(base.paragraph, format);
+        style->character = propertiesFor(base.character, character);
+        try {
+            validateStyles(trial);
+            document.styles = std::move(trial);
+        } catch (const std::exception &) {
+            warn(warnings, "A document style could not be kept; its formatting is applied directly.");
+        }
+    }
     // Inline (and floating, placed inline) pictures: PNG directly, other formats through
     // the converter. Sizes come from the drawing's extent and are fitted to the page later.
     std::size_t pictureBytes = 0;
@@ -2255,9 +2314,7 @@ std::string serializeDocx(const Document &document) {
                 throw std::runtime_error(
                     "DOCX export cannot preserve transparent text colors; save as .wfg");
             // Wordforge's default ink is Word's automatic text colour.
-            property(rpr, "color", run.style.color == CharacterStyle{}.color
-                                       ? std::string("auto")
-                                       : hex(run.style.color));
+            writeColor(rpr, run.style.color, activeTheme(run.style.theme, run.style.color), true);
             property(rpr, "sz", run.style.size * 2);
             property(rpr, "szCs", run.style.size * 2);
             if (!run.style.highlight) // override a highlight the paragraph style may set
@@ -2422,7 +2479,8 @@ std::string serializeDocx(const Document &document) {
             if ((*c.color >> 24) != 255)
                 throw std::runtime_error(
                     "DOCX export cannot preserve transparent text colors; save as .wfg");
-            property(rpr, "color", hex(*c.color));
+            writeColor(rpr, *c.color, c.theme ? activeTheme(*c.theme, *c.color) : std::nullopt,
+                       false);
         }
         if (c.size)
             property(rpr, "sz", *c.size * 2);

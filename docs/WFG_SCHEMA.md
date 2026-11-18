@@ -1,5 +1,14 @@
 # Native WFG schema and migration
 
+**WFG12 (Word theme colours)** is written only when a run, paragraph style or character
+style keeps a Word theme colour. `r`, `image`, `note`, `style` and `charStyle` may carry
+`theme` next to `color`: a theme colour name (`dark1`, `light1`, `dark2`, `light2`,
+`accent1`…`accent6`, `hyperlink`, `followedHyperlink`, `background1`, `text1`,
+`background2`, `text2`), optionally followed by ` s:XX` (shade) and/or ` t:XX` (tint), each
+two upper-case hex digits, at most once. `color` stays the colour shown; the theme name is
+what DOCX export writes as `w:themeColor`. A style's `theme` requires its `color`. Writers
+drop the reference once the colour no longer equals the one it was read with.
+
 **WFG11 (table borders and shading; indents and justification)** is written only when a
 table has non-default borders or shaded cells, or a paragraph or paragraph style uses a
 first-line or right indent or justified alignment. `table` may carry `borderWidth` (0–6

@@ -10,12 +10,33 @@ struct ParagraphFormat;
 enum class Alignment;
 enum class ListKind;
 
+// A Word theme colour (accent1, text1...) that a text colour was taken from, optionally
+// darkened (shade) or lightened (tint) 0-255. `color` is the colour it stood for when read;
+// the reference counts only while the text colour still equals it, so changing the colour
+// drops it without further bookkeeping.
+struct ThemeColor {
+    std::uint8_t index = 0; // 0: none; 1-16 in themeColorName's order
+    std::int16_t shade = -1, tint = -1;
+    std::uint32_t color = 0;
+    bool operator==(const ThemeColor &) const = default;
+};
+// "dark1", "light1", "dark2", "light2", "accent1".."accent6", "hyperlink",
+// "followedHyperlink", "background1", "text1", "background2", "text2"; nullptr if out of range.
+const char *themeColorName(std::uint8_t index);
+std::uint8_t themeColorIndex(const std::string &name); // 0 if unknown
+// The theme reference `theme` keeps for text coloured `color`, or nullopt if it lapsed.
+std::optional<ThemeColor> activeTheme(const ThemeColor &theme, std::uint32_t color);
+// Compact text form for the native format: "accent1", "accent1 s:BF", "text2 t:99".
+std::string themeColorText(const ThemeColor &);
+ThemeColor parseThemeColorText(const std::string &, std::uint32_t color); // throws if invalid
+
 // Properties a style sets; unset ones come from the style it is based on, then defaults.
 struct CharacterProperties {
     std::optional<std::string> family;
     std::optional<double> size;
     std::optional<bool> bold, italic, underline, strike;
     std::optional<std::uint32_t> color, highlight;
+    std::optional<ThemeColor> theme; // only with `color`, and only while it matches
     bool operator==(const CharacterProperties &) const = default;
 };
 struct ParagraphProperties {

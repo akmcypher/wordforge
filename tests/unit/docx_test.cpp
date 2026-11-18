@@ -408,8 +408,9 @@ TEST(Docx, ImportsWordCustomStylesAndKeepsNamesUnique) {
     EXPECT_EQ(fancyRun.style.color, 0xffc00000u);
     EXPECT_EQ(fancyRun.style.size, 11);
     EXPECT_EQ(document.paragraphs[0].alignment, Alignment::Center);
-    // Word's Normal is 11 pt, so the imported styles carry 11 pt themselves.
-    EXPECT_EQ(quote->character.size, 11);
+    // Word's Normal (11 pt) becomes Wordforge's Normal; styles based on it inherit the size.
+    EXPECT_EQ(document.styles.find("Normal")->character.size, 11);
+    EXPECT_FALSE(quote->character.size);
     EXPECT_EQ(fancyRun.direct, 0);
     const auto &quoteRun = document.paragraphs[1].runs.front();
     EXPECT_EQ(document.paragraphs[1].style, "MyQuote");
@@ -1236,4 +1237,61 @@ TEST(Docx, StrictOpenXmlLengthsWithUnits) {
     EXPECT_NEAR(imported.document.page.width, 595.3, 0.01);
     EXPECT_THROW(parseDocx(opc::write(wordDocument("<w:p><w:pPr><w:ind w:start='3furlongs'/></w:pPr></w:p>"))),
                  std::runtime_error);
+}
+TEST(Docx, WordHeadingStylesAndThemeColoursSurviveARoundTrip) {
+    auto parts = opc::read(serializeDocx(Document{}));
+    parts["word/styles.xml"] =
+        "<w:styles xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'>"
+        "<w:style w:type='paragraph' w:default='1' w:styleId='Normal'><w:name w:val='Normal'/>"
+        "<w:rPr><w:rFonts w:ascii='Aptos'/><w:sz w:val='24'/></w:rPr></w:style>"
+        "<w:style w:type='paragraph' w:styleId='Heading1'><w:name w:val='heading 1'/>"
+        "<w:basedOn w:val='Normal'/><w:pPr><w:spacing w:before='360' w:after='80'/></w:pPr>"
+        "<w:rPr><w:rFonts w:ascii='Aptos Display'/><w:color w:val='0F4761' "
+        "w:themeColor='accent1' w:themeShade='BF'/><w:sz w:val='40'/></w:rPr></w:style>"
+        "</w:styles>";
+    parts["word/document.xml"] =
+        "<w:document xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'><w:body>"
+        "<w:p><w:pPr><w:pStyle w:val='Heading1'/></w:pPr><w:r><w:t>Heading</w:t></w:r></w:p>"
+        "<w:p><w:r><w:rPr><w:color w:val='E97132' w:themeColor='accent2'/></w:rPr>"
+        "<w:t>body</w:t></w:r></w:p></w:body></w:document>";
+    const auto imported = parseDocx(opc::write(parts));
+    EXPECT_TRUE(std::none_of(imported.warnings.begin(), imported.warnings.end(),
+                             [](const auto &w) { return w.find("Theme colors") != w.npos; }));
+    const auto &document = imported.document;
+    // Word's definitions replace Wordforge's built-in ones.
+    const auto *heading = document.styles.find("Heading1");
+    ASSERT_NE(heading, nullptr);
+    EXPECT_EQ(heading->character.family, "Aptos Display");
+    EXPECT_EQ(heading->character.size, 20);
+    // Wordforge's Heading 1 is bold; Word's is not.
+    EXPECT_FALSE(resolveStyle(document.styles, "Heading1").character.bold);
+    ASSERT_TRUE(heading->character.theme);
+    EXPECT_EQ(heading->character.theme->index, themeColorIndex("accent1"));
+    EXPECT_EQ(heading->character.theme->shade, 0xbf);
+    EXPECT_EQ(heading->paragraph.spaceBefore, 18);
+    EXPECT_EQ(document.styles.find("Normal")->character.family, "Aptos");
+    const auto &headingRun = document.paragraphs[0].runs.front();
+    EXPECT_EQ(headingRun.style.color, 0xff0f4761u);
+    EXPECT_EQ(headingRun.direct, 0);
+    const auto &bodyRun = document.paragraphs[1].runs.front();
+    EXPECT_EQ(bodyRun.style.theme.index, themeColorIndex("accent2"));
+    EXPECT_EQ(bodyRun.style.theme.shade, -1);
+
+    // Saved again: the style and the run name their theme colours.
+    const auto saved = opc::read(serializeDocx(document));
+    const auto &styles = saved.at("word/styles.xml");
+    EXPECT_NE(styles.find("w:themeColor=\"accent1\" w:themeShade=\"BF\""), std::string::npos);
+    EXPECT_NE(styles.find("Aptos Display"), std::string::npos);
+    EXPECT_NE(saved.at("word/document.xml").find("w:themeColor=\"accent2\""), std::string::npos);
+    const auto again = parseDocx(serializeDocx(document)).document;
+    EXPECT_EQ(again.paragraphs[1].runs.front().style.theme, bodyRun.style.theme);
+    EXPECT_EQ(*again.styles.find("Heading1"), *heading);
+
+    // A colour changed in Wordforge drops the theme reference.
+    auto changed = document;
+    changed.paragraphs[1].runs.front().style.color = 0xff00aa00;
+    changed.paragraphs[1].runs.front().direct |= ColorField;
+    const auto plain = opc::read(serializeDocx(changed)).at("word/document.xml");
+    EXPECT_EQ(plain.find("accent2"), std::string::npos);
+    EXPECT_NE(plain.find("00AA00"), std::string::npos);
 }

@@ -559,6 +559,39 @@ TEST(NativeFormat, IndentsAndJustificationRoundTripInV11) {
     EXPECT_THROW(parseNative(older), std::exception);
 }
 
+TEST(NativeFormat, ThemeColoursRoundTripInV12) {
+    Editor e;
+    e.replace(u"text");
+    auto xml = [](const std::string &bytes) {
+        return bytes.starts_with("PK") ? opc::read(bytes).at("document.xml") : bytes;
+    };
+    EXPECT_EQ(xml(serializeNative(e.document)).find("version=\"12\""), std::string::npos);
+    auto &run = e.document.paragraphs[0].runs.front();
+    run.style.color = 0xff0f4761;
+    run.style.theme = {themeColorIndex("accent1"), 0xbf, -1, 0xff0f4761};
+    run.direct |= ColorField;
+    auto *heading = e.document.styles.find("Heading1");
+    heading->character.color = 0xffe97132;
+    heading->character.theme = ThemeColor{themeColorIndex("accent2"), -1, 0x99, 0xffe97132};
+    const auto bytes = serializeNative(e.document);
+    EXPECT_NE(xml(bytes).find("version=\"12\""), std::string::npos);
+    EXPECT_NE(xml(bytes).find("theme=\"accent1 s:BF\""), std::string::npos);
+    const auto restored = parseNative(bytes);
+    EXPECT_EQ(restored.paragraphs[0].runs.front().style, run.style);
+    EXPECT_EQ(*restored.styles.find("Heading1"), *heading);
+    // Earlier versions do not know the attribute, and malformed values are refused.
+    auto older = bytes;
+    older.replace(older.find("version=\"12\""), 12, "version=\"11\"");
+    EXPECT_THROW(parseNative(older), std::exception);
+    auto broken = bytes;
+    broken.replace(broken.find("accent1 s:BF"), 12, "accent9 s:BF");
+    EXPECT_THROW(parseNative(broken), std::exception);
+    // A lapsed reference (colour changed since) is not written.
+    run.style.color = 0xff112233;
+    heading->character.theme.reset();
+    EXPECT_EQ(xml(serializeNative(e.document)).find("theme="), std::string::npos);
+}
+
 namespace {
 std::string encode(const std::u16string &text, const char *encoding) {
     UErrorCode error = U_ZERO_ERROR;

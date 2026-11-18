@@ -24,8 +24,10 @@ void apply(CharacterStyle &target, const CharacterProperties &properties) {
         target.underline = *properties.underline;
     if (properties.strike)
         target.strike = *properties.strike;
-    if (properties.color)
+    if (properties.color) {
         target.color = *properties.color;
+        target.theme = properties.theme.value_or(ThemeColor{});
+    }
     if (properties.highlight)
         target.highlight = *properties.highlight;
 }
@@ -56,7 +58,63 @@ void checkText(const std::string &value, std::size_t limit, bool allowEmpty, con
         if (ch < 32)
             throw std::invalid_argument(std::string("Invalid style ") + what);
 }
+constexpr const char *themeNames[] = {"dark1",     "light1",    "dark2",
+                                       "light2",    "accent1",   "accent2",
+                                       "accent3",   "accent4",   "accent5",
+                                       "accent6",   "hyperlink", "followedHyperlink",
+                                       "background1", "text1",   "background2",
+                                       "text2"};
 } // namespace
+
+const char *themeColorName(std::uint8_t index) {
+    return index >= 1 && index <= 16 ? themeNames[index - 1] : nullptr;
+}
+std::uint8_t themeColorIndex(const std::string &name) {
+    for (std::uint8_t i = 0; i < 16; ++i)
+        if (name == themeNames[i])
+            return static_cast<std::uint8_t>(i + 1);
+    return 0;
+}
+std::optional<ThemeColor> activeTheme(const ThemeColor &theme, std::uint32_t color) {
+    if (!theme.index || theme.color != color)
+        return std::nullopt;
+    return theme;
+}
+std::string themeColorText(const ThemeColor &theme) {
+    static const char *digits = "0123456789ABCDEF";
+    std::string text = themeColorName(theme.index) ? themeColorName(theme.index) : "";
+    auto add = [&](const char *key, std::int16_t value) {
+        if (value >= 0)
+            text += std::string(" ") + key + digits[value >> 4] + digits[value & 15];
+    };
+    add("s:", theme.shade);
+    add("t:", theme.tint);
+    return text;
+}
+ThemeColor parseThemeColorText(const std::string &text, std::uint32_t color) {
+    ThemeColor theme;
+    theme.color = color;
+    std::size_t at = text.find(' ');
+    theme.index = themeColorIndex(text.substr(0, at));
+    if (!theme.index)
+        throw std::invalid_argument("Invalid theme colour");
+    auto hex = [](char c) {
+        return c >= '0' && c <= '9' ? c - '0' : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+    };
+    // Then " s:XX" and/or " t:XX", each at most once, nothing else.
+    while (at != std::string::npos) {
+        const auto part = text.substr(at + 1, 4);
+        if (part.size() != 4 || part[1] != ':' || hex(part[2]) < 0 || hex(part[3]) < 0 ||
+            (part[0] != 's' && part[0] != 't') || (at + 5 < text.size() && text[at + 5] != ' '))
+            throw std::invalid_argument("Invalid theme colour");
+        auto &slot = part[0] == 's' ? theme.shade : theme.tint;
+        if (slot >= 0)
+            throw std::invalid_argument("Invalid theme colour");
+        slot = static_cast<std::int16_t>(hex(part[2]) * 16 + hex(part[3]));
+        at = at + 5 < text.size() ? at + 5 : std::string::npos;
+    }
+    return theme;
+}
 
 const ParagraphStyle *StyleSheet::find(const std::string &id) const {
     const auto found = std::find_if(paragraphStyles.begin(), paragraphStyles.end(),
@@ -128,7 +186,10 @@ void fillUnset(CharacterProperties &target, const CharacterProperties &fallback)
     fill(target.italic, fallback.italic);
     fill(target.underline, fallback.underline);
     fill(target.strike, fallback.strike);
-    fill(target.color, fallback.color);
+    if (!target.color) {
+        target.color = fallback.color;
+        target.theme = fallback.theme;
+    }
     fill(target.highlight, fallback.highlight);
 }
 
@@ -257,7 +318,7 @@ CharacterMask differingFields(const CharacterStyle &a, const CharacterStyle &b) 
         mask |= UnderlineField;
     if (a.strike != b.strike)
         mask |= StrikeField;
-    if (a.color != b.color)
+    if (a.color != b.color || activeTheme(a.theme, a.color) != activeTheme(b.theme, b.color))
         mask |= ColorField;
     if (a.highlight != b.highlight)
         mask |= HighlightField;
@@ -295,8 +356,10 @@ void inheritFields(CharacterStyle &target, const CharacterStyle &source, Charact
         target.underline = source.underline;
     if (!(keep & StrikeField))
         target.strike = source.strike;
-    if (!(keep & ColorField))
+    if (!(keep & ColorField)) {
         target.color = source.color;
+        target.theme = source.theme;
+    }
     if (!(keep & HighlightField))
         target.highlight = source.highlight;
 }
@@ -333,8 +396,11 @@ CharacterProperties propertiesFor(const CharacterStyle &base, const CharacterSty
         result.underline = value.underline;
     if (base.strike != value.strike)
         result.strike = value.strike;
-    if (base.color != value.color)
+    if (base.color != value.color ||
+        activeTheme(base.theme, base.color) != activeTheme(value.theme, value.color)) {
         result.color = value.color;
+        result.theme = activeTheme(value.theme, value.color);
+    }
     if (base.highlight != value.highlight)
         result.highlight = value.highlight;
     return result;

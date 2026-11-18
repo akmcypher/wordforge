@@ -113,6 +113,8 @@ void writeCharacterProperties(pugi::xml_node node, const CharacterProperties &c)
         node.append_attribute("strike") = *c.strike;
     if (c.color)
         node.append_attribute("color") = static_cast<unsigned long long>(*c.color);
+    if (c.color && c.theme && activeTheme(*c.theme, *c.color))
+        node.append_attribute("theme") = themeColorText(*c.theme).c_str();
     if (c.highlight)
         node.append_attribute("highlight") = static_cast<unsigned long long>(*c.highlight);
 }
@@ -145,14 +147,21 @@ CharacterProperties readCharacterProperties(pugi::xml_node node) {
     character.strike = flag(node, "strike");
     character.color = whole<std::uint32_t>(node, "color", 4294967295.0);
     character.highlight = whole<std::uint32_t>(node, "highlight", 4294967295.0);
+    if (node.attribute("theme")) {
+        if (!character.color)
+            throw std::runtime_error("A style theme colour needs a colour");
+        character.theme = parseThemeColorText(node.attribute("theme").value(), *character.color);
+    }
     return character;
 }
 // `indented`: WFG11, which adds first-line and right indents and justified alignment.
-ParagraphStyle readStyle(pugi::xml_node node, bool indented) {
+// `themed`: WFG12, which adds Word theme colours.
+ParagraphStyle readStyle(pugi::xml_node node, bool indented, bool themed) {
     if (indented)
         attributes(node, {"id", "name", "basedOn", "next", "align", "list", "indent", "firstLine",
                           "rightIndent", "before", "after", "line", "family", "size", "bold",
-                          "italic", "underline", "strike", "color", "highlight"});
+                          "italic", "underline", "strike", "color", "highlight",
+                          themed ? "theme" : "id"});
     else
         attributes(node, {"id", "name", "basedOn", "next", "align", "list", "indent", "before",
                           "after", "line", "family", "size", "bold", "italic", "underline",
@@ -176,9 +185,9 @@ ParagraphStyle readStyle(pugi::xml_node node, bool indented) {
     style.character = readCharacterProperties(node);
     return style;
 }
-NamedCharacterStyle readCharacterStyle(pugi::xml_node node) {
+NamedCharacterStyle readCharacterStyle(pugi::xml_node node, bool themed) {
     attributes(node, {"id", "name", "basedOn", "family", "size", "bold", "italic", "underline",
-                      "strike", "color", "highlight"});
+                      "strike", "color", "highlight", themed ? "theme" : "id"});
     for (auto child : node.children())
         if (!indentation(child))
             throw std::runtime_error("Unexpected style content");
@@ -239,8 +248,25 @@ std::string serializeNative(const Document &document) {
         std::any_of(document.tables.begin(), document.tables.end(),
                     [](const Table &t) { return !t.widths.empty() || !t.merges.empty(); });
     // WFG6 and later store paragraph style names and direct-formatting masks.
-    const bool semantic = styled || banded || preserving || noted || reviewed || decorated;
-    root.append_attribute("version") = decorated                    ? "11"
+    // WFG12 only for Word theme colours, so other files stay readable by 0.6.7.
+    auto themedCharacter = [](const CharacterProperties &c) {
+        return c.color && c.theme && activeTheme(*c.theme, *c.color);
+    };
+    const bool themed =
+        std::any_of(document.paragraphs.begin(), document.paragraphs.end(),
+                    [](const Paragraph &p) {
+                        return std::any_of(p.runs.begin(), p.runs.end(), [](const Run &r) {
+                            return activeTheme(r.style.theme, r.style.color).has_value();
+                        });
+                    }) ||
+        std::any_of(document.styles.paragraphStyles.begin(), document.styles.paragraphStyles.end(),
+                    [&](const ParagraphStyle &s) { return themedCharacter(s.character); }) ||
+        std::any_of(document.styles.characterStyles.begin(), document.styles.characterStyles.end(),
+                    [&](const NamedCharacterStyle &s) { return themedCharacter(s.character); });
+    const bool semantic =
+        styled || banded || preserving || noted || reviewed || decorated || themed;
+    root.append_attribute("version") = themed                       ? "12"
+                                       : decorated                  ? "11"
                                        : reviewed                   ? "10"
                                        : preserving || noted        ? "9"
                                        : banded                     ? "8"
@@ -410,6 +436,8 @@ std::string serializeNative(const Document &document) {
             run.append_attribute("italic") = r.style.italic;
             run.append_attribute("underline") = r.style.underline;
             run.append_attribute("color") = static_cast<unsigned long long>(r.style.color);
+            if (activeTheme(r.style.theme, r.style.color))
+                run.append_attribute("theme") = themeColorText(r.style.theme).c_str();
             if (r.style.strike)
                 run.append_attribute("strike") = true;
             if (r.style.highlight)
@@ -476,11 +504,12 @@ Document parseNative(const std::string &input) {
     if (std::string_view(root.name()) != "wordforge" ||
         (version != "1" && version != "2" && version != "3" && version != "4" && version != "5" &&
          version != "6" && version != "7" && version != "8" && version != "9" &&
-         version != "10" && version != "11"))
+         version != "10" && version != "11" && version != "12"))
         throw std::runtime_error("Unsupported native document version");
     // WFG7 is WFG6 plus character styles; WFG8 adds headers and footers.
     // WFG9 adds DOCX package parts kept from an imported file.
-    const bool v11 = version == "11";
+    const bool v12 = version == "12";
+    const bool v11 = version == "11" || v12;
     const bool v10 = version == "10" || v11;
     const bool v9 = version == "9" || v10;
     const bool v8 = version == "8" || v9;
@@ -597,11 +626,11 @@ Document parseNative(const std::string &input) {
             continue;
         }
         if (v6 && std::string_view(p.name()) == "style") {
-            document.styles.paragraphStyles.push_back(readStyle(p, v11));
+            document.styles.paragraphStyles.push_back(readStyle(p, v11, v12));
             continue;
         }
         if (v7 && std::string_view(p.name()) == "charStyle") {
-            document.styles.characterStyles.push_back(readCharacterStyle(p));
+            document.styles.characterStyles.push_back(readCharacterStyle(p, v12));
             continue;
         }
         if ((version == "5" || v6) && std::string_view(p.name()) == "table") {
@@ -742,16 +771,18 @@ Document parseNative(const std::string &input) {
             if (note)
                 attributes(r, {"id", "family", "size", "bold", "italic", "underline", "color",
                                "strike", "highlight", "direct", "cstyle", v10 ? "ins" : "id",
-                               v10 ? "del" : "id"});
+                               v10 ? "del" : "id", v12 ? "theme" : "id"});
             else if (image)
                 attributes(r, {"resource", "width", "height", "description", "family", "size",
                                "bold", "italic", "underline", "color", "strike", "highlight",
                                v6 ? "direct" : "resource", v7 ? "cstyle" : "resource",
-                               v10 ? "ins" : "resource", v10 ? "del" : "resource"});
+                               v10 ? "ins" : "resource", v10 ? "del" : "resource",
+                               v12 ? "theme" : "resource"});
             else
                 attributes(r, {"family", "size", "bold", "italic", "underline", "color", "strike",
                                "highlight", v6 ? "direct" : "family", v7 ? "cstyle" : "family",
-                               v10 ? "ins" : "family", v10 ? "del" : "family"});
+                               v10 ? "ins" : "family", v10 ? "del" : "family",
+                               v12 ? "theme" : "family"});
             for (auto child : r.children())
                 if (image || note ? !indentation(child)
                           : child.type() != pugi::node_pcdata && child.type() != pugi::node_cdata)
@@ -775,6 +806,8 @@ Document parseNative(const std::string &input) {
                 static_cast<std::uint32_t>(number(r, "highlight", 0, 0, 4294967295.0));
             run.style.color =
                 static_cast<std::uint32_t>(number(r, "color", 0xff202631, 0, 4294967295.0));
+            if (r.attribute("theme"))
+                run.style.theme = parseThemeColorText(r.attribute("theme").value(), run.style.color);
             if (note)
                 run = Run::fromNote({identifier(r, "id")}, run.style);
             if (image)

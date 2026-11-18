@@ -18,6 +18,7 @@ struct CharacterStyle {
     bool strike = false;
     std::uint32_t color = 0xff202631;
     std::uint32_t highlight = 0;
+    ThemeColor theme; // the Word theme colour `color` came from, if any
     bool operator==(const CharacterStyle &) const = default;
 };
 void validateCharacterStyle(const CharacterStyle &);

@@ -15,7 +15,9 @@ void validateCharacterStyle(const CharacterStyle &style) {
     const auto family = utf16(style.family);
     if (style.family.size() > 256 || !std::isfinite(style.size) || style.size < 1 ||
         style.size > 200 ||
-        std::any_of(family.begin(), family.end(), [](auto ch) { return ch < 32; }))
+        std::any_of(family.begin(), family.end(), [](auto ch) { return ch < 32; }) ||
+        style.theme.index > 16 || style.theme.shade < -1 || style.theme.shade > 255 ||
+        style.theme.tint < -1 || style.theme.tint > 255)
         throw std::invalid_argument("Invalid character formatting");
 }
 std::uint64_t Document::allocateId() {
