@@ -32,7 +32,8 @@ documents and report anything that loses data.
   with based-on inheritance. Update a style from your text and every paragraph using
   it follows.
 * **Pages** — real page layout with margins, A4/Letter, portrait/landscape, page
-  breaks, headers and footers with page numbers, and footnotes.
+  breaks, headers and footers with page numbers, and footnotes. Sections let part of a
+  document be landscape or set in two or three columns.
 * **Review** — comments and tracked changes (accept or reject), saved to and from Word.
 * **Links, endnotes and contents** — web, e-mail and bookmark links (Ctrl+click to open),
   endnotes numbered i, ii, iii at the end of the document, and a table of contents built
@@ -60,7 +61,8 @@ documents and report anything that loses data.
 
 ## Not yet
 
-Word 97–2003 `.doc`, RTF and OpenDocument `.odt` files; sections and columns, floating or wrapped
+Word 97–2003 `.doc`, RTF and OpenDocument `.odt` files; unequal margins and columns,
+per-section headers, floating or wrapped
 pictures, equations and citations. Visual caret movement through mixed-direction text
 and screen-reader accessibility are incomplete. Details are in
 [COMPATIBILITY_MATRIX.md](COMPATIBILITY_MATRIX.md) and

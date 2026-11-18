@@ -1,5 +1,14 @@
 # Current status
 
+2026-11-18 — Sections and columns (Milestone 1/3, WFG13). A paragraph can end a section;
+each section has its own page size, orientation, margin and 1–6 equal columns, while
+headers and footers stay document-wide. Layout gives every page its section's geometry,
+flows text down each column then across, and keeps continuous sections on the same page
+(columns are not balanced). View, printing and PDF use each page's size. Insert > Section
+break (next page/continuous), Remove section break; Columns in Page setup and the Format
+panel, applied to the caret's section. DOCX paragraph and body sectPr (pgSz, pgMar, cols,
+type) both ways. Windows ARM64: all 6 suites pass.
+
 2026-11-18 — v0.6.8 prepared: links, endnotes, table of contents and Word fields, Word
 heading styles and theme colours (entries below; WFG12). Notes: docs/releases/v0.6.8.md.
 

@@ -1,49 +1,101 @@
 # Wordforge handoff — start here
 
-## Current state (2026-11-16) — authoritative; everything below this section is history
+## Current state (2026-11-18) — authoritative; everything below this section is history
 
-**Released and live.** v0.6.5 (tag `v0.6.5`, commit 5ff9309):
-- Windows: <https://github.com/akmcypher/wordforge/releases/tag/v0.6.5> — x64/ARM64
-  `-setup.exe` (Inno Setup, per-user, unsigned) and portable ZIPs + `SHA256SUMS.txt`.
-- Snap: `latest/stable` = 0.6.5 (amd64 rev 35, arm64 rev 34); edge follows `main`.
-- `main` = v0.6.5 plus docs only. No open PRs, no uncommitted work.
+**Released and live: v0.6.8** (tag `v0.6.8`, `main` a19fa8c).
+- Windows: <https://github.com/akmcypher/wordforge/releases/tag/v0.6.8>. The x64 and ARM64
+  `-setup.exe` installers (Inno Setup, per-user, unsigned), portable ZIPs and
+  `SHA256SUMS.txt`.
+- Snap: `latest/stable` is 0.6.8 (amd64 rev 51, arm64 rev 52); edge follows `main`.
+- Website: <https://akmcypher.github.io/wordforge/>, from `site/` via
+  `.github/workflows/pages.yml` on `main` pushes that touch `site/`. Repo description,
+  20 topics and the homepage link are set. Not done (they need the user's accounts): Google
+  Search Console with the sitemap, and the repo's social preview image.
 
-**In 0.6.5:** DOCX package-part preservation (#22, WFG9), footnotes (#23), comments
-(#24). Tracked changes (#27, WFG10, in 0.6.6). In 0.6.7: table borders and shading (#29, WFG11), indents/justification, Strict OOXML,
-.docm/.dotx and any-encoding text (WFG11; docs/FORMAT_COMPATIBILITY.md), then a navigation pane and deleted text left out of word count/find/text export. In 0.6.8
-(WFG12): Word heading styles and theme colours, hyperlinks, endnotes (#35), fields and
-table of contents (#36). Next: Word section settings, then the P1 list
-(incremental pagination, navigation pane,
-accessibility).
+**In progress, not merged: branch `feat/sections` (off main a19fa8c).** Commit 9cb7c0b,
+"Add sections and columns" (WFG13), plus uncommitted doc updates: WFG_SCHEMA, AGENTS.md,
+README, COMPATIBILITY_MATRIX, CURRENT_STATUS and this file. All 6 suites passed on Windows
+ARM64 in `build\theme-1`. To finish it:
+1. Read the Word harness result in `out/fidelity/run9/report.md`. It was running against the
+   frozen tool `build\theme-1\roundtrip-sections.exe`. Before this branch, sections changed
+   in 3 documents (055–057) and the structure score was 99.7%. Add a "Sections" column to
+   the table in `docs/WORD_FIDELITY.md` and update its "Still lost" text.
+2. Commit the docs, push, and open a PR into `main`. Merge only when CI is green and the
+   user approves (see Working rules).
+3. Not yet checked interactively in the app: try Insert > Section break, Columns in the
+   Format panel, and a landscape section. `wordforge.exe --snapshot out.png file.docx`
+   captures the window (used for `out/showcase/`).
+- What it does: `Paragraph::sectionBreak` (`SectionBreak{PageStyle page; bool continuous}`)
+  ends a section. `PageStyle` gains `columns` (1–6) and `columnGap`. Header, footer and
+  first-page settings stay on `document.page` and must be empty in breaks.
+  `sectionPage(doc, i)` gives a paragraph's section settings. `Editor::setPage` applies
+  size, margins and columns to the caret's section and bands to the whole document.
+  `insertSectionBreak(continuous)` always splits at the caret. `removeSectionBreak()`.
+  When paragraphs merge, the surviving (last) mark keeps its break.
+- Layout: `Layout::pageStyles` / `pageStyle(i)` hold each page's geometry. Text flows down
+  each column, then across (`advance()`). A continuous break stays on the same page when
+  the paper size matches. Columns are not balanced. Endnotes and footnotes use the full
+  text width.
+- PageView: `pageLeft(page)`, `pageTop(page)` (cumulative heights), `pageAtY`,
+  `widestPage`. Print sets each page's layout; PDF uses each page's size.
+- DOCX: paragraph `sectPr` and body `sectPr` both ways (pgSz/orient, pgMar as one margin,
+  cols num/space, `type continuous`). Word stores how a section *starts* in its own `w:type`,
+  so break k is continuous when section k+1's type is. Header references are written in every
+  `sectPr`; `titlePg` only in the first one.
+- WFG13: root `columns`/`columnGap`; `p` `section` = page|continuous plus
+  `sectionWidth`/`Height`/`Margin`/`Columns`/`Gap`. WFG12 was released in 0.6.8, which is why
+  these attributes are not in WFG12.
 
-**In 0.6.4:** DOCX table and picture import (#17), headers/footers/page numbers (#18,
-WFG8), merged table cells and column widths (#19). See CURRENT_STATUS.md.
+**In 0.6.8** (#35, #36, release #37): Word heading styles (Normal/Title/Heading1/2 are
+redefined from the DOCX) and theme colours (`ThemeColor` on `CharacterStyle`, kept while
+the colour is unchanged); hyperlinks (`Run::link`, Insert > Link Ctrl+Shift+K, Ctrl+click,
+`validateLink` refuses unsafe schemes); endnotes (`NoteReference::endnote`, roman numerals,
+laid out after the text); fields (`Document::fields`, anchored ranges, nest without crossing)
+and the table of contents (Insert/Update table of contents, page numbers from a scratch
+layout). Word harness: 100/100 rounded (99.6).
+**Earlier:** 0.6.7 borders/shading, indents/justify, Strict/.docm/.dotx, any-encoding text;
+0.6.6 tracked changes; 0.6.5 package preservation, footnotes, comments; 0.6.4 DOCX
+tables/pictures, headers/footers, merges and widths.
 
-**Delivered recently (Phase 1C styles, all in 0.6.3):** custom paragraph styles
-(create/rename/delete), DOCX export+import of paragraph and character styles, and
-character styles (WFG7). See ENGINEERING_ROADMAP.md → 1C slices 1–4 and
-docs/WFG_SCHEMA.md (WFG7 at the top). Windows installer: docs/WINDOWS.md → Installer.
+**Next work, in order:**
+1. Finish and merge `feat/sections`. Release 0.6.9 only when the user asks (same flow as
+   0.6.8).
+2. Two small UI flaws seen in the 0.6.8 screenshot: the toolbar labels are cut off
+   ("I…t", "Fo…at", "Com…nds"), and the font box shows Arial for Word text in another font
+   (the typing style at the caret?).
+3. Fidelity follow-ups: right-aligned TOC page numbers with dot leaders (needs tab stops;
+   `tabs` paragraph option unsupported), formatted footnotes/comments, comment replies,
+   nested list marker styles, per-cell borders, floating pictures, unequal margins and
+   columns, per-section headers, column balancing.
+4. Interop: `.doc`, `.odt`, RTF import; LibreOffice testing (it is not installed; ask
+   before installing).
+5. Milestone 2 performance (incremental pagination, background layout, 100/500/1,000-page
+   measurements), then Milestone 4 (code signing, accessibility, fresh-install testing).
 
-**Recommended next work, in order** (user agreed with this ranking 2026-11-15):
-1. ~~DOCX table and picture import~~ — done 2026-11-16 (branch feat/docx-table-picture-import;
-   see CURRENT_STATUS.md). Next would be checking it on real Word files.
-2. ~~Headers, footers and page numbers~~ — first slice done 2026-11-16 (branch
-   feat/headers-footers; see CURRENT_STATUS.md). Follow-ups: per-section and even/odd
-   variants, formatting, in-place editing, more fields.
-3. ~~Table cell merge and column widths~~ — done 2026-11-16 (branch
-   feat/table-merge-widths). Follow-ups: drag column borders, row heights, shading.
-4. Built-in character styles Strong/Emphasis/Code (needs WFG migration rule: add missing
-   built-ins on read instead of rejecting).
-5. UI plan steps 3–4 the user approved earlier: floating selection toolbar, `/` commands.
-6. Non-code, needs the user: code signing / Microsoft Store (MSIX), a README with
-   screenshots, an interactive strict-confinement test on a real Ubuntu desktop.
-7. Faster CI: cache Skia in snap-release.yml and ci.yml; actions/cache v4.2.3 =
-   5a3ec84eff668545956fd18022155c47e93e2684 (pin SHAs).
-Longer term: ENGINEERING_ROADMAP.md Phases 2–12.
+**Analytics (2026-11-17):** about 9 outside snap devices (US 5, India 2, Germany, France),
+mostly Ubuntu 24.04/26.04; GitHub had 4 unique visitors and 0 stars, and each Windows file
+was downloaded about once. Snap metrics come from `snapcraft metrics wordforge --name
+installed_base_by_operating_system --format table` in WSL (slow; `--format json` fails because
+WSL prints a warning first).
 
-**Known gaps to state honestly:** exported DOCX styles not yet opened in Microsoft Word or
-LibreOffice; installers unsigned (SmartScreen warns); `.doc/.odt/.rtf` unsupported;
-`.docx` only in "Open with" (not the default handler, by design); not a code editor.
+**Known gaps to state honestly:** not full DOCX preservation (see AGENTS.md);
+`.doc/.odt/.rtf` unsupported; LibreOffice untested; installers unsigned; screen-reader support
+incomplete; the snap's strict confinement has not been tested on a real desktop.
+
+**Session lessons (this machine):**
+- Word harness: `tools\fidelity\word-fidelity.ps1 -Tool <exe> -Corpus <abs> -Out <abs>`.
+  Pass absolute paths, because the PowerShell tool may start in another folder. Copy the
+  roundtrip exe to a frozen name first, since rebuilding replaces it while the harness runs.
+  Run the harness alone: with a parallel build the machine ran out of memory (16 GB). Stop
+  only `WINWORD.EXE /Automation` processes left behind, never the user's Word.
+- `cmake --build build\theme-1 --parallel 3` is the incremental build used here. Full
+  `local-ci.ps1` runs can run out of memory while Word or WSL is busy.
+- In the Bash tool, a `\n` or `\\` inside a heredoc can turn into a real newline or lose
+  its escaping. Write scripts with the Write tool and run them, or fix the result with Edit.
+- Snap edge uploads sometimes fail with "Connection aborted"; rerun with
+  `gh run rerun <id> --failed`. Promote the revisions built from the release commit.
+- CI's Ubuntu job sometimes spends 15–20 minutes installing packages; that is not a hang
+  (check the step timestamps with `gh api .../actions/jobs/<id>`).
 
 ## Working rules (from the user; follow exactly)
 
@@ -82,7 +134,33 @@ LibreOffice; installers unsigned (SmartScreen warns); `.doc/.odt/.rtf` unsupport
 - Files written from Python on Windows may get CRLF; git normalizes them (`eol=lf`).
   Prefer the Write/Edit tools over heredocs with nested quotes in Git Bash.
 
-## Code map for the style work (most recent area)
+## Code map (recent areas)
+
+- `core/document/document.hpp`: `Run` (`link`, `characterStyle`, tracked marks),
+  `NoteReference` (`endnote`), `Field`, `SectionBreak`, `PageStyle` (`columns`), `Editor`
+  commands (`setLink`, `linkAt/linkRange`, `insertTableOfContents`, `updateTablesOfContents`,
+  `insertSectionBreak`, `sectionPage`). Their implementations are near the end of
+  `document.cpp`; footnotes are in `images.cpp` and anchors (including fields) in
+  `anchors.cpp`.
+- `core/document/styles.*`: `ThemeColor` (`activeTheme`, `themeColorText`), style
+  resolution and masks.
+- `core/layout/layout.cpp` `compose`: sections and columns (`useSection`, `advance`,
+  `columnLeft`), footnotes at the page bottom, endnotes after the text, headers and footers
+  per page. `core/typography/shaper.cpp`: note labels (`romanNumeral`).
+- `core/formats/docx.cpp`: import `parseDocx` (`readGeometry`, `loadNotes`, the field marks
+  `fN` sharing `commentMarks`, `linkTargets`, built-in style redefinition) and export
+  `serializeDocx` (`writeSection`, `writeNotes`, field markers in `emitMarkers`,
+  `w:hyperlink` grouping, `writeColor`).
+- `core/formats/native.cpp`: WFG versions (11 indents; 12 theme/link/endnote/fields;
+  13 sections) and the "written only when used" rules.
+- `apps/desktop/page_view.*`: per-page geometry, link open/tooltip/context menu, TOC and
+  section commands. `commands.cpp`: dialogs (link, footnote/endnote) and command
+  registration. `main_window.cpp`: menus. `shell.cpp`: the Format panel (Columns).
+- `tools/fidelity/`: `word-fidelity.ps1` (114-document Word corpus in `out/fidelity/corpus`,
+  report and per-document `.diff.txt`), `format-compat.ps1` (formats × 23 languages),
+  `roundtrip.cpp`.
+
+## Code map for the style work (0.6.3)
 
 - `core/document/styles.*`: `StyleSheet` (paragraph + character styles), resolution,
   masks, `adoptStyles`, `uniqueStyleId`, `inheritedCharacter`.

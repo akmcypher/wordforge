@@ -27,8 +27,8 @@ frozen. Development happens here only.
   targets, Word theme colours and built-in heading styles as Word defines them, fields (TOC,
   PAGEREF, PAGE...) as anchored ranges with their result text, and tracked text
   insertions/deletions as tracked changes; other unknown content inside the document body
-  (formatting/paragraph-mark revisions, section settings, unknown elements) is still omitted
-  with a warning. Do
+  (formatting/paragraph-mark revisions, unknown elements) is still omitted with a warning;
+  sections keep size, orientation, margins (one value) and equal columns. Do
   not describe this as full DOCX preservation.
 - Test both actual Windows and Ubuntu paths where available. Offscreen tests
   alone do not prove desktop accessibility, installed packaging or Word fidelity.

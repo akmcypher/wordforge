@@ -1,5 +1,13 @@
 # Native WFG schema and migration
 
+**WFG13 (sections and columns)** is written only when a paragraph ends a section or the
+last section has columns. The root may carry `columns` (1–6) and `columnGap` (0–144
+points) for the last section. `p` may carry `section` (`page`: the next section starts on
+a new page; `continuous`: on the same page) with `sectionWidth`, `sectionHeight`,
+`sectionMargin`, `sectionColumns` and `sectionGap`: the page settings of the section that
+ends with this paragraph. Header, footer and first-page settings stay on the root. Table
+cell paragraphs never end a section. Columns must leave at least 36 points each.
+
 **WFG12 (Word theme colours, links, endnotes, fields)** is written only when a run,
 paragraph style or character style keeps a Word theme colour, a run is a link, a note is an
 endnote or the document has fields. Root children `field` (`id`, `instruction`: 1-4096
