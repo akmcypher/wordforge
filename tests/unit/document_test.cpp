@@ -4,6 +4,27 @@
 #include <gtest/gtest.h>
 #include <limits>
 using namespace wf;
+TEST(Editor, ResetUsesFormattingAtTheInitialCaretForTyping) {
+    Editor source;
+    source.replace(u"Formatted text");
+    source.selection = {{0, 0}, {0, 14}};
+    source.format([](auto &s) {
+        s.family = "Georgia";
+        s.size = 19;
+        s.italic = true;
+    });
+    Editor editor;
+    editor.reset(source.document);
+    EXPECT_EQ(editor.typingStyle, editor.document.styleAt({0, 0}));
+    editor.replace(u"X");
+    EXPECT_EQ(editor.document.paragraphs[0].runs[0].style.family, "Georgia");
+    EXPECT_EQ(editor.document.paragraphs[0].runs[0].style.size, 19);
+    EXPECT_TRUE(editor.document.paragraphs[0].runs[0].style.italic);
+    EXPECT_TRUE(editor.undo());
+    EXPECT_FALSE(editor.undo());
+    editor.reset({});
+    EXPECT_EQ(editor.typingStyle, editor.document.styleAt({0, 0}));
+}
 TEST(Images, InsertResizeAndDeleteAreAtomicAndRetainImmutableResources) {
     Editor editor;
     editor.replace(u"before after");
