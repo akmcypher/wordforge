@@ -1,7 +1,11 @@
 # Native WFG schema and migration
 
-**WFG12 (Word theme colours, links, endnotes)** is written only when a run, paragraph style
-or character style keeps a Word theme colour, a run is a link or a note is an endnote.
+**WFG12 (Word theme colours, links, endnotes, fields)** is written only when a run,
+paragraph style or character style keeps a Word theme colour, a run is a link, a note is an
+endnote or the document has fields. Root children `field` (`id`, `instruction`: 1-4096
+bytes of UTF-8 without control characters, `startParagraph`, `startOffset`, `endParagraph`,
+`endOffset`) mark a Word field whose result is the text between the two anchors; fields
+nest or are apart, never cross.
 `r` and `image` may carry `link`: `http://`, `https://`, `mailto:`, `ftp://` or `file:///`
 followed by at least one character, or `#` and a bookmark name; at most 2048 bytes, no
 spaces or control characters; other schemes are refused. Adjacent runs with the same

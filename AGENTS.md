@@ -24,9 +24,10 @@ frozen. Development happens here only.
   (`PreservedPackage`) keeps document properties, theme, settings, font table, web
   settings and custom XML byte for byte (only the Track Changes switch in settings is
   rewritten); footnotes, endnotes and comments are imported as plain text, hyperlinks with their
-  targets, Word theme colours and built-in heading styles as Word defines them, and tracked
-  text insertions/deletions as tracked changes; other unknown content inside the document
-  body (fields, formatting/paragraph-mark revisions, unknown elements) is still omitted
+  targets, Word theme colours and built-in heading styles as Word defines them, fields (TOC,
+  PAGEREF, PAGE...) as anchored ranges with their result text, and tracked text
+  insertions/deletions as tracked changes; other unknown content inside the document body
+  (formatting/paragraph-mark revisions, section settings, unknown elements) is still omitted
   with a warning. Do
   not describe this as full DOCX preservation.
 - Test both actual Windows and Ubuntu paths where available. Offscreen tests

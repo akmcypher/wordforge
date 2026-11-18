@@ -1,5 +1,12 @@
 # Current status
 
+2026-11-18 — Fields and table of contents (Milestone 1, WFG12). Word fields are kept as
+anchored ranges (instruction plus ordinary result text) that nest and follow edits; DOCX
+fldChar/instrText/fldSimple both ways. Insert > Table of contents builds one from Title and
+Heading 1/2 with page numbers from the layout; Update table of contents rebuilds it. Word
+fidelity: fields no longer change in any of the 114 documents; structure 99.2% -> 99.7%.
+Still lost: section settings. Windows ARM64: all 6 suites pass.
+
 2026-11-18 — Word styles, theme colours, hyperlinks and endnotes (Milestone 1, WFG12).
 DOCX import redefines Normal, Title and Heading 1/2 from the document's own styles, and
 text colours from Word's theme keep the reference (w:themeColor/Shade/Tint) while

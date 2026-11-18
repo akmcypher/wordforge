@@ -34,8 +34,10 @@ documents and report anything that loses data.
 * **Pages** — real page layout with margins, A4/Letter, portrait/landscape, page
   breaks, headers and footers with page numbers, and footnotes.
 * **Review** — comments and tracked changes (accept or reject), saved to and from Word.
-* **Links and endnotes** — web, e-mail and bookmark links (Ctrl+click to open), endnotes
-  numbered i, ii, iii at the end of the document.
+* **Links, endnotes and contents** — web, e-mail and bookmark links (Ctrl+click to open),
+  endnotes numbered i, ii, iii at the end of the document, and a table of contents built
+  from your headings (Insert → Table of contents; update it after editing). Word's fields
+  are kept.
 * **Tables** — insert, add and delete rows and columns, merged cells, column widths,
   borders and cell shading.
 * **Pictures** — insert PNG/JPEG, resize with aspect lock; pictures in Word files open.
@@ -58,8 +60,7 @@ documents and report anything that loses data.
 
 ## Not yet
 
-Word 97–2003 `.doc`, RTF and OpenDocument `.odt` files; fields such as a table of
-contents, sections and columns, floating or wrapped
+Word 97–2003 `.doc`, RTF and OpenDocument `.odt` files; sections and columns, floating or wrapped
 pictures, equations and citations. Visual caret movement through mixed-direction text
 and screen-reader accessibility are incomplete. Details are in
 [COMPATIBILITY_MATRIX.md](COMPATIBILITY_MATRIX.md) and
