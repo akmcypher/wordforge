@@ -148,7 +148,7 @@ incomplete; the snap's strict confinement has not been tested on a real desktop.
   `columnLeft`), footnotes at the page bottom, endnotes after the text, headers and footers
   per page. `core/typography/shaper.cpp`: note labels (`romanNumeral`).
 - `core/formats/docx.cpp`: import `parseDocx` (`readGeometry`, `loadNotes`, the field marks
-  `fN` sharing `commentMarks`, `linkTargets`, built-in style redefinition) and export
+  `"\1f" + N` keys sharing `commentMarks`, `linkTargets`, built-in style redefinition) and export
   `serializeDocx` (`writeSection`, `writeNotes`, field markers in `emitMarkers`,
   `w:hyperlink` grouping, `writeColor`).
 - `core/formats/native.cpp`: WFG versions (11 indents; 12 theme/link/endnote/fields;
