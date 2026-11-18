@@ -1371,3 +1371,56 @@ TEST(Docx, EndnotesRoundTripAndImportFromWord) {
         {false, u"A footnote."}, {true, u"First endnote & source."}, {true, u"Second endnote."}};
     EXPECT_EQ(found, expected);
 }
+TEST(Docx, FieldsAndTablesOfContentsBothWays) {
+    auto parts = opc::read(serializeDocx(Document{}));
+    auto r = [](const std::string &inner) { return "<w:r>" + inner + "</w:r>"; };
+    auto fld = [&](const char *type) {
+        return r(std::string("<w:fldChar w:fldCharType='") + type + "'/>");
+    };
+    auto instr = [&](const char *text) {
+        return r(std::string("<w:instrText xml:space='preserve'>") + text + "</w:instrText>");
+    };
+    auto entry = [&](const char *anchor, const char *text, const char *page) {
+        return std::string("<w:p><w:hyperlink w:anchor='") + anchor + "'>" +
+               r(std::string("<w:t>") + text + "</w:t>") + r("<w:tab/>") + fld("begin") +
+               instr(" PAGEREF _Toc1 \\h ") + fld("separate") +
+               r(std::string("<w:t>") + page + "</w:t>") + fld("end") + "</w:hyperlink>";
+    };
+    parts["word/document.xml"] =
+        "<w:document xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'><w:body>" +
+        std::string("<w:p>") + fld("begin") + instr(" TOC \\o \"1-3\" \\h \\z \\u ") +
+        fld("separate") + entry("_Toc1", "One", "1").substr(5) + "</w:p>" +
+        entry("_Toc2", "Two", "2") + fld("end") + "</w:p>" +
+        "<w:p><w:r><w:t xml:space='preserve'>Page </w:t></w:r><w:fldSimple w:instr=' PAGE '>"
+        "<w:r><w:t>4</w:t></w:r></w:fldSimple></w:p></w:body></w:document>";
+    const auto imported = parseDocx(opc::write(parts));
+    const auto &document = imported.document;
+    EXPECT_TRUE(std::none_of(imported.warnings.begin(), imported.warnings.end(), [](const auto &w) {
+        return w.find("fldChar") != w.npos || w.find("instrText") != w.npos;
+    }));
+    ASSERT_EQ(document.fields.size(), 4u);
+    std::vector<std::string> instructions;
+    for (const auto &field : document.fields)
+        instructions.push_back(field.instruction);
+    EXPECT_EQ(instructions[0], "TOC \\o \"1-3\" \\h \\z \\u");
+    EXPECT_EQ(instructions[1], "PAGEREF _Toc1 \\h");
+    EXPECT_EQ(instructions[3], "PAGE");
+    EXPECT_EQ(document.paragraphs[0].text(), u"One\t1");
+    EXPECT_EQ(document.paragraphs[1].text(), u"Two\t2");
+    const auto toc = document.resolve(document.fields[0].end);
+    ASSERT_TRUE(toc);
+    EXPECT_EQ(toc->paragraph, 1u);
+    // Saved and read again: the same fields over the same text, links intact.
+    const auto saved = serializeDocx(document);
+    const auto xml = opc::read(saved).at("word/document.xml");
+    EXPECT_NE(xml.find("TOC \\o"), std::string::npos);
+    const auto again = parseDocx(saved).document;
+    ASSERT_EQ(again.fields.size(), 4u);
+    for (std::size_t i = 0; i < 4; ++i) {
+        EXPECT_EQ(again.fields[i].instruction, document.fields[i].instruction);
+        EXPECT_EQ(again.resolve(again.fields[i].start), document.resolve(document.fields[i].start));
+        EXPECT_EQ(again.resolve(again.fields[i].end), document.resolve(document.fields[i].end));
+    }
+    EXPECT_EQ(again.paragraphs[0].runs.back().link, "#_Toc1");
+    EXPECT_NO_THROW(validateDocument(again));
+}

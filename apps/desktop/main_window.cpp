@@ -424,7 +424,8 @@ void MainWindow::buildUi() {
         named(edit->addAction("&Replace…", QKeySequence::Replace), "replace"), "Edit");
 
     auto *insert = new QMenu("&Insert", this);
-    fill(insert, {"pageBreak", "picture", "table", "date", "", "link", "removeLink", "",
+    fill(insert, {"pageBreak", "picture", "table", "date", "", "tableOfContents",
+                  "updateTableOfContents", "", "link", "removeLink", "",
                   "footnote", "endnote", "editFootnote", "comment", "editComment", "deleteComment", "",
                   "headerFooter"});
     auto *symbols = insert->addMenu("Symbol");

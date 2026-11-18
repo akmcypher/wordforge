@@ -336,6 +336,39 @@ void PageView::selectRange(Selection range) {
 bool PageView::insertFootnote(const std::u16string &text, bool endnote) {
     return change([&](Editor &candidate) { candidate.insertFootnote(text, endnote); });
 }
+namespace {
+// Each paragraph's first page (1-based), from a layout of `document`.
+Editor::PageOf pagesOf(Shaper &shaper, const Document &document) {
+    LayoutEngine scratch(shaper);
+    const auto layout = scratch.compose(document);
+    std::vector<std::size_t> pages(document.paragraphs.size(), 0);
+    for (const auto &line : layout.lines)
+        if (line.paragraph < pages.size() && !pages[line.paragraph])
+            pages[line.paragraph] = line.page + 1;
+    return [pages](std::size_t paragraph) {
+        return paragraph < pages.size() && pages[paragraph] ? pages[paragraph] : 1;
+    };
+}
+} // namespace
+bool PageView::insertTableOfContents() {
+    return change([&](Editor &candidate) {
+        candidate.transact([&](Editor &e) {
+            e.insertTableOfContents(pagesOf(shaper_, e.document));
+            // Again, now that the table itself moves the headings.
+            e.updateTablesOfContents(pagesOf(shaper_, e.document));
+        });
+    });
+}
+bool PageView::updateTablesOfContents() {
+    return change([&](Editor &candidate) {
+        candidate.transact(
+            [&](Editor &e) { e.updateTablesOfContents(pagesOf(shaper_, e.document)); });
+    });
+}
+bool PageView::hasTableOfContents() const {
+    return std::any_of(editor_.document.fields.begin(), editor_.document.fields.end(),
+                       [](const Field &f) { return tableOfContentsField(f.instruction); });
+}
 bool PageView::selectedNoteIsEndnote() const {
     const auto id = editor_.selectedFootnote();
     if (!id)

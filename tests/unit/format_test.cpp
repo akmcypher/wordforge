@@ -618,6 +618,23 @@ TEST(NativeFormat, EndnotesRoundTripInV12) {
     EXPECT_EQ(restored.footnotes, e.document.footnotes);
 }
 
+TEST(NativeFormat, FieldsRoundTripInV12) {
+    Editor e;
+    e.replace(u"Heading");
+    e.applyStyle("Heading1");
+    e.insertParagraphBreak();
+    e.selection = {{0, 0}, {0, 0}};
+    e.insertTableOfContents([](std::size_t) { return 3; });
+    const auto bytes = serializeNative(e.document);
+    const auto restored = parseNative(bytes);
+    EXPECT_EQ(restored.fields, e.document.fields);
+    auto broken = bytes;
+    const auto at = broken.find("instruction=\"");
+    ASSERT_NE(at, std::string::npos);
+    broken.insert(at + 13, "&#9;");
+    EXPECT_THROW(parseNative(broken), std::exception);
+}
+
 namespace {
 std::string encode(const std::u16string &text, const char *encoding) {
     UErrorCode error = U_ZERO_ERROR;

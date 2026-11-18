@@ -198,6 +198,19 @@ struct Comment {
     bool operator==(const Comment &) const = default;
 };
 void validateCommentText(const std::u16string &);
+// A Word field: an instruction ("TOC \o \"1-3\" \h", "PAGEREF _Toc1 \h", "PAGE") whose
+// result is the document text between `start` and `end`. The result is ordinary text that
+// Wordforge shows and edits; the instruction is kept for saving and for updating tables of
+// contents. Fields nest (a table of contents holds page references) but never cross.
+struct Field {
+    std::uint64_t id = 0;
+    std::string instruction; // UTF-8, 1-4096 bytes, no control characters
+    Anchor start, end;
+    bool operator==(const Field &) const = default;
+};
+void validateFieldInstruction(const std::string &);
+// Whether `instruction` is a table of contents field (TOC ...).
+bool tableOfContentsField(const std::string &instruction);
 void validateCommentAuthor(const std::string &);
 // DOCX package parts Wordforge does not edit (document properties, theme, settings, font
 // table, web settings, custom XML) kept byte for byte from an imported file, so saving to
@@ -243,6 +256,7 @@ struct Document {
     ImageResources images;
     std::vector<Table> tables;
     std::vector<Footnote> footnotes; // each referenced exactly once in the text
+    std::vector<Field> fields;
     std::vector<Comment> comments;
     std::vector<Revision> revisions; // each used by at least one run
     bool trackChanges = false;       // record edits as tracked changes
@@ -309,6 +323,7 @@ struct ChangeSet {
     bool tablesChanged = false;
     bool notesChanged = false; // footnote texts, additions or removals
     bool commentsChanged = false;
+    bool fieldsChanged = false;
     bool revisionsChanged = false; // the revision list or the track-changes switch
 };
 
@@ -372,6 +387,14 @@ class Editor {
     std::optional<InlineImage> selectedImage() const;
     // Inserts a footnote reference at the caret (replacing the selection) with `text`.
     std::uint64_t insertFootnote(const std::u16string &text, bool endnote = false);
+    // A table of contents at the caret, in new paragraphs: one per Title, Heading 1 and
+    // Heading 2 paragraph ("text<TAB>page", Heading 2 entries indented), inside a TOC field.
+    // `pageOf` gives the 1-based page of a paragraph index; without it no pages are shown.
+    // Returns the field id.
+    using PageOf = std::function<std::size_t(std::size_t paragraph)>;
+    std::uint64_t insertTableOfContents(const PageOf &pageOf = {});
+    // Rebuilds every table of contents from the current headings. False if there is none.
+    bool updateTablesOfContents(const PageOf &pageOf = {});
     // The footnote whose reference is next to the caret or selected, if any.
     std::optional<std::uint64_t> selectedFootnote() const;
     void setFootnoteText(std::uint64_t id, const std::u16string &text);

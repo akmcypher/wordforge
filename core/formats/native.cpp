@@ -248,12 +248,13 @@ std::string serializeNative(const Document &document) {
         std::any_of(document.tables.begin(), document.tables.end(),
                     [](const Table &t) { return !t.widths.empty() || !t.merges.empty(); });
     // WFG6 and later store paragraph style names and direct-formatting masks.
-    // WFG12 only for Word theme colours, links or endnotes, so other files stay readable by
-    // 0.6.7.
+    // WFG12 only for Word theme colours, links, endnotes or fields, so other files stay
+    // readable by 0.6.7.
     auto themedCharacter = [](const CharacterProperties &c) {
         return c.color && c.theme && activeTheme(*c.theme, *c.color);
     };
     const bool themed =
+        !document.fields.empty() ||
         std::any_of(document.paragraphs.begin(), document.paragraphs.end(),
                     [](const Paragraph &p) {
                         return std::any_of(p.runs.begin(), p.runs.end(), [](const Run &r) {
@@ -338,6 +339,17 @@ std::string serializeNative(const Document &document) {
         node.append_attribute("endParagraph") =
             static_cast<unsigned long long>(comment.end.paragraphId);
         node.append_attribute("endOffset") = static_cast<unsigned long long>(comment.end.offset);
+    }
+    for (const auto &field : document.fields) {
+        auto node = root.append_child("field");
+        node.append_attribute("id") = static_cast<unsigned long long>(field.id);
+        node.append_attribute("instruction") = field.instruction.c_str();
+        node.append_attribute("startParagraph") =
+            static_cast<unsigned long long>(field.start.paragraphId);
+        node.append_attribute("startOffset") = static_cast<unsigned long long>(field.start.offset);
+        node.append_attribute("endParagraph") =
+            static_cast<unsigned long long>(field.end.paragraphId);
+        node.append_attribute("endOffset") = static_cast<unsigned long long>(field.end.offset);
     }
     for (const auto &note : document.footnotes) {
         auto node = root.append_child("footnote");
@@ -577,6 +589,25 @@ Document parseNative(const std::string &input) {
                 throw std::runtime_error(error.what());
             }
             document.comments.push_back(std::move(comment));
+            continue;
+        }
+        if (v12 && std::string_view(p.name()) == "field") {
+            attributes(p, {"id", "instruction", "startParagraph", "startOffset", "endParagraph",
+                           "endOffset"});
+            if (p.first_child())
+                throw std::runtime_error("Unexpected field content");
+            Field field{identifier(p, "id"),
+                        p.attribute("instruction").value(),
+                        {identifier(p, "startParagraph"), index(p, "startOffset", true),
+                         Affinity::Before},
+                        {identifier(p, "endParagraph"), index(p, "endOffset", true),
+                         Affinity::After}};
+            try {
+                validateFieldInstruction(field.instruction);
+            } catch (const std::invalid_argument &error) {
+                throw std::runtime_error(error.what());
+            }
+            document.fields.push_back(std::move(field));
             continue;
         }
         if (v9 && std::string_view(p.name()) == "footnote") {

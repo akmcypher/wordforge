@@ -40,6 +40,10 @@ std::vector<Anchor *> Document::anchors() {
         result.push_back(&comment.start);
         result.push_back(&comment.end);
     }
+    for (auto &field : fields) {
+        result.push_back(&field.start);
+        result.push_back(&field.end);
+    }
     return result;
 }
 std::vector<const Anchor *> Document::anchors() const {
@@ -49,6 +53,10 @@ std::vector<const Anchor *> Document::anchors() const {
     for (const auto &comment : comments) {
         result.push_back(&comment.start);
         result.push_back(&comment.end);
+    }
+    for (const auto &field : fields) {
+        result.push_back(&field.start);
+        result.push_back(&field.end);
     }
     return result;
 }

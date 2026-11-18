@@ -592,6 +592,12 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
         if (const auto id = view->selectedFootnote())
             footnoteDialog(view, window_, id);
     })->setIconText("Edit note");
+    create("tableOfContents", "Table of contents", "Insert",
+           [view] { view->insertTableOfContents(); })
+        ->setIconText("Contents");
+    create("updateTableOfContents", "Update table of contents", "Insert",
+           [view] { view->updateTablesOfContents(); })
+        ->setIconText("Update contents");
     create("link", "Link…", "Insert", [this, view] { linkDialog(view, window_); });
     get("link")->setIconText("Link");
     get("link")->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_K)); // Ctrl+K: palette
@@ -740,6 +746,7 @@ void Commands::sync() {
                      p.indentLeft < 360);
     get("pictureSize")->setEnabled(view_->selectedImage().has_value());
     get("editFootnote")->setEnabled(view_->selectedFootnote().has_value());
+    get("updateTableOfContents")->setEnabled(view_->hasTableOfContents());
     get("removeLink")->setEnabled(!view_->linkAtCaret().empty() ||
                                   view_->selection().anchor != view_->selection().focus);
     const bool inComment = view_->commentAtCaret().has_value();

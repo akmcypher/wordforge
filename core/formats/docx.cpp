@@ -940,6 +940,14 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         std::size_t offset;
     };
     std::vector<CommentMark> commentMarks;
+    // Fields: their range marks join commentMarks under keys that start with "\1f".
+    struct OpenField {
+        std::string key, instruction;
+        bool separated = false;
+    };
+    std::vector<OpenField> openFields;
+    std::map<std::string, std::string> fieldInstructions;
+    std::size_t fieldCount = 0;
     if (!body)
         throw std::runtime_error("DOCX document has no body");
     DocxImport result;
@@ -1406,6 +1414,20 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                 if (is(run, "moveFromRangeStart") || is(run, "moveFromRangeEnd") ||
                     is(run, "moveToRangeStart") || is(run, "moveToRangeEnd"))
                     continue;
+                if (is(run, "fldSimple")) {
+                    const auto key = "\1f" + std::to_string(++fieldCount);
+                    auto here = [&] {
+                        std::size_t offset = 0;
+                        for (const auto &existing : paragraph.runs)
+                            offset += existing.text().size();
+                        return offset;
+                    };
+                    marks.push_back({key, true, 0, here()});
+                    readRuns(run, depth + 1);
+                    marks.push_back({key, false, 0, here()});
+                    fieldInstructions[key] = attr(run, "instr");
+                    continue;
+                }
                 if (is(run, "hyperlink")) {
                     std::string target;
                     if (const auto anchor = attr(run, "anchor"); !anchor.empty())
@@ -1484,6 +1506,29 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                             text += u'\n';
                             warn(warnings, "Inline breaks are converted to paragraph breaks; "
                                            "page/column break types are not preserved.");
+                        } else if (is(item, "fldChar")) {
+                            // begin, instruction text, separate, result, end; fields nest.
+                            std::size_t here = text.size();
+                            for (const auto &existing : paragraph.runs)
+                                here += existing.text().size();
+                            const auto type = attr(item, "fldCharType");
+                            if (type == "begin")
+                                openFields.push_back({"\1f" + std::to_string(++fieldCount), {}});
+                            else if (type == "separate" && !openFields.empty() &&
+                                     !openFields.back().separated) {
+                                openFields.back().separated = true;
+                                marks.push_back({openFields.back().key, true, 0, here});
+                            } else if (type == "end" && !openFields.empty()) {
+                                const auto field = openFields.back();
+                                openFields.pop_back();
+                                if (!field.separated)
+                                    marks.push_back({field.key, true, 0, here});
+                                marks.push_back({field.key, false, 0, here});
+                                fieldInstructions[field.key] = field.instruction;
+                            }
+                        } else if (is(item, "instrText")) {
+                            if (!openFields.empty() && !openFields.back().separated)
+                                openFields.back().instruction += item.text().get();
                         } else if (!is(item, "rPr") && !is(item, "lastRenderedPageBreak"))
                             warn(warnings,
                                  "Unsupported inline content was omitted: " + local(item.name()));
@@ -2074,6 +2119,61 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         if (simplifiedComments)
             warn(warnings, "Comments are kept as one paragraph of plain text each.");
     }
+    // Fields from their range marks, kept only when every one nests properly.
+    if (!fieldInstructions.empty()) {
+        std::map<std::string, std::pair<std::optional<Anchor>, std::optional<Anchor>>> ranges;
+        for (const auto &mark : commentMarks)
+            if (mark.id.starts_with("\1f")) {
+                auto &range = ranges[mark.id];
+                auto &slot = mark.start ? range.first : range.second;
+                if (!slot)
+                    slot = Anchor{mark.paragraph, mark.offset,
+                                  mark.start ? Affinity::Before : Affinity::After};
+            }
+        auto snap = [&](Anchor anchor) {
+            for (const auto &p : document.paragraphs)
+                if (p.id == anchor.paragraphId) {
+                    const auto boundaries = p.boundaries();
+                    const auto found =
+                        std::lower_bound(boundaries.begin(), boundaries.end(), anchor.offset);
+                    anchor.offset = found == boundaries.end() ? boundaries.back() : *found;
+                }
+            return anchor;
+        };
+        bool dropped = false;
+        for (std::size_t n = 1; n <= fieldCount; ++n) {
+            const auto key = "\1f" + std::to_string(n);
+            const auto found = ranges.find(key);
+            const auto instruction = fieldInstructions.find(key);
+            if (found == ranges.end() || !found->second.first || !found->second.second ||
+                instruction == fieldInstructions.end())
+                continue;
+            auto text = instruction->second;
+            text.erase(0, text.find_first_not_of(' '));
+            text.erase(text.find_last_not_of(' ') + 1);
+            try {
+                validateFieldInstruction(text);
+            } catch (const std::exception &) {
+                dropped = true;
+                continue;
+            }
+            const auto start = snap(*found->second.first), end = snap(*found->second.second);
+            const auto from = document.resolve(start), to = document.resolve(end);
+            if (!from || !to || *to < *from) {
+                dropped = true;
+                continue;
+            }
+            document.fields.push_back({document.allocateId(), text, start, end});
+        }
+        try {
+            validateDocument(document);
+        } catch (const std::exception &) {
+            document.fields.clear();
+            dropped = true;
+        }
+        if (dropped)
+            warn(warnings, "Some fields were kept as plain text.");
+    }
     document.preserved = preservePackage(parts, main, warnings);
     // Word's "Track Changes" switch lives in the (kept) settings part.
     if (document.preserved)
@@ -2137,8 +2237,12 @@ std::string serializeDocx(const Document &document) {
     struct Marker {
         std::size_t offset;
         bool end;
-        std::size_t id;
+        std::size_t id; // a comment's number, or a field's index in `exportedFields`
+        bool field = false;
+        bool empty = false; // a field with no result: written whole at its start
     };
+    std::vector<const Field *> exportedFields; // in nesting order: outer before inner
+    std::vector<pugi::xml_node> fieldParents;  // where each field's begin was written
     std::map<std::size_t, std::vector<Marker>> markers;
     std::vector<const Comment *> exportedComments;
     {
@@ -2163,9 +2267,38 @@ std::string serializeDocx(const Document &document) {
             markers[start->paragraph].push_back({start->offset, false, id});
             markers[end->paragraph].push_back({end->offset, true, id});
         }
+        // Fields: begin, instruction and separator at the start of the result, end after it.
+        std::vector<std::tuple<Position, Position, const Field *>> fields;
+        for (const auto &field : document.fields) {
+            const auto start = document.resolve(field.start), end = document.resolve(field.end);
+            if (start && end && written(start->paragraph) && written(end->paragraph))
+                fields.emplace_back(*start, *end, &field);
+        }
+        std::stable_sort(fields.begin(), fields.end(), [](const auto &a, const auto &b) {
+            return std::get<0>(a) < std::get<0>(b) ||
+                   (std::get<0>(a) == std::get<0>(b) && std::get<1>(b) < std::get<1>(a));
+        });
+        for (const auto &[start, end, field] : fields) {
+            const auto id = exportedFields.size();
+            exportedFields.push_back(field);
+            fieldParents.emplace_back();
+            const bool empty = start == end;
+            markers[start.paragraph].push_back({start.offset, false, id, true, empty});
+            if (!empty)
+                markers[end.paragraph].push_back({end.offset, true, id, true});
+        }
+        // At one offset: field ends (inner first), comment starts, field starts (outer
+        // first), comment ends.
         for (auto &[index, list] : markers)
             std::stable_sort(list.begin(), list.end(), [](const Marker &a, const Marker &b) {
-                return a.offset != b.offset ? a.offset < b.offset : !a.end && b.end;
+                if (a.offset != b.offset)
+                    return a.offset < b.offset;
+                auto phase = [](const Marker &m) {
+                    return m.field ? (m.end ? 0 : 2) : (m.end ? 3 : 1);
+                };
+                if (phase(a) != phase(b))
+                    return phase(a) < phase(b);
+                return a.field && (a.end ? a.id > b.id : a.id < b.id);
             });
     }
     std::optional<TableCell> previousCell;
@@ -2305,12 +2438,42 @@ std::string serializeDocx(const Document &document) {
             }
         }
         std::size_t nextMarker = 0;
+        pugi::xml_node hyperlink; // the open w:hyperlink, while runs continue its target
+        std::string hyperlinkTarget;
+        // Field characters go inside an open link when the link continues past them.
+        pugi::xml_node fieldTarget;
+        auto fieldChar = [&](const char *type) {
+            set(element(element(fieldTarget, "r"), "fldChar"), "fldCharType", std::string(type));
+        };
         auto emitMarkers = [&](std::size_t upTo) {
             if (paragraphMarkers == markers.end())
                 return;
             const auto &list = paragraphMarkers->second;
             while (nextMarker < list.size() && list[nextMarker].offset <= upTo) {
                 const auto &marker = list[nextMarker++];
+                if (marker.field) {
+                    if (marker.end) {
+                        // Beside its begin: inside the link only if that one is still open.
+                        const auto saved = fieldTarget;
+                        fieldTarget = hyperlink && fieldParents[marker.id] == hyperlink &&
+                                              p.last_child() == hyperlink
+                                          ? hyperlink
+                                          : p;
+                        fieldChar("end");
+                        fieldTarget = saved;
+                        continue;
+                    }
+                    fieldParents[marker.id] = fieldTarget;
+                    fieldChar("begin");
+                    auto instruction = element(element(fieldTarget, "r"), "instrText");
+                    instruction.append_attribute("xml:space") = "preserve";
+                    instruction.text().set(
+                        (" " + exportedFields[marker.id]->instruction + " ").c_str());
+                    fieldChar("separate");
+                    if (marker.empty)
+                        fieldChar("end");
+                    continue;
+                }
                 set(element(p, marker.end ? "commentRangeEnd" : "commentRangeStart"), "id",
                     static_cast<double>(marker.id));
                 if (marker.end)
@@ -2318,9 +2481,10 @@ std::string serializeDocx(const Document &document) {
                         static_cast<double>(marker.id));
             }
         };
-        pugi::xml_node hyperlink; // the open w:hyperlink, while runs continue its target
-        std::string hyperlinkTarget;
         for (const auto &[pieceOffset, run] : pieces) {
+            fieldTarget = hyperlink && p.last_child() == hyperlink && run.link == hyperlinkTarget
+                              ? hyperlink
+                              : p;
             emitMarkers(pieceOffset);
             // Links wrap runs: w:hyperlink, then tracked changes (w:ins, then w:del inside).
             auto container = p;
@@ -2450,6 +2614,7 @@ std::string serializeDocx(const Document &document) {
                 begin = end + 1;
             }
         }
+        fieldTarget = p;
         emitMarkers(std::numeric_limits<std::size_t>::max());
     }
     auto section = element(body, "sectPr");

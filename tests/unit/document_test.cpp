@@ -806,3 +806,66 @@ TEST(Links, CopyAndPasteKeepTheTarget) {
         }
     EXPECT_EQ(linked, 2u);
 }
+TEST(Fields, TableOfContentsListsHeadingsAndUpdates) {
+    Editor e;
+    e.replace(u"Intro text");
+    e.insertParagraphBreak();
+    e.replace(u"Chapter one");
+    e.applyStyle("Heading1");
+    e.insertParagraphBreak();
+    e.applyStyle("Normal");
+    e.replace(u"Body");
+    e.insertParagraphBreak();
+    e.replace(u"Section A");
+    e.applyStyle("Heading2");
+    e.selection = {{0, 0}, {0, 0}};
+    auto pageOf = [](std::size_t paragraph) { return paragraph + 1; };
+    const auto id = e.insertTableOfContents(pageOf);
+    ASSERT_EQ(e.document.fields.size(), 1u);
+    const auto &field = e.document.fields[0];
+    EXPECT_EQ(field.id, id);
+    EXPECT_TRUE(tableOfContentsField(field.instruction));
+    const auto start = e.document.resolve(field.start), end = e.document.resolve(field.end);
+    ASSERT_TRUE(start && end);
+    EXPECT_EQ(start->paragraph, 0u);
+    EXPECT_EQ(end->paragraph, 1u);
+    EXPECT_EQ(e.document.paragraphs[0].text().substr(0, 12), u"Chapter one\t");
+    EXPECT_EQ(e.document.paragraphs[1].text().substr(0, 10), u"Section A\t");
+    EXPECT_EQ(e.document.paragraphs[1].indentLeft, 18);
+    EXPECT_EQ(e.document.paragraphs[2].text(), u"Intro text"); // the table has its own lines
+    EXPECT_NO_THROW(validateDocument(e.document));
+    // A new heading appears after an update; one undo step removes the update.
+    e.selection = {{2, 0}, {2, 0}};
+    e.insertParagraphBreak();
+    e.selection = {{2, 0}, {2, 0}};
+    e.replace(u"Preface");
+    e.applyStyle("Heading1");
+    EXPECT_TRUE(e.updateTablesOfContents(pageOf));
+    const auto updated = e.document.resolve(e.document.fields[0].end);
+    ASSERT_TRUE(updated);
+    EXPECT_EQ(updated->paragraph, 2u);
+    EXPECT_EQ(e.document.paragraphs[0].text().substr(0, 8), u"Preface\t");
+    e.undo();
+    EXPECT_EQ(e.document.paragraphs[0].text().substr(0, 12), u"Chapter one\t");
+    // Without headings the table says so.
+    Editor empty;
+    empty.insertTableOfContents();
+    EXPECT_EQ(empty.document.paragraphs[0].text(), u"No table of contents entries found.");
+}
+TEST(Fields, MustNestAndHaveValidInstructions) {
+    Editor e;
+    e.replace(u"abcdefghij");
+    auto document = e.document;
+    const auto id = document.paragraphs[0].id;
+    document.nextId += 3;
+    const auto a = document.nextId - 3, b = document.nextId - 2;
+    document.fields = {{a, "PAGE", {id, 0, Affinity::Before}, {id, 6, Affinity::After}},
+                       {b, "PAGE", {id, 2, Affinity::Before}, {id, 4, Affinity::After}}};
+    EXPECT_NO_THROW(validateDocument(document)); // nested
+    document.fields[1].end.offset = 8;
+    EXPECT_THROW(validateDocument(document), std::invalid_argument); // crossing
+    document.fields[1] = {b, "PAGE", {id, 6, Affinity::Before}, {id, 8, Affinity::After}};
+    EXPECT_NO_THROW(validateDocument(document)); // adjacent
+    document.fields[1].instruction = "bad\tinstruction";
+    EXPECT_THROW(validateDocument(document), std::invalid_argument);
+}

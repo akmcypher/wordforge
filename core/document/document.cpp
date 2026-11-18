@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <set>
 #include <stdexcept>
 #include <unicode/ubrk.h>
 #include <unicode/ustring.h>
@@ -173,6 +174,30 @@ void validateDocument(const Document &document) {
         const auto start = document.resolve(comment.start), end = document.resolve(comment.end);
         if (!start || !end || *end < *start)
             throw std::invalid_argument("Comment range is dangling or reversed");
+    }
+    if (document.fields.size() > 100000)
+        throw std::invalid_argument("Too many fields");
+    std::vector<std::pair<Position, Position>> fieldRanges;
+    for (const auto &field : document.fields) {
+        if (!field.id || field.id >= document.nextId || !ids.insert(field.id).second)
+            throw std::invalid_argument("Invalid field identifier");
+        validateFieldInstruction(field.instruction);
+        const auto start = document.resolve(field.start), end = document.resolve(field.end);
+        if (!start || !end || *end < *start)
+            throw std::invalid_argument("Field range is dangling or reversed");
+        fieldRanges.emplace_back(*start, *end);
+    }
+    // Fields nest or are apart; they never cross.
+    std::sort(fieldRanges.begin(), fieldRanges.end(), [](const auto &a, const auto &b) {
+        return a.first < b.first || (a.first == b.first && b.second < a.second);
+    });
+    std::vector<Position> open;
+    for (const auto &[start, end] : fieldRanges) {
+        while (!open.empty() && open.back() <= start && !(open.back() == start && start == end))
+            open.pop_back();
+        if (!open.empty() && open.back() < end)
+            throw std::invalid_argument("Fields overlap without nesting");
+        open.push_back(end);
     }
     for (const auto &bookmark : document.bookmarks) {
         validateBookmarkName(bookmark.name);
@@ -414,6 +439,7 @@ ChangeSet Editor::transact(const std::function<void(Editor &)> &command) {
     changes.tablesChanged = document.tables != candidate.document.tables;
     changes.notesChanged = document.footnotes != candidate.document.footnotes;
     changes.commentsChanged = document.comments != candidate.document.comments;
+    changes.fieldsChanged = document.fields != candidate.document.fields;
     changes.revisionsChanged = document.revisions != candidate.document.revisions ||
                                document.trackChanges != candidate.document.trackChanges;
     for (const auto &revision : candidate.document.revisions)
@@ -463,7 +489,8 @@ ChangeSet Editor::transact(const std::function<void(Editor &)> &command) {
     const bool contentChanged = changes.pageChanged || changes.orderChanged ||
                                 changes.bookmarksChanged || changes.resourcesChanged ||
                                 changes.tablesChanged || changes.notesChanged ||
-                                changes.commentsChanged || changes.revisionsChanged ||
+                                changes.commentsChanged || changes.fieldsChanged ||
+                                changes.revisionsChanged ||
                                 !changes.inserted.empty() ||
                                 !changes.removed.empty() || !changes.changed.empty();
     if (contentChanged) {
@@ -1519,5 +1546,145 @@ void Editor::setLink(const std::string &target, const std::u16string &text) {
         p.revision = serial_ + 1;
     }
     document.revision = ++serial_;
+}
+} // namespace wf
+
+namespace wf {
+void validateFieldInstruction(const std::string &instruction) {
+    if (instruction.empty() || instruction.size() > 4096)
+        throw std::invalid_argument("Invalid field instruction");
+    for (unsigned char ch : instruction)
+        if (ch < 32 || ch == 127)
+            throw std::invalid_argument("Invalid field instruction");
+    (void)utf16(instruction); // valid UTF-8
+}
+bool tableOfContentsField(const std::string &instruction) {
+    const auto first = instruction.find_first_not_of(' ');
+    if (first == std::string::npos)
+        return false;
+    auto word = instruction.substr(first, instruction.find(' ', first) - first);
+    std::transform(word.begin(), word.end(), word.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+    return word == "TOC";
+}
+namespace {
+// The text of a table of contents for `document`: one line per heading.
+struct TocEntries {
+    std::u16string text;
+    std::vector<bool> indented;
+};
+TocEntries tocEntries(const Document &document, const Editor::PageOf &pageOf,
+                      const std::set<std::size_t> &skip) {
+    TocEntries entries;
+    for (std::size_t i = 0; i < document.paragraphs.size(); ++i) {
+        const auto &p = document.paragraphs[i];
+        if (skip.contains(i) || p.cell ||
+            (p.style != "Title" && p.style != "Heading1" && p.style != "Heading2"))
+            continue;
+        std::u16string line;
+        for (const auto &run : p.runs)
+            if (!run.atom() && !run.deleted)
+                line += run.text();
+        for (auto &ch : line)
+            if (ch == u'\t')
+                ch = u' ';
+        if (line.find_first_not_of(u' ') == std::u16string::npos)
+            continue;
+        if (pageOf)
+            line += u'\t' + utf16(std::to_string(pageOf(i)));
+        if (!entries.text.empty())
+            entries.text += u'\n';
+        entries.text += line;
+        entries.indented.push_back(p.style == "Heading2");
+    }
+    if (entries.text.empty()) {
+        entries.text = u"No table of contents entries found.";
+        entries.indented.push_back(false);
+    }
+    return entries;
+}
+} // namespace
+std::uint64_t Editor::insertTableOfContents(const PageOf &pageOf) {
+    std::uint64_t id = 0;
+    auto command = [&](Editor &e) {
+        if (e.document.fields.size() >= 100000)
+            throw std::invalid_argument("Too many fields");
+        // Own paragraphs: break before (unless at an empty paragraph's start) and after.
+        e.replace(u"");
+        auto at = e.selection.focus;
+        if (!e.document.paragraphs[at.paragraph].text().empty()) {
+            if (at.offset)
+                e.insertParagraphBreak();
+            e.insertParagraphBreak();
+            e.selection.focus = e.selection.anchor = {e.selection.focus.paragraph - 1, 0};
+        }
+        e.applyStyle("Normal");
+        const auto first = e.selection.focus.paragraph;
+        const auto entries = tocEntries(e.document, pageOf, {});
+        e.replace(entries.text);
+        const auto last = e.selection.focus;
+        for (std::size_t k = 0; k < entries.indented.size(); ++k)
+            if (entries.indented[k]) {
+                e.selection = {{first + k, 0}, {first + k, 0}};
+                e.formatParagraph([](ParagraphFormat &f) { f.indentLeft = 18; });
+            }
+        e.document.nextId = std::max(e.document.nextId, e.idHighWater_);
+        id = e.document.allocateId();
+        e.document.fields.push_back({id, "TOC \\o \"1-3\" \\h \\z \\u",
+                                     e.document.anchorAt({first, 0}, Affinity::Before),
+                                     e.document.anchorAt(last, Affinity::After)});
+        e.selection = {last, last};
+    };
+    if (inTransaction_)
+        command(*this);
+    else
+        transact(command);
+    return id;
+}
+bool Editor::updateTablesOfContents(const PageOf &pageOf) {
+    bool found = false;
+    auto command = [&](Editor &e) {
+        for (std::size_t n = 0; n < e.document.fields.size(); ++n) {
+            if (!tableOfContentsField(e.document.fields[n].instruction))
+                continue;
+            found = true;
+            const auto start = e.document.resolve(e.document.fields[n].start);
+            const auto end = e.document.resolve(e.document.fields[n].end);
+            if (!start || !end)
+                continue;
+            std::set<std::size_t> inside;
+            for (auto i = start->paragraph; i <= end->paragraph; ++i)
+                inside.insert(i);
+            const auto entries = tocEntries(e.document, pageOf, inside);
+            // Fields nested in the old entries (page references) go with them.
+            const auto id = e.document.fields[n].id;
+            std::erase_if(e.document.fields, [&](const Field &f) {
+                if (f.id == id)
+                    return false;
+                const auto a = e.document.resolve(f.start), b = e.document.resolve(f.end);
+                return a && b && *start <= *a && *b <= *end;
+            });
+            auto &field = *std::find_if(e.document.fields.begin(), e.document.fields.end(),
+                                        [&](const Field &f) { return f.id == id; });
+            e.selection = {*start, *end};
+            e.replace(entries.text);
+            const auto last = e.selection.focus;
+            const auto first = last.paragraph + 1 - entries.indented.size();
+            for (std::size_t k = 0; k < entries.indented.size(); ++k) {
+                e.selection = {{first + k, 0}, {first + k, 0}};
+                const bool indent = entries.indented[k];
+                e.formatParagraph([&](ParagraphFormat &f) { f.indentLeft = indent ? 18 : 0; });
+            }
+            field.start = e.document.anchorAt({first, start->offset}, Affinity::Before);
+            field.end = e.document.anchorAt(last, Affinity::After);
+            e.selection = {last, last};
+            n = static_cast<std::size_t>(&field - e.document.fields.data());
+        }
+    };
+    if (inTransaction_)
+        command(*this);
+    else
+        transact(command);
+    return found;
 }
 } // namespace wf

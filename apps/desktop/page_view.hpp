@@ -69,6 +69,10 @@ class PageView : public QAbstractScrollArea {
     }
     bool insertFootnote(const std::u16string &text, bool endnote = false);
     bool selectedNoteIsEndnote() const;
+    // A table of contents at the caret, with page numbers from the current layout.
+    bool insertTableOfContents();
+    bool updateTablesOfContents();
+    bool hasTableOfContents() const;
     // Links: `target` on the selection (or `text` inserted at the caret); empty removes.
     bool setLink(const std::string &target, const std::u16string &text = {});
     std::string linkAtCaret() const {
