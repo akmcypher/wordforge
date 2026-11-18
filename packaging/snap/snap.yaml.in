@@ -1,6 +1,6 @@
 name: wordforge
 title: Wordforge - Office Word Processor
-version: '0.6.7-preview'
+version: '0.6.8-preview'
 summary: Office word processor, document editor and writer - DOCX, PDF, rich text
 description: |
   Wordforge is a fast, native office word processor, document editor and rich text
@@ -23,9 +23,10 @@ description: |
   for letters, reports, notes and assignments.
 
   Review documents with comments and tracked changes (accept or reject), add
-  footnotes, headers and footers with page numbers, and tables with merged cells.
-  This is a developer preview: some advanced Word features (sections, columns,
-  fields, endnotes) are not supported yet. Built with C++20, Qt 6 and Skia; open source under
+  footnotes and endnotes, links, a table of contents, headers and footers with page
+  numbers, and tables with merged cells.
+  This is a developer preview: some advanced Word features (sections, columns)
+  are not supported yet. Built with C++20, Qt 6 and Skia; open source under
   Apache-2.0. Also available for Windows.
 base: core24
 grade: stable

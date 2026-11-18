@@ -10,9 +10,9 @@
 
 **In 0.6.5:** DOCX package-part preservation (#22, WFG9), footnotes (#23), comments
 (#24). Tracked changes (#27, WFG10, in 0.6.6). In 0.6.7: table borders and shading (#29, WFG11), indents/justification, Strict OOXML,
-.docm/.dotx and any-encoding text (WFG11; docs/FORMAT_COMPATIBILITY.md), then a navigation pane and deleted text left out of word count/find/text export. After
-0.6.7 (branch feat/word-styles-theme-colours, WFG12): Word heading styles and theme
-colours, hyperlinks, endnotes. Next: fields and table of contents, then the P1 list
+.docm/.dotx and any-encoding text (WFG11; docs/FORMAT_COMPATIBILITY.md), then a navigation pane and deleted text left out of word count/find/text export. In 0.6.8
+(WFG12): Word heading styles and theme colours, hyperlinks, endnotes (#35), fields and
+table of contents (#36). Next: Word section settings, then the P1 list
 (incremental pagination, navigation pane,
 accessibility).
 

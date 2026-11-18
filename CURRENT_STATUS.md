@@ -1,5 +1,8 @@
 # Current status
 
+2026-11-18 — v0.6.8 prepared: links, endnotes, table of contents and Word fields, Word
+heading styles and theme colours (entries below; WFG12). Notes: docs/releases/v0.6.8.md.
+
 2026-11-18 — Fields and table of contents (Milestone 1, WFG12). Word fields are kept as
 anchored ranges (instruction plus ordinary result text) that nest and follow edits; DOCX
 fldChar/instrText/fldSimple both ways. Insert > Table of contents builds one from Title and
