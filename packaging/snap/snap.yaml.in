@@ -8,12 +8,13 @@ description: |
   engine inside.
 
   Write with real page layout, paragraph styles (Normal, Title, Headings),
-  bullets and numbering, tables, pictures, bookmarks, find and replace, and
-  spell check as you type. Copy and paste keeps formatting from web pages,
+  bullets and numbering, indents and justified text, tables with borders and
+  shading, pictures, bookmarks, find and replace, and spell check as you type. Copy and paste keeps formatting from web pages,
   Microsoft Word and LibreOffice. Print, export PDF, and open or save DOCX files
   (complex Word features are not preserved yet). Text shaping covers Hindi and
   other Indic scripts, Arabic, Hebrew, Chinese, Japanese, Korean and emoji.
-  Unsaved work is recovered after a crash. Light and dark themes, a Ctrl+K
+  Plain text files in any common encoding (UTF-16, Shift_JIS, GB18030, Big5,
+  EUC-KR, Windows code pages) open correctly. Unsaved work is recovered after a crash. Light and dark themes, a Ctrl+K
   command palette and a distraction-free focus mode keep the page in front.
 
   Opens and saves DOCX, the document format used by Microsoft Word (MS Word),
@@ -32,7 +33,7 @@ confinement: strict
 license: Apache-2.0
 links:
   website:
-    - https://github.com/akmcypher/wordforge
+    - https://akmcypher.github.io/wordforge/
   source-code:
     - https://github.com/akmcypher/wordforge
   issues:

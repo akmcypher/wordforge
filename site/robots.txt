@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://akmcypher.github.io/wordforge/sitemap.xml
