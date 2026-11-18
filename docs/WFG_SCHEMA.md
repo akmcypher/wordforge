@@ -1,7 +1,13 @@
 # Native WFG schema and migration
 
-**WFG12 (Word theme colours)** is written only when a run, paragraph style or character
-style keeps a Word theme colour. `r`, `image`, `note`, `style` and `charStyle` may carry
+**WFG12 (Word theme colours, links, endnotes)** is written only when a run, paragraph style
+or character style keeps a Word theme colour, a run is a link or a note is an endnote.
+`r` and `image` may carry `link`: `http://`, `https://`, `mailto:`, `ftp://` or `file:///`
+followed by at least one character, or `#` and a bookmark name; at most 2048 bytes, no
+spaces or control characters; other schemes are refused. Adjacent runs with the same
+`link` form one link. `note` may carry `endnote="true"`: the reference is an endnote
+(numbered separately, i, ii, iii, and listed after the text). `r`, `image`, `note`, `style`
+and `charStyle` may carry
 `theme` next to `color`: a theme colour name (`dark1`, `light1`, `dark2`, `light2`,
 `accent1`…`accent6`, `hyperlink`, `followedHyperlink`, `background1`, `text1`,
 `background2`, `text2`), optionally followed by ` s:XX` (shade) and/or ` t:XX` (tint), each

@@ -1,5 +1,17 @@
 # Current status
 
+2026-11-18 — Word styles, theme colours, hyperlinks and endnotes (Milestone 1, WFG12).
+DOCX import redefines Normal, Title and Heading 1/2 from the document's own styles, and
+text colours from Word's theme keep the reference (w:themeColor/Shade/Tint) while
+unchanged. Hyperlinks: Insert > Link... (Ctrl+Shift+K), Remove link, context menu
+Open/Edit/Remove, Ctrl+click opens web/mail links or goes to a bookmark, hover shows the
+target; unsafe schemes are refused; DOCX w:hyperlink both ways; copy/paste as HTML links.
+Endnotes: Insert > Endnote... (Ctrl+Alt+D), numbered i, ii, iii, laid out after the text
+and onto new pages; DOCX endnotes.xml both ways. Word fidelity (114 documents): character
+formatting 89.5% -> 99.5%, note text 95.9% -> 100%, structure 97.9% -> 99.2%, score 97 ->
+100 (rounded from 99.6). Still lost: fields/TOC, section settings. Windows ARM64: all 6
+suites pass; Ubuntu by CI. Not yet tested interactively in the desktop app.
+
 2026-11-17 — v0.6.7 prepared: table borders and shading, indents and justification, Word
 fidelity fixes, Strict OOXML/.docm/.dotx and any-encoding text (entries below). Notes:
 docs/releases/v0.6.7.md.
