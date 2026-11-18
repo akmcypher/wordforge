@@ -37,18 +37,18 @@ writes, not every document people have.
 
 ## Results
 
-2026-11-17, Microsoft Word 16.0 (build 16.0.20527), 114 documents:
+2026-11-17–18, Microsoft Word 16.0 (build 16.0.20527), 114 documents:
 
-| Measure | First run | Page breaks, fonts, colour | Indents, justification | Styles, theme colours, links, endnotes | Fields |
-|---|---|---|---|---|---|
-| Opened in Word after Wordforge saved them | 114/114 | 114/114 | 114/114 | 114/114 | 114/114 |
-| Body text kept | 100% | 100% | 100% | 100% | 100% |
-| Header, footer, note and comment text kept | 95.9% | 95.9% | 95.9% | 100% | 100% |
-| Paragraph formatting the same | 90.6% | 90.7% | 100% | 100% | 100% |
-| Character formatting the same | 0% | 89.5% | 89.5% | 99.5% | 99.5% |
-| Same page count | 86.8% | 97.4% | 100% | 100% | 100% |
-| Structure counts unchanged | 97.9% | 97.9% | 97.9% | 99.2% | 99.7% |
-| Score | 79/100 | 95/100 | 97/100 | 100/100 (rounded) | 100/100 (rounded) |
+| Measure | First run | Page breaks, fonts, colour | Indents, justification | Styles, theme colours, links, endnotes | Fields | Sections |
+|---|---|---|---|---|---|---|
+| Opened in Word after Wordforge saved them | 114/114 | 114/114 | 114/114 | 114/114 | 114/114 | 114/114 |
+| Body text kept | 100% | 100% | 100% | 100% | 100% | 100% |
+| Header, footer, note and comment text kept | 95.9% | 95.9% | 95.9% | 100% | 100% | 100% |
+| Paragraph formatting the same | 90.6% | 90.7% | 100% | 100% | 100% | 100% |
+| Character formatting the same | 0% | 89.5% | 89.5% | 99.5% | 99.5% | 99.5% |
+| Same page count | 86.8% | 97.4% | 100% | 100% | 100% | 100% |
+| Structure counts unchanged | 97.9% | 97.9% | 97.9% | 99.2% | 99.7% | 100% |
+| Score | 79/100 | 95/100 | 97/100 | 100/100 (rounded) | 100/100 (rounded) | 100/100 (rounded) |
 
 Fixed from the first run: Word page breaks and next-page section breaks became plain
 paragraph breaks; theme fonts (Aptos) became Arial; automatic text colour became #202631.
@@ -63,7 +63,11 @@ endnotes (dropped before).
 
 Then fields (tables of contents, PAGEREF, PAGE), which were dropped in 9 documents.
 
-Still lost: section settings (orientation, columns; 3 documents). Nested list levels keep their indent but show one
-marker style. "100/100" is rounded from 99.6: a few sampled words still differ.
+Then sections (orientation and equal columns), checked on 2026-11-18 in the existing
+`out/fidelity/run9/report.md`: all structure counts and Word page counts match.
+This checks Word's round-trip interpretation, not Wordforge's visual pagination.
+
+Still limited: per-section headers, unequal margins and columns, column balancing, and
+nested list marker styles. A few sampled words still differ, so "100/100" remains rounded.
 
 Other formats and languages: see [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md).
