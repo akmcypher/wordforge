@@ -7,6 +7,9 @@
 #include <QBuffer>
 #include <QClipboard>
 #include <QContextMenuEvent>
+#include <QDesktopServices>
+#include <QToolTip>
+#include <QUrl>
 #include <QMenu>
 #include <QPainterPath>
 #include <QFile>
@@ -40,6 +43,7 @@ PageView::PageView(QWidget *parent)
     setFocusPolicy(Qt::StrongFocus);
     setAttribute(Qt::WA_InputMethodEnabled);
     viewport()->setCursor(Qt::IBeamCursor);
+    viewport()->setMouseTracking(true); // link tooltips
     viewport()->setAttribute(Qt::WA_OpaquePaintEvent);
     setAccessibleName("Document editing surface");
     blink_.setInterval(std::max(100, QApplication::cursorFlashTime() / 2));
@@ -331,6 +335,35 @@ void PageView::selectRange(Selection range) {
 }
 bool PageView::insertFootnote(const std::u16string &text) {
     return change([&](Editor &candidate) { candidate.insertFootnote(text); });
+}
+bool PageView::setLink(const std::string &target, const std::u16string &text) {
+    return change([&](Editor &candidate) { candidate.setLink(target, text); });
+}
+std::string PageView::linkAt(Position position) const {
+    const auto &paragraph = editor_.document.paragraphs.at(position.paragraph);
+    std::size_t offset = 0;
+    for (const auto &run : paragraph.runs) {
+        const auto end = offset + run.text().size();
+        if (position.offset >= offset && position.offset < end)
+            return run.link;
+        offset = end;
+    }
+    return {};
+}
+bool PageView::openLink(const std::string &target) {
+    if (target.starts_with("#")) {
+        for (const auto &bookmark : editor_.document.bookmarks)
+            if (bookmark.name == target.substr(1))
+                return goToBookmark(bookmark.id);
+        emit errorOccurred("This document has no bookmark named " +
+                           QString::fromStdString(target.substr(1)));
+        return false;
+    }
+    if (!externalLink(target)) {
+        emit errorOccurred("Only web and e-mail links open from Wordforge");
+        return false;
+    }
+    return QDesktopServices::openUrl(QUrl(QString::fromStdString(target), QUrl::StrictMode));
 }
 bool PageView::setFootnoteText(std::uint64_t id, const std::u16string &text) {
     return change([&](Editor &candidate) { candidate.setFootnoteText(id, text); });
@@ -717,6 +750,19 @@ void PageView::contextMenuEvent(QContextMenuEvent *event) {
         });
         menu.addSeparator();
     }
+    if (const auto link = linkAt(position); !link.empty()) {
+        connect(menu.addAction("Open link"), &QAction::triggered, this,
+                [this, link] { openLink(link); });
+        connect(menu.addAction("Edit link…"), &QAction::triggered, this, [this, position] {
+            moveCaret(position, false);
+            emit editLinkRequested();
+        });
+        connect(menu.addAction("Remove link"), &QAction::triggered, this, [this, position] {
+            moveCaret(position, false);
+            setLink({});
+        });
+        menu.addSeparator();
+    }
     const bool selected = editor_.selection.anchor != editor_.selection.focus;
     auto *cutAction = menu.addAction("Cut", this, &PageView::cut);
     auto *copyAction = menu.addAction("Copy", this, &PageView::copy);
@@ -886,13 +932,25 @@ Position PageView::positionAt(QPointF point) const {
 void PageView::mousePressEvent(QMouseEvent *event) {
     if (event->button() == Qt::LeftButton) {
         setFocus();
-        moveCaret(positionAt(event->position()), event->modifiers().testFlag(Qt::ShiftModifier));
+        const auto position = positionAt(event->position());
+        // Ctrl+click follows a link, as in Word.
+        if (event->modifiers().testFlag(Qt::ControlModifier))
+            if (const auto link = linkAt(position); !link.empty()) {
+                openLink(link);
+                return;
+            }
+        moveCaret(position, event->modifiers().testFlag(Qt::ShiftModifier));
     } else
         QAbstractScrollArea::mousePressEvent(event);
 }
 void PageView::mouseMoveEvent(QMouseEvent *event) {
     if (event->buttons().testFlag(Qt::LeftButton))
         moveCaret(positionAt(event->position()), true);
+    else if (const auto link = linkAt(positionAt(event->position())); !link.empty())
+        QToolTip::showText(event->globalPosition().toPoint(),
+                           QString::fromStdString(link) + "\nCtrl+click to open", viewport());
+    else
+        QToolTip::hideText();
 }
 void PageView::inputMethodEvent(QInputMethodEvent *event) {
     if (event->replacementLength() || event->replacementStart()) {

@@ -151,6 +151,56 @@ void footnoteDialog(PageView *view, QWidget *parent, std::optional<std::uint64_t
     else
         view->insertFootnote(value);
 }
+// Insert or edit a link. With no selection it also asks for the text to show.
+void linkDialog(PageView *view, QWidget *parent) {
+    const auto existing = view->linkAtCaret();
+    const auto selection = view->selection();
+    const bool selected = selection.anchor != selection.focus;
+    QDialog dialog(parent);
+    dialog.setObjectName("linkDialog");
+    dialog.setWindowTitle(existing.empty() ? "Insert link" : "Edit link");
+    auto *form = new QFormLayout(&dialog);
+    auto *address = new QLineEdit(QString::fromStdString(existing));
+    address->setObjectName("linkAddress");
+    address->setAccessibleName("Link address");
+    address->setPlaceholderText("https://example.com, name@example.com or #bookmark");
+    address->setMaxLength(2048);
+    address->setMinimumWidth(420);
+    form->addRow("Address", address);
+    QLineEdit *shown = nullptr;
+    if (!selected && existing.empty()) {
+        shown = new QLineEdit;
+        shown->setObjectName("linkText");
+        shown->setAccessibleName("Text to show");
+        shown->setPlaceholderText("The address itself");
+        shown->setMaxLength(4096);
+        form->addRow("Text to show", shown);
+    }
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    form->addRow(buttons);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    auto target = address->text().trimmed().toStdString();
+    if (target.empty())
+        return;
+    // Bare addresses get the scheme Word would give them.
+    if (target[0] != '#' && target.find(':') == std::string::npos)
+        target = (target.find('@') != std::string::npos ? "mailto:" : "https://") + target;
+    try {
+        validateLink(target);
+    } catch (const std::exception &) {
+        QMessageBox::warning(parent, "Link",
+                             "Enter a web address, an e-mail address or # and a bookmark name.");
+        return;
+    }
+    // Editing a link without a selection changes the whole link.
+    if (!existing.empty() && !selected)
+        if (const auto range = view->linkRange())
+            view->selectRange(*range);
+    view->setLink(target, shown ? shown->text().toStdU16String() : std::u16string());
+}
 // The caret column's width, in centimetres.
 void columnWidthDialog(PageView *view, QWidget *parent) {
     const auto cell = view->selectedCell();
@@ -534,6 +584,13 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
         if (const auto id = view->selectedFootnote())
             footnoteDialog(view, window_, id);
     })->setIconText("Edit note");
+    create("link", "Link…", "Insert", [this, view] { linkDialog(view, window_); });
+    get("link")->setIconText("Link");
+    get("link")->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_K)); // Ctrl+K: palette
+    create("removeLink", "Remove link", "Insert", [view] { view->setLink({}); })
+        ->setIconText("Remove link");
+    QObject::connect(view, &PageView::editLinkRequested, window_,
+                     [this, view] { linkDialog(view, window_); });
     create("comment", "Comment…", "Insert",
            [this, view] { commentDialog(view, window_, std::nullopt); });
     get("comment")->setIconText("Comment");
@@ -675,6 +732,8 @@ void Commands::sync() {
                      p.indentLeft < 360);
     get("pictureSize")->setEnabled(view_->selectedImage().has_value());
     get("editFootnote")->setEnabled(view_->selectedFootnote().has_value());
+    get("removeLink")->setEnabled(!view_->linkAtCaret().empty() ||
+                                  view_->selection().anchor != view_->selection().focus);
     const bool inComment = view_->commentAtCaret().has_value();
     get("editComment")->setEnabled(inComment);
     get("deleteComment")->setEnabled(inComment);

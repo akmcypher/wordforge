@@ -729,3 +729,80 @@ TEST(Tables, BordersAndShadingFollowStructureEdits) {
     broken.tables[0].border.color = 0x80000000;
     EXPECT_THROW(validateDocument(broken), std::invalid_argument);
 }
+TEST(Links, SetTypeAroundAndRemove) {
+    Editor editor;
+    editor.replace(u"see the site");
+    editor.selection = {{0, 4}, {0, 12}};
+    editor.setLink("https://example.com/a");
+    EXPECT_EQ(editor.document.paragraphs[0].runs.size(), 2u);
+    const auto &linked = editor.document.paragraphs[0].runs[1];
+    EXPECT_EQ(linked.link, "https://example.com/a");
+    EXPECT_TRUE(linked.style.underline); // Word's look for a link
+    EXPECT_EQ(linked.style.color, 0xff0563c1u);
+    EXPECT_NO_THROW(validateDocument(editor.document));
+    // Typing inside a link extends it; typing at its end does not.
+    editor.selection = {{0, 6}, {0, 6}};
+    editor.typingStyle = editor.document.styleAt({0, 6}); // as moving the caret does
+    EXPECT_EQ(editor.linkAt(), "https://example.com/a");
+    editor.replace(u"X");
+    EXPECT_EQ(editor.document.paragraphs[0].runs[1].text(), u"thXe site");
+    editor.selection = {{0, 13}, {0, 13}};
+    editor.typingStyle = editor.document.styleAt({0, 13});
+    editor.replace(u"!");
+    EXPECT_EQ(editor.document.paragraphs[0].runs.back().text(), u"!");
+    EXPECT_TRUE(editor.document.paragraphs[0].runs.back().link.empty());
+    // Removing the link around the caret restores the paragraph's look.
+    editor.selection = {{0, 8}, {0, 8}};
+    const auto range = editor.linkRange();
+    ASSERT_TRUE(range);
+    EXPECT_EQ(range->anchor.offset, 4u);
+    EXPECT_EQ(range->focus.offset, 13u);
+    editor.setLink({});
+    for (const auto &run : editor.document.paragraphs[0].runs) {
+        EXPECT_TRUE(run.link.empty());
+        EXPECT_FALSE(run.style.underline);
+    }
+    EXPECT_EQ(editor.document.paragraphs[0].runs.size(), 1u);
+    // One undo step per command.
+    EXPECT_TRUE(editor.undo());
+    EXPECT_FALSE(editor.document.paragraphs[0].runs[1].link.empty());
+}
+TEST(Links, InsertAtCaretAndRejectUnsafeTargets) {
+    Editor editor;
+    editor.replace(u"Mail ");
+    editor.setLink("mailto:me@example.com", u"me");
+    const auto &runs = editor.document.paragraphs[0].runs;
+    ASSERT_EQ(runs.size(), 2u);
+    EXPECT_EQ(runs[1].text(), u"me");
+    EXPECT_EQ(runs[1].link, "mailto:me@example.com");
+    EXPECT_EQ(editor.selection.focus.offset, 7u);
+    editor.undo();
+    EXPECT_EQ(editor.document.paragraphs[0].text(), u"Mail ");
+    for (const auto *bad : {"javascript:alert(1)", "https://a b", "", "#", "http://", "data:x"})
+        EXPECT_THROW(validateLink(bad), std::invalid_argument) << bad;
+    EXPECT_NO_THROW(validateLink("#Intro"));
+    EXPECT_NO_THROW(validateLink("HTTPS://Example.com"));
+    EXPECT_TRUE(externalLink("https://x.org"));
+    EXPECT_FALSE(externalLink("file:///etc/passwd"));
+    EXPECT_FALSE(externalLink("#Intro"));
+    auto document = editor.document;
+    document.paragraphs[0].runs[0].link = "javascript:void(0)";
+    EXPECT_THROW(validateDocument(document), std::invalid_argument);
+}
+TEST(Links, CopyAndPasteKeepTheTarget) {
+    Editor editor;
+    editor.replace(u"go there now");
+    editor.selection = {{0, 3}, {0, 8}};
+    editor.setLink("https://example.org");
+    editor.selection = {{0, 0}, {0, 12}};
+    const auto fragment = editor.copySelection();
+    editor.selection = {{0, 12}, {0, 12}};
+    editor.insertFragment(fragment);
+    std::size_t linked = 0;
+    for (const auto &run : editor.document.paragraphs[0].runs)
+        if (run.link == "https://example.org") {
+            EXPECT_EQ(run.text(), u"there");
+            ++linked;
+        }
+    EXPECT_EQ(linked, 2u);
+}

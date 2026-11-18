@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <gtest/gtest.h>
 #include <pugixml.hpp>
 using namespace wf;
@@ -1294,4 +1295,49 @@ TEST(Docx, WordHeadingStylesAndThemeColoursSurviveARoundTrip) {
     const auto plain = opc::read(serializeDocx(changed)).at("word/document.xml");
     EXPECT_EQ(plain.find("accent2"), std::string::npos);
     EXPECT_NE(plain.find("00AA00"), std::string::npos);
+}
+TEST(Docx, HyperlinksBothWays) {
+    auto parts = opc::read(serializeDocx(Document{}));
+    parts["word/_rels/document.xml.rels"] =
+        "<Relationships xmlns='http://schemas.openxmlformats.org/package/2006/relationships'>"
+        "<Relationship Id='rId9' Type='http://schemas.openxmlformats.org/officeDocument/2006/"
+        "relationships/hyperlink' Target='https://example.com/page?a=1&amp;b=2' "
+        "TargetMode='External'/><Relationship Id='rId8' Type='http://schemas.openxmlformats.org/"
+        "officeDocument/2006/relationships/hyperlink' Target='javascript:alert(1)' "
+        "TargetMode='External'/><Relationship Id='styles' Type='http://schemas.openxmlformats.org/"
+        "officeDocument/2006/relationships/styles' Target='styles.xml'/></Relationships>";
+    parts["word/document.xml"] =
+        "<w:document xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main' "
+        "xmlns:r='http://schemas.openxmlformats.org/officeDocument/2006/relationships'><w:body>"
+        "<w:p><w:r><w:t xml:space='preserve'>Go to </w:t></w:r><w:hyperlink r:id='rId9'>"
+        "<w:r><w:t>the</w:t></w:r><w:r><w:rPr><w:b/></w:rPr><w:t xml:space='preserve'> page"
+        "</w:t></w:r></w:hyperlink><w:r><w:t xml:space='preserve'> or </w:t></w:r>"
+        "<w:hyperlink w:anchor='Intro'><w:r><w:t>intro</w:t></w:r></w:hyperlink>"
+        "<w:hyperlink r:id='rId8'><w:r><w:t>bad</w:t></w:r></w:hyperlink></w:p>"
+        "</w:body></w:document>";
+    const auto imported = parseDocx(opc::write(parts));
+    const auto &runs = imported.document.paragraphs[0].runs;
+    std::map<std::u16string, std::string> links;
+    for (const auto &run : runs)
+        links[run.text()] = run.link;
+    EXPECT_EQ(links[u"Go to "], "");
+    EXPECT_EQ(links[u"the"], "https://example.com/page?a=1&b=2");
+    EXPECT_EQ(links[u" page"], "https://example.com/page?a=1&b=2");
+    EXPECT_EQ(links[u"intro"], "#Intro");
+    EXPECT_EQ(links[u"bad"], ""); // unsafe targets keep their text only
+    EXPECT_TRUE(std::any_of(imported.warnings.begin(), imported.warnings.end(),
+                            [](const auto &w) { return w.find("link targets") != w.npos; }));
+    // Saved: one w:hyperlink holding both runs of the first link, an External relationship.
+    const auto saved = opc::read(serializeDocx(imported.document));
+    const auto &document = saved.at("word/document.xml");
+    const auto first = document.find("<w:hyperlink r:id=\"link1\"");
+    ASSERT_NE(first, std::string::npos);
+    EXPECT_EQ(document.find("<w:hyperlink r:id=", first + 1), std::string::npos);
+    EXPECT_NE(document.find("w:anchor=\"Intro\""), std::string::npos);
+    const auto &relationships = saved.at("word/_rels/document.xml.rels");
+    EXPECT_NE(relationships.find("Target=\"https://example.com/page?a=1&amp;b=2\" "
+                                 "TargetMode=\"External\""),
+              std::string::npos);
+    const auto again = parseDocx(serializeDocx(imported.document)).document;
+    EXPECT_EQ(again.paragraphs[0].runs, imported.document.paragraphs[0].runs);
 }

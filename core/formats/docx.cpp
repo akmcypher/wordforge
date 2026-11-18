@@ -942,6 +942,15 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
     // being read.
     std::map<std::pair<std::string, std::string>, std::uint64_t> revisionIds;
     std::uint64_t insertedMark = 0, deletedMark = 0;
+    // External hyperlink targets by relationship id.
+    std::map<std::string, std::string> linkTargets;
+    if (const auto found = parts.find(relationshipsPath(main)); found != parts.end()) {
+        auto relationships = xml(found->second);
+        for (auto node : relationships.document_element().children())
+            if (local(node.name()) == "Relationship" &&
+                relationshipKind(node.attribute("Type").value()) == "hyperlink")
+                linkTargets[node.attribute("Id").value()] = node.attribute("Target").value();
+    }
     auto revisionFor = [&](pugi::xml_node change) {
         auto author = attr(change, "author");
         auto date = attr(change, "date");
@@ -1391,8 +1400,23 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                     is(run, "moveToRangeStart") || is(run, "moveToRangeEnd"))
                     continue;
                 if (is(run, "hyperlink")) {
-                    warn(warnings, "Hyperlink text is preserved; link targets are not.");
+                    std::string target;
+                    if (const auto anchor = attr(run, "anchor"); !anchor.empty())
+                        target = "#" + anchor;
+                    else if (const auto found = linkTargets.find(attrIn(run, "id", relationshipsNs));
+                             found != linkTargets.end())
+                        target = found->second;
+                    try {
+                        validateLink(target);
+                    } catch (const std::exception &) {
+                        target.clear();
+                        warn(warnings, "Some link targets could not be kept; their text is.");
+                    }
+                    const auto first = paragraph.runs.size();
                     readRuns(run, depth + 1);
+                    for (auto i = first; i < paragraph.runs.size(); ++i)
+                        if (!paragraph.runs[i].note())
+                            paragraph.runs[i].link = target;
                 } else if (is(run, "r")) {
                     const auto firstRun = paragraph.runs.size();
                     auto style = base;
@@ -1487,6 +1511,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                     {run.text().substr(start, end == std::u16string::npos ? end : end - start),
                      run.style});
                 split.runs.back().characterStyle = run.characterStyle;
+                split.runs.back().link = run.link;
                 if (!split.runs.back().text().empty()) {
                     split.runs.back().inserted = run.inserted;
                     split.runs.back().deleted = run.deleted;
@@ -2073,6 +2098,7 @@ std::string serializeDocx(const Document &document) {
     unsigned long long drawingId = 0;
     unsigned long long changeId = 0; // w:ins / w:del identifiers
     std::set<std::uint64_t> imageIds;
+    std::map<std::string, std::string> linkIds; // external link target -> relationship id
     auto body = element(root, "body");
     pugi::xml_document numbers;
     auto numRoot = numbers.append_child("w:numbering");
@@ -2281,10 +2307,29 @@ std::string serializeDocx(const Document &document) {
                         static_cast<double>(marker.id));
             }
         };
+        pugi::xml_node hyperlink; // the open w:hyperlink, while runs continue its target
+        std::string hyperlinkTarget;
         for (const auto &[pieceOffset, run] : pieces) {
             emitMarkers(pieceOffset);
-            // Tracked changes wrap the run: w:ins, then w:del inside it.
+            // Links wrap runs: w:hyperlink, then tracked changes (w:ins, then w:del inside).
             auto container = p;
+            if (!run.link.empty()) {
+                if (!hyperlink || p.last_child() != hyperlink || hyperlinkTarget != run.link) {
+                    hyperlink = element(p, "hyperlink");
+                    hyperlinkTarget = run.link;
+                    if (run.link[0] == '#')
+                        set(hyperlink, "anchor", run.link.substr(1));
+                    else {
+                        auto &id = linkIds[run.link];
+                        if (id.empty())
+                            id = "link" + std::to_string(linkIds.size());
+                        hyperlink.append_attribute("r:id") = id.c_str();
+                    }
+                    set(hyperlink, "history", std::string("1"));
+                }
+                container = hyperlink;
+            } else
+                hyperlink = {};
             for (const auto &[mark, name] :
                  {std::pair{run.inserted, "ins"}, std::pair{run.deleted, "del"}}) {
                 if (!mark)
@@ -2527,6 +2572,19 @@ std::string serializeDocx(const Document &document) {
         {"word/document.xml", saved(content)},
         {"word/styles.xml", saved(styles)},
         {"word/numbering.xml", saved(numbers)}};
+    if (!linkIds.empty()) {
+        pugi::xml_document relationships;
+        relationships.load_string(parts.at("word/_rels/document.xml.rels").c_str());
+        for (const auto &[target, id] : linkIds) {
+            auto relation = relationships.document_element().append_child("Relationship");
+            relation.append_attribute("Id") = id.c_str();
+            relation.append_attribute("Type") =
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
+            relation.append_attribute("Target") = target.c_str();
+            relation.append_attribute("TargetMode") = "External";
+        }
+        parts["word/_rels/document.xml.rels"] = saved(relationships);
+    }
     if (!imageIds.empty()) {
         pugi::xml_document types, relationships;
         types.load_string(parts.at("[Content_Types].xml").c_str());

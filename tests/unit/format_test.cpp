@@ -592,6 +592,21 @@ TEST(NativeFormat, ThemeColoursRoundTripInV12) {
     EXPECT_EQ(xml(serializeNative(e.document)).find("theme="), std::string::npos);
 }
 
+TEST(NativeFormat, LinksRoundTripInV12) {
+    Editor e;
+    e.replace(u"a link here");
+    e.selection = {{0, 2}, {0, 6}};
+    e.setLink("https://example.com/?q=1&r=2");
+    const auto bytes = serializeNative(e.document);
+    const auto xml = bytes.starts_with("PK") ? opc::read(bytes).at("document.xml") : bytes;
+    EXPECT_NE(xml.find("version=\"12\""), std::string::npos);
+    const auto restored = parseNative(bytes);
+    EXPECT_EQ(restored.paragraphs[0].runs, e.document.paragraphs[0].runs);
+    auto unsafe = bytes;
+    unsafe.replace(unsafe.find("https://example.com/?q=1&amp;r=2"), 32, "javascript:alert(1)");
+    EXPECT_THROW(parseNative(unsafe), std::exception);
+}
+
 namespace {
 std::string encode(const std::u16string &text, const char *encoding) {
     UErrorCode error = U_ZERO_ERROR;

@@ -68,6 +68,18 @@ class PageView : public QAbstractScrollArea {
         return editor_.selectedFootnote();
     }
     bool insertFootnote(const std::u16string &text);
+    // Links: `target` on the selection (or `text` inserted at the caret); empty removes.
+    bool setLink(const std::string &target, const std::u16string &text = {});
+    std::string linkAtCaret() const {
+        return editor_.linkAt();
+    }
+    std::optional<Selection> linkRange() const {
+        return editor_.linkRange();
+    }
+    // The link under a document position, or empty.
+    std::string linkAt(Position) const;
+    // Opens a web or mail link in the system's handler, or goes to a "#bookmark".
+    bool openLink(const std::string &target);
     bool addComment(const std::u16string &text);
     // Tracked changes, recorded under the user's name.
     bool setTrackChanges(bool on);
@@ -118,6 +130,7 @@ class PageView : public QAbstractScrollArea {
     void selectionChanged();
     void zoomChanged(double);
     void errorOccurred(const QString &);
+    void editLinkRequested(); // the context menu's "Edit link…"
     void viewportRasterized();
 
   protected:

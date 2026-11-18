@@ -248,7 +248,7 @@ std::string serializeNative(const Document &document) {
         std::any_of(document.tables.begin(), document.tables.end(),
                     [](const Table &t) { return !t.widths.empty() || !t.merges.empty(); });
     // WFG6 and later store paragraph style names and direct-formatting masks.
-    // WFG12 only for Word theme colours, so other files stay readable by 0.6.7.
+    // WFG12 only for Word theme colours or links, so other files stay readable by 0.6.7.
     auto themedCharacter = [](const CharacterProperties &c) {
         return c.color && c.theme && activeTheme(*c.theme, *c.color);
     };
@@ -256,7 +256,8 @@ std::string serializeNative(const Document &document) {
         std::any_of(document.paragraphs.begin(), document.paragraphs.end(),
                     [](const Paragraph &p) {
                         return std::any_of(p.runs.begin(), p.runs.end(), [](const Run &r) {
-                            return activeTheme(r.style.theme, r.style.color).has_value();
+                            return activeTheme(r.style.theme, r.style.color).has_value() ||
+                                   !r.link.empty();
                         });
                     }) ||
         std::any_of(document.styles.paragraphStyles.begin(), document.styles.paragraphStyles.end(),
@@ -447,6 +448,8 @@ std::string serializeNative(const Document &document) {
                 run.append_attribute("direct") = r.direct;
             if (!r.characterStyle.empty())
                 run.append_attribute("cstyle") = r.characterStyle.c_str();
+            if (!r.link.empty())
+                run.append_attribute("link") = r.link.c_str();
             if (r.inserted)
                 run.append_attribute("ins") = static_cast<unsigned long long>(r.inserted);
             if (r.deleted)
@@ -777,12 +780,12 @@ Document parseNative(const std::string &input) {
                                "bold", "italic", "underline", "color", "strike", "highlight",
                                v6 ? "direct" : "resource", v7 ? "cstyle" : "resource",
                                v10 ? "ins" : "resource", v10 ? "del" : "resource",
-                               v12 ? "theme" : "resource"});
+                               v12 ? "theme" : "resource", v12 ? "link" : "resource"});
             else
                 attributes(r, {"family", "size", "bold", "italic", "underline", "color", "strike",
                                "highlight", v6 ? "direct" : "family", v7 ? "cstyle" : "family",
                                v10 ? "ins" : "family", v10 ? "del" : "family",
-                               v12 ? "theme" : "family"});
+                               v12 ? "theme" : "family", v12 ? "link" : "family"});
             for (auto child : r.children())
                 if (image || note ? !indentation(child)
                           : child.type() != pugi::node_pcdata && child.type() != pugi::node_cdata)
@@ -817,6 +820,10 @@ Document parseNative(const std::string &input) {
                                      run.style);
             if (v6 && r.attribute("direct"))
                 run.direct = mask(r, AllCharacterFields);
+            if (r.attribute("link")) {
+                run.link = r.attribute("link").value();
+                validateLink(run.link);
+            }
             if (r.attribute("ins"))
                 run.inserted = identifier(r, "ins");
             if (r.attribute("del"))

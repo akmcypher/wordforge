@@ -86,6 +86,7 @@ Run Run::slice(std::size_t start, std::size_t end) const {
     Run part(text().substr(start, end - start), style);
     part.direct = direct;
     part.characterStyle = characterStyle;
+    part.link = link;
     part.inserted = inserted;
     part.deleted = deleted;
     return part;

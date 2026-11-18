@@ -142,6 +142,8 @@ void validateDocument(const Document &document) {
                     throw std::invalid_argument("Tracked change without a revision");
             if (run.tracked() && run.text().empty())
                 throw std::invalid_argument("Empty tracked run");
+            if (!run.link.empty())
+                validateLink(run.link);
             if (const auto *note = run.note())
                 if (!document.footnote(note->id) || !noteReferences.insert(note->id).second)
                     throw std::invalid_argument("Footnote reference without a unique footnote");
@@ -236,12 +238,26 @@ BreakIterator graphemes(const std::u16string &text) {
         throw std::runtime_error(u_errorName(error));
     return result;
 }
+// The link of the characters on both sides of `offset` when it is the same, or empty.
+std::string linkInside(const Paragraph &p, std::size_t offset) {
+    std::string before, after;
+    std::size_t at = 0;
+    for (const auto &run : p.runs) {
+        const auto end = at + run.text().size();
+        if (offset > at && offset <= end)
+            before = run.link;
+        if (offset >= at && offset < end)
+            after = run.link;
+        at = end;
+    }
+    return before == after ? before : std::string();
+}
 void append(std::vector<Run> &runs, Run run) {
     if (run.text().empty())
         return;
     if (!run.atom() && !runs.empty() && !runs.back().atom() && runs.back().style == run.style &&
         runs.back().direct == run.direct && runs.back().characterStyle == run.characterStyle &&
-        runs.back().inserted == run.inserted && runs.back().deleted == run.deleted)
+        runs.back().link == run.link && runs.back().inserted == run.inserted && runs.back().deleted == run.deleted)
         runs.back().appendText(run.text());
     else
         runs.push_back(std::move(run));
@@ -532,6 +548,20 @@ void Editor::replaceRange(const std::u16string &input, Selection range, const Ru
         for (auto &run : suffix)
             run.direct |= differingFields(
                 run.style, inheritedCharacter(document.styles, inherited, run.characterStyle));
+    // Typed text joins a link only inside it, not at its start or end (as in Word).
+    const auto typedLink = forcedLink_ ? *forcedLink_
+                                       : linkInside(document.paragraphs[start.paragraph], start.offset);
+    // Right after a link, typed text drops the link's blue underline too.
+    auto typing = typingStyle;
+    if (const auto &before = document.runAt(start);
+        !forcedLink_ && typedLink.empty() && !before.link.empty() && typing == before.style) {
+        const auto plain = inheritedCharacter(document.styles,
+                                              resolveStyle(document.styles, prototype.style).character,
+                                              before.characterStyle);
+        typing.color = plain.color;
+        typing.theme = plain.theme;
+        typing.underline = plain.underline;
+    }
     // Typed text continues the character style of the run it is typed into.
     const auto typedCharacterStyle = forcedCharacterStyle_
                                          ? *forcedCharacterStyle_
@@ -566,8 +596,9 @@ void Editor::replaceRange(const std::u16string &input, Selection range, const Ru
                 inheritedCharacter(document.styles, inherited, inserted.characterStyle));
             append(p.runs, std::move(inserted));
         } else {
-            auto typed = styledRun(text.substr(offset, split - offset), typingStyle, typedInherited);
+            auto typed = styledRun(text.substr(offset, split - offset), typing, typedInherited);
             typed.characterStyle = typedCharacterStyle;
+            typed.link = typedLink;
             append(p.runs, std::move(typed));
         }
         const auto caretOffset = (replacement.empty() ? start.offset : 0) + split - offset;
@@ -1079,8 +1110,10 @@ void Editor::insertFragment(const std::vector<Paragraph> &fragment) {
                                                 ? run.characterStyle
                                                 : std::string();
                 e.forcedCharacterStyle_ = &characterStyle;
+                e.forcedLink_ = &run.link;
                 e.replace(run.text());
                 e.forcedCharacterStyle_ = nullptr;
+                e.forcedLink_ = nullptr;
             }
         }
     });
@@ -1349,5 +1382,142 @@ bool Editor::nextChange() {
     if (first)
         selection = *first;
     return first.has_value();
+}
+} // namespace wf
+
+namespace wf {
+constexpr std::uint32_t linkColor = 0xff0563c1; // Word's Hyperlink style colour
+void validateLink(const std::string &target) {
+    if (target.empty() || target.size() > 2048)
+        throw std::invalid_argument("Invalid link target");
+    for (unsigned char ch : target)
+        if (ch <= 32 || ch == 127)
+            throw std::invalid_argument("Invalid link target");
+    if (target[0] == '#') {
+        validateBookmarkName(target.substr(1));
+        return;
+    }
+    auto lower = target.substr(0, 8);
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    for (const char *scheme : {"http://", "https://", "mailto:", "ftp://", "file:///"})
+        if (lower.starts_with(scheme) && target.size() > std::string_view(scheme).size())
+            return;
+    throw std::invalid_argument("Unsupported link target");
+}
+bool externalLink(const std::string &target) {
+    auto lower = target.substr(0, 8);
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return lower.starts_with("http://") || lower.starts_with("https://") ||
+           lower.starts_with("mailto:");
+}
+std::string Editor::linkAt() const {
+    const auto [start, end] = ordered(selection);
+    const auto &p = document.paragraphs.at(start.paragraph);
+    std::size_t at = 0;
+    // The character after the caret, or before it at the paragraph end.
+    const auto *found = &p.runs.back();
+    for (const auto &run : p.runs) {
+        if (start.offset >= at && start.offset < at + run.text().size()) {
+            found = &run;
+            break;
+        }
+        at += run.text().size();
+    }
+    return found->link;
+}
+std::optional<Selection> Editor::linkRange() const {
+    const auto link = linkAt();
+    if (link.empty())
+        return std::nullopt;
+    const auto [start, end] = ordered(selection);
+    const auto &p = document.paragraphs.at(start.paragraph);
+    // Grow from the caret over neighbouring runs with the same target.
+    std::size_t at = 0, from = 0, to = 0;
+    bool open = false, covered = false;
+    for (const auto &run : p.runs) {
+        const auto next = at + run.text().size();
+        if (run.link == link) {
+            if (!open)
+                from = at;
+            open = true;
+            to = next;
+            if (start.offset >= at && start.offset <= next)
+                covered = true;
+        } else {
+            if (covered)
+                break;
+            open = false;
+        }
+        at = next;
+    }
+    if (!covered)
+        return std::nullopt;
+    return Selection{{start.paragraph, from}, {start.paragraph, to}};
+}
+void Editor::setLink(const std::string &target, const std::u16string &text) {
+    if (!inTransaction_) {
+        transact([&](Editor &e) { e.setLink(target, text); });
+        return;
+    }
+    validate(selection);
+    if (!target.empty())
+        validateLink(target);
+    auto [start, end] = ordered(selection);
+    if (start == end) {
+        if (target.empty()) {
+            if (const auto range = linkRange()) {
+                const auto caret = selection;
+                selection = *range;
+                setLink({});
+                selection = caret;
+            }
+            return;
+        }
+        const auto shown = text.empty() ? utf16(target) : text;
+        if (shown.find(u'\n') != std::u16string::npos || shown.size() > 4096)
+            throw std::invalid_argument("Invalid link text");
+        replace(shown);
+        start = selection.focus;
+        start.offset -= shown.size();
+        end = selection.focus;
+    }
+    for (auto i = start.paragraph; i <= end.paragraph; ++i) {
+        auto &p = document.paragraphs[i];
+        const auto a = i == start.paragraph ? start.offset : 0,
+                   b = i == end.paragraph ? end.offset : p.text().size();
+        const auto inherited = resolveStyle(document.styles, p.style).character;
+        auto runs = slice(p, 0, a);
+        for (auto &run : slice(p, a, b)) {
+            if (run.note()) { // a footnote mark stays outside links
+                append(runs, std::move(run));
+                continue;
+            }
+            // Links look like Word's: blue and underlined; removing one restores the text.
+            const auto plain = inheritedCharacter(document.styles, inherited, run.characterStyle);
+            const auto before = run.style;
+            if (!target.empty() && run.link.empty()) {
+                run.style.color = linkColor;
+                run.style.theme = {};
+                run.style.underline = true;
+            } else if (target.empty() && !run.link.empty() && run.style.color == linkColor &&
+                       run.style.underline) {
+                run.style.color = plain.color;
+                run.style.theme = plain.theme;
+                run.style.underline = plain.underline;
+            }
+            run.direct = (run.direct | differingFields(before, run.style)) &
+                         differingFields(run.style, plain);
+            run.link = target;
+            append(runs, std::move(run));
+        }
+        for (auto &run : slice(p, b, p.text().size()))
+            append(runs, std::move(run));
+        if (!runs.empty())
+            p.runs = std::move(runs);
+        p.revision = serial_ + 1;
+    }
+    document.revision = ++serial_;
 }
 } // namespace wf

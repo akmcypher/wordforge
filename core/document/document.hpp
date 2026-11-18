@@ -64,6 +64,9 @@ class Run {
     CharacterStyle style;
     CharacterMask direct = 0; // fields of `style` set directly, not inherited from the styles
     std::string characterStyle; // named character style; empty for none
+    // Hyperlink target: a web or mail address ("https://...", "mailto:...") or "#name" for a
+    // bookmark in this document; empty for none. Adjacent runs with one target are one link.
+    std::string link;
     // Tracked changes: the Revision that inserted or deleted this run (0 for none). Deleted
     // text stays in the document, shown struck through, until the change is accepted.
     std::uint64_t inserted = 0, deleted = 0;
@@ -85,6 +88,11 @@ class Run {
     std::variant<TextContent, InlineImage, NoteReference> content_;
 };
 void validateImageResource(const ImageResource &);
+// Throws unless `target` is a usable link: at most 2048 bytes, no spaces or control
+// characters, and http(s), mailto, ftp or file address, or "#" plus a bookmark name.
+void validateLink(const std::string &target);
+// Whether a link may be opened outside Wordforge (http, https, mailto).
+bool externalLink(const std::string &target);
 using ImageResources = std::map<std::uint64_t, std::shared_ptr<const ImageResource>>;
 struct TableCell {
     std::uint64_t tableId = 0;
@@ -328,6 +336,14 @@ class Editor {
     // Gives the selected text the character style `id` (empty: none), clearing its direct
     // character formatting. With no selection it sets the typing formatting.
     void applyCharacterStyle(const std::string &id);
+    // Makes the selected text a link to `target` (empty: removes links from it). With no
+    // selection it inserts `text` (the target itself when empty) as a link at the caret, or,
+    // with an empty target, removes the whole link around the caret.
+    void setLink(const std::string &target, const std::u16string &text = {});
+    // The link at the caret (the selection's start), or empty.
+    std::string linkAt() const;
+    // The text range of the link around the caret, or nullopt.
+    std::optional<Selection> linkRange() const;
     // Defines a character style from the selection's formatting (where the selection ends)
     // relative to its paragraph style, and gives it to the selected text without changing
     // how it looks. Returns the new style's identifier.
@@ -419,6 +435,7 @@ class Editor {
     bool inTransaction_ = false;
     // When set, text that replace() inserts takes this character style.
     const std::string *forcedCharacterStyle_ = nullptr;
+    const std::string *forcedLink_ = nullptr; // the link of pasted text, while pasting
     bool untracked_ = false; // set while tracked-change machinery edits directly
     void checkpoint();
     void validate(Selection) const;

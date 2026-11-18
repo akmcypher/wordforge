@@ -67,11 +67,16 @@ QString fragmentToHtml(const std::vector<Paragraph> &fragment) {
                     .arg(p.indentFirstLine)
                     .arg(std::lround(p.lineSpacing * 100));
         for (const auto &run : p.runs)
-            if (!run.atom() && !run.text().empty())
-                html += "<span style=\"" + runCss(run.style) + "\">" +
-                        QString::fromStdU16String(run.text()).toHtmlEscaped().replace(
-                            '\t', "&#9;") +
-                        "</span>";
+            if (!run.atom() && !run.text().empty()) {
+                auto span = "<span style=\"" + runCss(run.style) + "\">" +
+                            QString::fromStdU16String(run.text()).toHtmlEscaped().replace(
+                                '\t', "&#9;") +
+                            "</span>";
+                if (!run.link.empty())
+                    span = "<a href=\"" + QString::fromStdString(run.link).toHtmlEscaped() +
+                           "\">" + span + "</a>";
+                html += span;
+            }
         html += "</" + tag + ">";
     }
     if (!openList.isEmpty())
@@ -152,6 +157,15 @@ std::vector<Paragraph> fragmentFromHtml(const QString &html, const CharacterStyl
                 style.highlight = color.alpha() > 0 && !tooLight(color) ? color.rgba() : 0;
             }
             p.runs.push_back({std::move(text), style});
+            if (f.isAnchor() && !f.anchorHref().isEmpty()) {
+                try {
+                    const auto target = f.anchorHref().trimmed().toStdString();
+                    validateLink(target);
+                    p.runs.back().link = target;
+                } catch (const std::exception &) {
+                    // Unusable or unsafe targets (javascript:...) paste as plain text.
+                }
+            }
         }
         if (p.runs.empty())
             p.runs.push_back({u"", base});
