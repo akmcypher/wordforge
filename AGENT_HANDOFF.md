@@ -1,6 +1,37 @@
 # Wordforge handoff — start here
 
-## Current state (2026-11-18) — authoritative; everything below this section is history
+## Current state (2026-11-19) — authoritative checkpoint
+
+Published release remains **v0.6.8**. Remote main is dd2730a (sections merged).
+PR #39 (toolbar/caret font fixes) and draft PR #40 (paragraph tabs and TOC leaders)
+remain separate, unmerged work. The active tabs branch is `codex/wordforge-tabs`;
+use `docs/superpowers/plans/2026-11-19-tabs.md` and continue in this public repo.
+Do not mistake the historical notes below for current branch state.
+
+Tabs: left/centre/right stops and dots integrated through styles, WFG14, DOCX,
+layout and TOC insert/update. Custom automatic intervals stay in preserved settings
+but display at 36 pt, with an import warning. Decimal/bar tabs, other leaders,
+RTL-specific geometry and a tab ruler remain unsupported.
+
+Windows ARM64: fresh Release build, six suites passed, including Qt menu TOC
+insert/update, margin change, undo/redo, WFG/DOCX save/reopen. Six focused corpus
+documents reopened in Word, retaining text, structure counts and Word page counts;
+this is structural sampling, not visual parity. Hosted CI for 2453fac passed Ubuntu
+x64 and Windows ARM64. Local WSL ARM64 remains unverified; new commits need their
+own hosted check. Evidence: `docs/evidence/2026-11-19-tabs-acceptance.md`.
+
+Local portable ARM64 preview built; checksum and extracted-package self-test passed
+with development paths removed. Internal version remains 0.6.8 plus a developer
+build ID: this is not a new release. No signing identity has been configured.
+Native preview launched, but computer-use window state/screenshots disagreed, so
+interactive TOC acceptance remains unverified. Do not drive stale UI coordinates.
+
+Next: finish interactive/visual acceptance and remaining boundary cases in the tabs
+plan, then the roadmap's incremental layout work. Preserve running user editors;
+use a fresh build directory if needed. Owner approval is required before merging
+either PR or publishing a release; no merge, release or stable promotion was done.
+
+## Historical checkpoint (2026-11-18)
 
 **Released and live: v0.6.8** (tag `v0.6.8`, `main` a19fa8c).
 - Windows: <https://github.com/akmcypher/wordforge/releases/tag/v0.6.8>. The x64 and ARM64

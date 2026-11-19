@@ -7,6 +7,32 @@
 #include <map>
 #include <pugixml.hpp>
 using namespace wf;
+TEST(Tabs, WarnsAboutCustomDefaultIntervalAndPreservesSettings) {
+    Editor e;
+    e.replace(u"Heading\t12");
+    auto parts = opc::read(serializeDocx(e.document));
+    const std::string settings =
+        "<w:settings xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'>"
+        "<w:defaultTabStop w:val='1440'/></w:settings>";
+    parts["word/settings.xml"] = settings;
+    auto &types = parts["[Content_Types].xml"];
+    types.insert(types.rfind("</Types>"),
+                 "<Override PartName='/word/settings.xml' ContentType='application/"
+                 "vnd.openxmlformats-officedocument.wordprocessingml.settings+xml'/>");
+    auto &rels = parts["word/_rels/document.xml.rels"];
+    rels.insert(rels.rfind("</Relationships>"),
+                "<Relationship Id='customSettings' Type='http://schemas.openxmlformats.org/"
+                "officeDocument/2006/relationships/settings' Target='settings.xml'/>");
+    const auto imported = parseDocx(opc::write(parts));
+    EXPECT_TRUE(std::any_of(imported.warnings.begin(), imported.warnings.end(), [](const auto &w) {
+        return w.find("default tab interval") != std::string::npos;
+    }));
+    EXPECT_EQ(opc::read(serializeDocx(imported.document)).at("word/settings.xml"), settings);
+    auto &standard = parts["word/settings.xml"];
+    standard.replace(standard.find("1440"), 4, "720");
+    const auto usual = parseDocx(opc::write(parts));
+    EXPECT_TRUE(usual.warnings.empty());
+}
 TEST(Tabs, DocxRetainsAlignedStopsAndLeaders) {
     Editor e;
     e.replace(u"Heading\t12");

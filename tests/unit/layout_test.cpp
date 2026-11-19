@@ -5,6 +5,32 @@
 #include <gtest/gtest.h>
 #include <map>
 using namespace wf;
+TEST(Tabs, AlignmentsUseShapedFieldsAcrossFormattingAndIndents) {
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    for (auto alignment : {TabAlignment::Left, TabAlignment::Center, TabAlignment::Right}) {
+        Editor e;
+        e.replace(u"Title\tWide 123");
+        e.selection = {{0, 6}, {0, 10}};
+        e.format([](auto &style) { style.bold = true; style.size = 18; });
+        e.formatParagraph([&](auto &p) {
+            p.indentLeft = 18;
+            p.indentFirstLine = 12;
+            p.tabs = {{240, alignment, TabLeader::Dots}};
+        });
+        for (bool listed : {false, true}) {
+            e.formatParagraph([&](auto &p) { p.list = listed ? ListKind::Bullet : ListKind::None; });
+            const auto layout = engine.compose(e.document);
+            ASSERT_EQ(layout.lines.size(), 1u);
+            const double begin = layout.caret({0, 6}).x;
+            const double end = layout.caret({0, 14}).x;
+            const double anchor = alignment == TabAlignment::Right ? end
+                                  : alignment == TabAlignment::Center ? (begin + end) / 2
+                                                                     : begin;
+            EXPECT_NEAR(anchor, e.document.page.margin + 240, 0.1);
+        }
+    }
+}
 TEST(Tabs, AlignedMultiwordFieldMovesTogetherAfterUnbrokenPrefix) {
     Shaper shaper(systemFontFiles());
     Paragraph prefix, field;

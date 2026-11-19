@@ -1,6 +1,16 @@
 # Current status
 
-2026-11-19 � Paragraph tabs / TOC leaders, first slice on codex/wordforge-tabs.
+2026-11-19 — Tabs acceptance follow-up. Added mixed-formatting/alignment/indent/list
+coverage, a custom-default-interval warning regression, and a Qt menu TOC workflow
+covering margin changes, undo/redo and WFG/DOCX save/reopen. Windows Release build
+and six suites passed. Six focused documents reopened in Microsoft Word, retaining
+text, structure counts and page counts. Portable ARM64 preview built and passed
+checksum/dependency-isolated self-test. Hosted CI for 2453fac passed Windows ARM64
+and Ubuntu x64; this follow-up needs its own run. Interactive/visual parity and local
+Ubuntu ARM64 remain unverified. No merge, release or signing. See
+docs/evidence/2026-11-19-tabs-acceptance.md.
+
+2026-11-19 — Paragraph tabs / TOC leaders, first slice on codex/wordforge-tabs.
 Left/centre/right tab stops and dot leaders now follow the existing model/style, WFG14,
 DOCX and shaping paths. Generated/updated TOCs use a right stop at the section column
 edge. Windows six-suite CTest run passed; new layout/caret, native/style and DOCX tests

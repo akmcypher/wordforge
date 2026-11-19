@@ -202,9 +202,9 @@ ordinary keystrokes do not acquire this new full batch-validation pass. The mode
 benchmark measures this cost separately from layout and presentation.
 
 
-## WFG14 — paragraph tab stops (2026-11-19)
+## WFG14 â€” paragraph tab stops (2026-11-19)
 
-Written only when tab stops or a paragraph style tab override are used. WFG1–13
+Written only when tab stops or a paragraph style tab override are used. WFG1â€“13
 remain readable. Paragraphs and paragraph styles may carry a `tabs` attribute:
 space-separated `position/alignment/leader` triples in points. Alignments are 0 left,
 1 centre, 2 right; leaders 0 none, 1 dots. Stops must be strictly increasing, finite,

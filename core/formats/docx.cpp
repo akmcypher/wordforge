@@ -2347,7 +2347,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             warn(warnings, "Some fields were kept as plain text.");
     }
     document.preserved = preservePackage(parts, main, warnings);
-    // Word's "Track Changes" switch lives in the (kept) settings part.
+    // Read settings that affect editing; retain the original package bytes.
     if (document.preserved)
         for (const auto &part : document.preserved->parts)
             if (part.contentType ==
@@ -2359,6 +2359,9 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                             document.trackChanges = attr(node, "val") != "false" &&
                                                     attr(node, "val") != "0" &&
                                                     attr(node, "val") != "off";
+                        else if (is(node, "defaultTabStop") && twips(attr(node, "val")) != 720)
+                            warn(warnings, "The custom default tab interval is preserved, but "
+                                           "Wordforge displays automatic tabs every 36 points.");
             }
     validateDocument(document);
     return result;
