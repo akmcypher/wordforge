@@ -1,5 +1,14 @@
 # Current status
 
+2026-11-19 � Paragraph tabs / TOC leaders, first slice on codex/wordforge-tabs.
+Left/centre/right tab stops and dot leaders now follow the existing model/style, WFG14,
+DOCX and shaping paths. Generated/updated TOCs use a right stop at the section column
+edge. Windows six-suite CTest run passed; new layout/caret, native/style and DOCX tests
+pass. Ubuntu build invocation has not produced output yet and is unverified. Decimal/bar
+tabs, other leaders, custom default intervals and RTL-specific tab geometry remain
+unsupported. No tab-ruler UI, visual Word certification or pagination work in this slice.
+See docs/superpowers/plans/2026-11-19-tabs.md for the remaining acceptance checks.
+
 2026-11-18 — Sections and columns (Milestone 1/3, WFG13). A paragraph can end a section;
 each section has its own page size, orientation, margin and 1–6 equal columns, while
 headers and footers stay document-wide. Layout gives every page its section's geometry,

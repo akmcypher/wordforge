@@ -3,6 +3,23 @@
 #include <gtest/gtest.h>
 
 using namespace wf;
+TEST(Tabs, NativeAndStyleOverridesRoundTrip) {
+    Editor e;
+    e.replace(u"Heading\t12");
+    e.document.styles.find("Normal")->paragraph.tabs =
+        std::vector<TabStop>{{240, TabAlignment::Right, TabLeader::Dots}};
+    e.applyStyle("Normal");
+    const auto bytes = serializeNative(e.document);
+    EXPECT_NE(bytes.find("version=\"14\""), std::string::npos);
+    const auto restored = parseNative(bytes);
+    EXPECT_EQ(restored.paragraphs[0].tabs, e.document.paragraphs[0].tabs);
+    EXPECT_EQ(restored.styles, e.document.styles);
+    e.formatParagraph([](auto &p) { p.tabs.clear(); });
+    EXPECT_TRUE(parseNative(serializeNative(e.document)).paragraphs[0].tabs.empty());
+    EXPECT_TRUE(e.undo());
+    EXPECT_EQ(e.document.paragraphs[0].tabs.size(), 1);
+    EXPECT_THROW(e.formatParagraph([](auto &p) { p.tabs = {{-0.5}}; }), std::invalid_argument);
+}
 
 namespace {
 Editor headingsAndBody() {
@@ -221,7 +238,8 @@ TEST(Styles, NewStyleFromSelectionKeepsAppearanceAndRestylesFollowers) {
     EXPECT_NO_THROW(validateDocument(e.document));
     const auto &after = e.document.paragraphs[2];
     EXPECT_EQ(after.style, "Quote");
-    EXPECT_EQ(static_cast<const ParagraphFormat &>(after), static_cast<const ParagraphFormat &>(before));
+    EXPECT_EQ(static_cast<const ParagraphFormat &>(after),
+              static_cast<const ParagraphFormat &>(before));
     EXPECT_EQ(after.runs.front().style, before.runs.front().style);
     EXPECT_EQ(after.direct, 0);
     EXPECT_EQ(after.runs.front().direct, 0);

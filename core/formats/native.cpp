@@ -70,6 +70,32 @@ bool indentation(pugi::xml_node node) {
     return node.type() == pugi::node_pcdata &&
            std::string_view(node.value()).find_first_not_of(" \t\r\n") == std::string_view::npos;
 }
+std::string writeTabs(const std::vector<TabStop> &tabs) {
+    std::ostringstream out;
+    out.precision(17);
+    for (const auto &tab : tabs)
+        out << tab.position << '/' << static_cast<int>(tab.alignment) << '/'
+            << static_cast<int>(tab.leader) << ' ';
+    return out.str();
+}
+std::vector<TabStop> readTabs(pugi::xml_node node) {
+    std::istringstream in(node.attribute("tabs").value());
+    std::vector<TabStop> tabs;
+    while (in >> std::ws && !in.eof()) {
+        double position;
+        int alignment, leader;
+        char a, b;
+        if (!(in >> position >> a >> alignment >> b >> leader) || a != '/' || b != '/' ||
+            alignment < 0 || alignment > 2 || leader < 0 || leader > 1 || tabs.size() >= 64)
+            throw std::runtime_error("Invalid native tab stops");
+        tabs.push_back(
+            {position, static_cast<TabAlignment>(alignment), static_cast<TabLeader>(leader)});
+    }
+    ParagraphFormat format;
+    format.tabs = tabs;
+    validateParagraphFormat(format);
+    return tabs;
+}
 void writeCharacterProperties(pugi::xml_node node, const CharacterProperties &c);
 void writeStyle(pugi::xml_node root, const ParagraphStyle &style) {
     auto node = root.append_child("style");
@@ -80,6 +106,8 @@ void writeStyle(pugi::xml_node root, const ParagraphStyle &style) {
     if (!style.next.empty())
         node.append_attribute("next") = style.next.c_str();
     const auto &p = style.paragraph;
+    if (p.tabs)
+        node.append_attribute("tabs") = writeTabs(*p.tabs).c_str();
     if (p.alignment)
         node.append_attribute("align") = static_cast<int>(*p.alignment);
     if (p.list)
@@ -156,12 +184,30 @@ CharacterProperties readCharacterProperties(pugi::xml_node node) {
 }
 // `indented`: WFG11, which adds first-line and right indents and justified alignment.
 // `themed`: WFG12, which adds Word theme colours.
-ParagraphStyle readStyle(pugi::xml_node node, bool indented, bool themed) {
+ParagraphStyle readStyle(pugi::xml_node node, bool indented, bool themed, bool tabbed) {
     if (indented)
-        attributes(node, {"id", "name", "basedOn", "next", "align", "list", "indent", "firstLine",
-                          "rightIndent", "before", "after", "line", "family", "size", "bold",
-                          "italic", "underline", "strike", "color", "highlight",
-                          themed ? "theme" : "id"});
+        attributes(node, {"id",
+                          "name",
+                          "basedOn",
+                          "next",
+                          "align",
+                          "list",
+                          "indent",
+                          "firstLine",
+                          "rightIndent",
+                          "before",
+                          "after",
+                          "line",
+                          "family",
+                          "size",
+                          "bold",
+                          "italic",
+                          "underline",
+                          "strike",
+                          "color",
+                          "highlight",
+                          themed ? "theme" : "id",
+                          tabbed ? "tabs" : "id"});
     else
         attributes(node, {"id", "name", "basedOn", "next", "align", "list", "indent", "before",
                           "after", "line", "family", "size", "bold", "italic", "underline",
@@ -182,6 +228,8 @@ ParagraphStyle readStyle(pugi::xml_node node, bool indented, bool themed) {
     style.paragraph.spaceBefore = real(node, "before", 0, 200);
     style.paragraph.spaceAfter = real(node, "after", 0, 200);
     style.paragraph.lineSpacing = real(node, "line", 1, 3);
+    if (node.attribute("tabs"))
+        style.paragraph.tabs = readTabs(node);
     style.character = readCharacterProperties(node);
     return style;
 }
@@ -229,7 +277,8 @@ std::string serializeNative(const Document &document) {
                p.alignment == decltype(p.alignment){Alignment::Justify};
     };
     const bool decorated =
-        std::any_of(document.tables.begin(), document.tables.end(),
+        std::any_of(
+            document.tables.begin(), document.tables.end(),
                     [](const Table &t) { return t.border != TableBorder{} || !t.shading.empty(); }) ||
         std::any_of(document.paragraphs.begin(), document.paragraphs.end(),
                     [&](const Paragraph &p) { return indented(p); }) ||
@@ -271,9 +320,15 @@ std::string serializeNative(const Document &document) {
         document.page.columns != 1 || document.page.columnGap != 36 ||
         std::any_of(document.paragraphs.begin(), document.paragraphs.end(),
                     [](const Paragraph &p) { return p.sectionBreak.has_value(); });
-    const bool semantic =
-        styled || banded || preserving || noted || reviewed || decorated || themed || sectioned;
-    root.append_attribute("version") = sectioned                    ? "13"
+    const bool tabbed =
+        std::any_of(document.paragraphs.begin(), document.paragraphs.end(),
+                    [](const auto &p) { return !p.tabs.empty(); }) ||
+        std::any_of(document.styles.paragraphStyles.begin(), document.styles.paragraphStyles.end(),
+                    [](const auto &s) { return s.paragraph.tabs.has_value(); });
+    const bool semantic = styled || banded || preserving || noted || reviewed || decorated ||
+                          themed || sectioned || tabbed;
+    root.append_attribute("version") = tabbed                       ? "14"
+                                       : sectioned                  ? "13"
                                        : themed                     ? "12"
                                        : decorated                  ? "11"
                                        : reviewed                   ? "10"
@@ -315,8 +370,8 @@ std::string serializeNative(const Document &document) {
         if (!revision.date.empty())
             node.append_attribute("date") = revision.date.c_str();
     }
-    for (auto [name, band] : {std::pair{"header", &document.page.header},
-                              std::pair{"footer", &document.page.footer}}) {
+    for (auto [name, band] :
+         {std::pair{"header", &document.page.header}, std::pair{"footer", &document.page.footer}}) {
         if (band->empty())
             continue;
         auto node = root.append_child(name);
@@ -345,7 +400,8 @@ std::string serializeNative(const Document &document) {
         node.append_attribute("text") = utf8(comment.text).c_str();
         node.append_attribute("startParagraph") =
             static_cast<unsigned long long>(comment.start.paragraphId);
-        node.append_attribute("startOffset") = static_cast<unsigned long long>(comment.start.offset);
+        node.append_attribute("startOffset") =
+            static_cast<unsigned long long>(comment.start.offset);
         node.append_attribute("endParagraph") =
             static_cast<unsigned long long>(comment.end.paragraphId);
         node.append_attribute("endOffset") = static_cast<unsigned long long>(comment.end.offset);
@@ -428,12 +484,15 @@ std::string serializeNative(const Document &document) {
                 paragraph.append_attribute("style") = p.style.c_str();
             if (p.direct)
                 paragraph.append_attribute("direct") = p.direct;
-        } else if (const auto preset = presetFor(p.style); preset && *preset != ParagraphPreset::Normal)
+        } else if (const auto preset = presetFor(p.style);
+                   preset && *preset != ParagraphPreset::Normal)
             paragraph.append_attribute("preset") = static_cast<int>(*preset);
         if (p.indentLeft)
             paragraph.append_attribute("indent") = p.indentLeft;
         if (p.indentFirstLine)
             paragraph.append_attribute("firstLine") = p.indentFirstLine;
+        if (!p.tabs.empty())
+            paragraph.append_attribute("tabs") = writeTabs(p.tabs).c_str();
         if (p.indentRight)
             paragraph.append_attribute("rightIndent") = p.indentRight;
         if (p.spaceBefore)
@@ -540,12 +599,13 @@ Document parseNative(const std::string &input) {
     const std::string_view version = root.attribute("version").value();
     if (std::string_view(root.name()) != "wordforge" ||
         (version != "1" && version != "2" && version != "3" && version != "4" && version != "5" &&
-         version != "6" && version != "7" && version != "8" && version != "9" &&
-         version != "10" && version != "11" && version != "12" && version != "13"))
+         version != "6" && version != "7" && version != "8" && version != "9" && version != "10" &&
+         version != "11" && version != "12" && version != "13" && version != "14"))
         throw std::runtime_error("Unsupported native document version");
     // WFG7 is WFG6 plus character styles; WFG8 adds headers and footers.
     // WFG9 adds DOCX package parts kept from an imported file.
-    const bool v13 = version == "13";
+    const bool v14 = version == "14";
+    const bool v13 = version == "13" || v14;
     const bool v12 = version == "12" || v13;
     const bool v11 = version == "11" || v12;
     const bool v10 = version == "10" || v11;
@@ -604,14 +664,13 @@ Document parseNative(const std::string &input) {
                            "endParagraph", "endOffset"});
             if (p.first_child())
                 throw std::runtime_error("Unexpected comment content");
-            Comment comment{identifier(p, "id"),
+            Comment comment{
+                identifier(p, "id"),
                             p.attribute("author").value(),
                             p.attribute("date").value(),
                             utf16(p.attribute("text").value()),
-                            {identifier(p, "startParagraph"), index(p, "startOffset", true),
-                             Affinity::Before},
-                            {identifier(p, "endParagraph"), index(p, "endOffset", true),
-                             Affinity::After}};
+                {identifier(p, "startParagraph"), index(p, "startOffset", true), Affinity::Before},
+                {identifier(p, "endParagraph"), index(p, "endOffset", true), Affinity::After}};
             try {
                 validateCommentText(comment.text);
                 validateCommentAuthor(comment.author);
@@ -626,12 +685,11 @@ Document parseNative(const std::string &input) {
                            "endOffset"});
             if (p.first_child())
                 throw std::runtime_error("Unexpected field content");
-            Field field{identifier(p, "id"),
+            Field field{
+                identifier(p, "id"),
                         p.attribute("instruction").value(),
-                        {identifier(p, "startParagraph"), index(p, "startOffset", true),
-                         Affinity::Before},
-                        {identifier(p, "endParagraph"), index(p, "endOffset", true),
-                         Affinity::After}};
+                {identifier(p, "startParagraph"), index(p, "startOffset", true), Affinity::Before},
+                {identifier(p, "endParagraph"), index(p, "endOffset", true), Affinity::After}};
             try {
                 validateFieldInstruction(field.instruction);
             } catch (const std::invalid_argument &error) {
@@ -663,8 +721,8 @@ Document parseNative(const std::string &input) {
                 throw std::runtime_error("Invalid or duplicate preserved document part");
             if (!preserved)
                 preserved = std::make_shared<PreservedPackage>();
-            preserved->parts.push_back(
-                {p.attribute("path").value(), p.attribute("contentType").value(), parts.at(stored)});
+            preserved->parts.push_back({p.attribute("path").value(),
+                                        p.attribute("contentType").value(), parts.at(stored)});
             continue;
         }
         if (v9 && std::string_view(p.name()) == "preservedRelationship") {
@@ -673,17 +731,18 @@ Document parseNative(const std::string &input) {
                 throw std::runtime_error("Invalid preserved document relationship");
             if (!preserved)
                 preserved = std::make_shared<PreservedPackage>();
-            preserved->relationships.push_back(
-                {boolean(p, "package"), p.attribute("type").value(), p.attribute("target").value()});
+            preserved->relationships.push_back({boolean(p, "package"), p.attribute("type").value(),
+                                                p.attribute("target").value()});
             continue;
         }
-        if (v8 && (std::string_view(p.name()) == "header" || std::string_view(p.name()) == "footer")) {
+        if (v8 &&
+            (std::string_view(p.name()) == "header" || std::string_view(p.name()) == "footer")) {
             attributes(p, {"left", "center", "right"});
             for (auto nested : p.children())
                 if (!indentation(nested))
                     throw std::runtime_error("Unexpected header or footer content");
-            auto &band =
-                std::string_view(p.name()) == "header" ? document.page.header : document.page.footer;
+            auto &band = std::string_view(p.name()) == "header" ? document.page.header
+                                                                : document.page.footer;
             if (!band.empty())
                 throw std::runtime_error("Duplicate native header or footer");
             band = {utf16(p.attribute("left").value()), utf16(p.attribute("center").value()),
@@ -693,7 +752,7 @@ Document parseNative(const std::string &input) {
             continue;
         }
         if (v6 && std::string_view(p.name()) == "style") {
-            document.styles.paragraphStyles.push_back(readStyle(p, v11, v12));
+            document.styles.paragraphStyles.push_back(readStyle(p, v11, v12, v14));
             continue;
         }
         if (v7 && std::string_view(p.name()) == "charStyle") {
@@ -732,8 +791,9 @@ Document parseNative(const std::string &input) {
                     attributes(nested, {"row", "column", "rows", "columns"});
                     if (nested.first_child() || table.merges.size() >= 10000)
                         throw std::runtime_error("Invalid native table merge");
-                    table.merges.push_back({index(nested, "row", true), index(nested, "column", true),
-                                            index(nested, "rows"), index(nested, "columns")});
+                    table.merges.push_back({index(nested, "row", true),
+                                            index(nested, "column", true), index(nested, "rows"),
+                                            index(nested, "columns")});
                 } else
                     throw std::runtime_error("Unexpected native table metadata content");
             }
@@ -787,11 +847,28 @@ Document parseNative(const std::string &input) {
             attributes(p,
                        {"align", "after", "list", "preset", "indent", "before", "line", "break"});
         else if (v11)
-            attributes(p, {"align", "after", "list", "style", "direct", "indent", "firstLine",
-                           "rightIndent", "before", "line", "break", "id", "table", "row",
-                           "column", v13 ? "section" : "id", v13 ? "sectionWidth" : "id",
-                           v13 ? "sectionHeight" : "id", v13 ? "sectionMargin" : "id",
-                           v13 ? "sectionColumns" : "id", v13 ? "sectionGap" : "id"});
+            attributes(p, {"align",
+                           "after",
+                           "list",
+                           "style",
+                           "direct",
+                           "indent",
+                           "firstLine",
+                           "rightIndent",
+                           "before",
+                           "line",
+                           "break",
+                           "id",
+                           "table",
+                           "row",
+                           "column",
+                           v13 ? "section" : "id",
+                           v13 ? "sectionWidth" : "id",
+                           v13 ? "sectionHeight" : "id",
+                           v13 ? "sectionMargin" : "id",
+                           v13 ? "sectionColumns" : "id",
+                           v13 ? "sectionGap" : "id",
+                           v14 ? "tabs" : "id"});
         else if (v6)
             attributes(p, {"align", "after", "list", "style", "direct", "indent", "before", "line",
                            "break", "id", "table", "row", "column"});
@@ -822,6 +899,8 @@ Document parseNative(const std::string &input) {
                 paragraph.direct = mask(p, AllParagraphFields);
         } else
             paragraph.style = presetStyleId(static_cast<ParagraphPreset>(static_cast<int>(preset)));
+        if (p.attribute("tabs"))
+            paragraph.tabs = readTabs(p);
         paragraph.indentLeft = number(p, "indent", 0, 0, 360);
         paragraph.indentFirstLine = number(p, "firstLine", 0, -360, 360);
         paragraph.indentRight = number(p, "rightIndent", 0, 0, 360);
@@ -848,16 +927,15 @@ Document parseNative(const std::string &input) {
         for (auto r : p.children()) {
             if (indentation(r))
                 continue;
-            const bool image = (version == "4" || version == "5" || v6) &&
-                               std::string_view(r.name()) == "image";
+            const bool image =
+                (version == "4" || version == "5" || v6) && std::string_view(r.name()) == "image";
             const bool note = v9 && std::string_view(r.name()) == "note";
             if (std::string_view(r.name()) != "r" && !image && !note)
                 throw std::runtime_error("Unknown inline content; refusing lossy import");
             if (note)
                 attributes(r, {"id", "family", "size", "bold", "italic", "underline", "color",
                                "strike", "highlight", "direct", "cstyle", v10 ? "ins" : "id",
-                               v10 ? "del" : "id", v12 ? "theme" : "id",
-                               v12 ? "endnote" : "id"});
+                               v10 ? "del" : "id", v12 ? "theme" : "id", v12 ? "endnote" : "id"});
             else if (image)
                 attributes(r, {"resource", "width", "height", "description", "family", "size",
                                "bold", "italic", "underline", "color", "strike", "highlight",
@@ -870,7 +948,8 @@ Document parseNative(const std::string &input) {
                                v10 ? "ins" : "family", v10 ? "del" : "family",
                                v12 ? "theme" : "family", v12 ? "link" : "family"});
             for (auto child : r.children())
-                if (image || note ? !indentation(child)
+                if (image || note
+                        ? !indentation(child)
                           : child.type() != pugi::node_pcdata && child.type() != pugi::node_cdata)
                     throw std::runtime_error("Unexpected nested inline content");
             Run run;
@@ -893,7 +972,8 @@ Document parseNative(const std::string &input) {
             run.style.color =
                 static_cast<std::uint32_t>(number(r, "color", 0xff202631, 0, 4294967295.0));
             if (r.attribute("theme"))
-                run.style.theme = parseThemeColorText(r.attribute("theme").value(), run.style.color);
+                run.style.theme =
+                    parseThemeColorText(r.attribute("theme").value(), run.style.color);
             if (note)
                 run = Run::fromNote({identifier(r, "id"), boolean(r, "endnote")}, run.style);
             if (image)

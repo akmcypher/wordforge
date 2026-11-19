@@ -2,9 +2,39 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
-#include <map>
 #include <gtest/gtest.h>
+#include <map>
 using namespace wf;
+TEST(Tabs, AlignedMultiwordFieldMovesTogetherAfterUnbrokenPrefix) {
+    Shaper shaper(systemFontFiles());
+    Paragraph prefix, field;
+    prefix.runs = {{u"Unbrokenprefix12345678901234567890", {}}};
+    field.runs = {{u"field with several words", {}}};
+    const auto width = shaper.shape(prefix, 0, prefix.text().size()).width +
+                       shaper.shape(field, 0, field.text().size()).width - 20;
+    Editor e;
+    e.document.page.width = width + 72;
+    e.document.page.margin = 36;
+    e.replace(prefix.text() + u"\t" + field.text());
+    e.formatParagraph([&](auto &p) { p.tabs = {{width, TabAlignment::Right}}; });
+    LayoutEngine engine(shaper);
+    const auto layout = engine.compose(e.document);
+    ASSERT_EQ(layout.lines.size(), 2);
+    EXPECT_EQ(layout.lines[0].end, prefix.text().size());
+    EXPECT_EQ(layout.lines[1].start, prefix.text().size());
+    EXPECT_EQ(layout.lines[1].end, e.document.text().size());
+}
+TEST(Tabs, RightAlignedFieldAndLeaderKeepCaretEdges) {
+    Editor editor;
+    editor.replace(u"Heading\t123");
+    editor.formatParagraph([](auto &p) { p.tabs = {{240, TabAlignment::Right, TabLeader::Dots}}; });
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    const auto layout = engine.compose(editor.document);
+    EXPECT_NEAR(layout.caret({0, 11}).x, editor.document.page.margin + 240, 0.1);
+    EXPECT_GT(layout.caret({0, 8}).x, layout.caret({0, 7}).x);
+    EXPECT_EQ(layout.hitTest(layout.caret({0, 8}).x, layout.lines[0].baseline - 2, 0).offset, 8);
+}
 TEST(Layout, RightToLeftImageCaretUsesLogicalEdges) {
     std::ifstream file(std::filesystem::path(__FILE__).parent_path().parent_path() /
                            "fixtures/red-blue.png",
@@ -309,7 +339,8 @@ TEST(Layout, MergedCellsSpanTheirRowsAndColumnsWithCustomWidths) {
     EXPECT_NEAR(below.y, merged.y + merged.height, 1e-6);
     // Clicking anywhere in the merged cell lands in its text.
     const auto hit = layout.hitTest(merged.x + merged.width - 5, merged.y + merged.height - 3, 0);
-    EXPECT_EQ(e.document.paragraphs[hit.paragraph].cell, (TableCell{e.document.tables[0].id, 0, 0}));
+    EXPECT_EQ(e.document.paragraphs[hit.paragraph].cell,
+              (TableCell{e.document.tables[0].id, 0, 0}));
     // Covered cells add no height: the merged cell is about two plain rows tall.
     EXPECT_GE(merged.height, 48);
     EXPECT_LT(merged.height, 56);
@@ -325,8 +356,7 @@ TEST(Layout, VerticallyMergedRowsStayOnOnePage) {
     e.insertTable(40, 1);
     auto cellAt = [&](std::size_t row) {
         for (std::size_t i = 0; i < e.document.paragraphs.size(); ++i)
-            if (e.document.paragraphs[i].cell &&
-                e.document.paragraphs[i].cell->row == row)
+            if (e.document.paragraphs[i].cell && e.document.paragraphs[i].cell->row == row)
                 return i;
         return std::size_t{0};
     };
@@ -491,7 +521,8 @@ TEST(Layout, EndnotesFollowTheTextNumberedInRomanNumerals) {
     // One rule for the endnotes, below the text, and one above the footnote.
     ASSERT_EQ(layout.noteSeparators.size(), 2u);
     const double lastBody = layout.lines.back().baseline;
-    const auto endnoteRule = std::min(layout.noteSeparators[0].second, layout.noteSeparators[1].second);
+    const auto endnoteRule =
+        std::min(layout.noteSeparators[0].second, layout.noteSeparators[1].second);
     EXPECT_GT(endnoteRule, lastBody);
     // Three note lines: two endnotes after the text, the footnote at the page bottom.
     ASSERT_EQ(layout.furniture.size(), 3u);
@@ -500,7 +531,8 @@ TEST(Layout, EndnotesFollowTheTextNumberedInRomanNumerals) {
         tops.push_back(line.baseline - line.shaped.ascent);
     std::sort(tops.begin(), tops.end());
     EXPECT_GT(tops[0], endnoteRule);
-    const auto footnoteRule = std::max(layout.noteSeparators[0].second, layout.noteSeparators[1].second);
+    const auto footnoteRule =
+        std::max(layout.noteSeparators[0].second, layout.noteSeparators[1].second);
     EXPECT_LT(tops[1], footnoteRule);
     EXPECT_GT(tops[2], footnoteRule);
     EXPECT_EQ(romanNumeral(1), "i");

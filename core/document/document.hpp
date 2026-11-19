@@ -26,6 +26,7 @@ enum class Alignment { Left, Center, Right, Justify };
 enum class ListKind { None, Bullet, Decimal };
 enum class ParagraphPreset { Normal, Title, Heading1, Heading2 };
 struct ParagraphFormat {
+    std::vector<TabStop> tabs;
     Alignment alignment = Alignment::Left;
     ListKind list = ListKind::None;
     double indentLeft = 0, spaceBefore = 0, spaceAfter = 8, lineSpacing = 1.15;
