@@ -1,27 +1,41 @@
 # Wordforge handoff — start here
 
-## Current state (2026-11-20) — 0.6.9 release preparation
+## Current state (2026-11-20) — released v0.6.9
 
-The owner requested "release and show analytics" after the feature increments.
-That authorizes integrating the approved work and publishing/promoting 0.6.9 after
-verification; earlier deferral below is historical. Do not publish failing builds.
+The owner requested release and analytics, then confirmed continuation. PR #42 was
+merged by fast-forward push after green combined native, Windows installer and
+strict Snap package CI. Main and annotated v0.6.9 resolve to d7afd475ff65; do not
+rewrite that published tag. The earlier release deferral below is historical.
 
-Active branch `codex/release-0.6.9` integrates PRs #39, #40 and #41 without rewriting
-their history. Sections were already on main dd2730a. Version is bumped to 0.6.9 /
+Release branch `codex/release-0.6.9` integrates PRs #39, #40 and #41 without rewriting
+their history. Sections were already on main dd2730a. App version is 0.6.9 /
 Snap 0.6.9-preview; release notes are `docs/releases/v0.6.9.md`.
+
+Snap stable is verified live: amd64 revision 56 and ARM64 revision 55. Both came
+from successful main workflow 44736947212, passed strict-confinement tests, and
+were downloaded from the Store before promotion. Store SHA3-384, embedded source
+commit, clean-source marker and executable SHA256 were checked against d7afd47.
+Authenticated status and the public Store API confirmed stable after promotion.
+Windows tag workflow 44736952818 succeeded, including both architectures' portable
+and install/self-test/uninstall checks. The public release contains both installers,
+both ZIPs and SHA256SUMS.txt. All four downloaded app-file hashes match the manifest;
+both ZIP build IDs are d7afd475ff65. Downloads:
+https://github.com/akmcypher/wordforge/releases/tag/v0.6.9.
 
 WFG1–15 now read together; WFG15 includes tabs and pagination, WFG14 remains the
 tabs-only version. Paragraph masks are 0x3f before WFG14, 0x7f for WFG14, 0x1ff for
 WFG15. Integration tests retain mixed style/direct settings and explicit clears.
-All feature regression tests were retained when resolving merges. Fresh Windows
-ARM64 build and six suites pass (18.30 s). Ubuntu and hosted release/package checks
-must also pass before advancing main/tagging. No running user editor was closed.
+All feature regressions survived the merges. A release review caught version
+selection after clearing direct tabs; the reproduction failed before the fix.
+Final Windows ARM64 six suites passed (17.72 s), Ubuntu ARM64 six (5.64 s).
+Microsoft Word opened all 114 round-trip outputs with body text and structure
+counts retained; this is structural sampling, not visual parity. Evidence:
+`docs/evidence/2026-11-20-release-0.6.9.md`. No running user editor was closed.
 
-Release order: combined PR into main, green CI, fast-forward push to main, annotated
-v0.6.9 tag, verify GitHub Windows artifacts and exact Snap revisions, then promote
-those revisions to stable. Keep unsigned/partial DOCX/accessibility limits explicit.
+Publication is complete. Do not repeat promotion or rewrite v0.6.9. Future feature
+work follows the roadmap; keep unsigned/partial DOCX/accessibility limits explicit.
 
-Analytics are read-only; current snapshot under ignored out/analytics-2026-11-20.
+Analytics are read-only; latest snapshot under ignored out/analytics-2026-11-20/refresh.
 Snap metrics are delayed; country-attributed devices and _INTERNAL must be kept
 distinct. No analytics secrets or machine paths belong in release notes.
 

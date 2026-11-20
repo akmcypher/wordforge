@@ -1,11 +1,16 @@
 # Current status
 
-2026-11-20 — Release 0.6.9 integration in progress at the owner's request. Combined
+2026-11-20 — Release 0.6.9 tagged at d7afd47 after PR #42 and green combined CI. Combined
 toolbar/caret fixes, tab stops/TOC leaders and paragraph keeps with already-merged
 sections. WFG1–15 reader/masks integrated, including combined tabs/keeps and old
-mask rejection tests. Fresh Windows six-suite run passes (18.30 s). Release notes
-and version bump prepared; hosted packaging/Ubuntu checks precede publication.
-This entry records preparation, not a completed release or Snap promotion.
+mask rejection tests; clearing standalone direct tabs also retains the right native
+version. Final six-suite runs passed Windows ARM64 (17.72 s) and Ubuntu ARM64
+(5.64 s). All 114 Word round-trip outputs opened with body text/structure retained.
+Snap stable 0.6.9-preview is live at amd64 56 / ARM64 55, with source and hashes
+verified before promotion. Windows x64/ARM64 installers and ZIPs are published;
+all four public downloads match SHA256SUMS.txt and both ZIP build IDs match the tag.
+The tag publication workflow and installer smoke tests succeeded. No full visual/accessibility
+certification is claimed. See docs/evidence/2026-11-20-release-0.6.9.md.
 
 2026-11-18 — Section UI verification and caret/toolbar fixes. Native Windows checks
 exercised next-page/continuous section breaks, two-column text and a landscape section;
