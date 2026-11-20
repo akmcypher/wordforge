@@ -29,7 +29,8 @@ void justify(ShapedLine &line, const std::u16string &text, std::size_t end, doub
     std::sort(spaces.begin(), spaces.end());
     const double each = extra / static_cast<double>(spaces.size());
     auto shift = [&](double x) { // total widening of the spaces that start left of x
-        const auto count = std::lower_bound(spaces.begin(), spaces.end(), x - 1e-6) - spaces.begin();
+        const auto count =
+            std::lower_bound(spaces.begin(), spaces.end(), x - 1e-6) - spaces.begin();
         return each * static_cast<double>(count);
     };
     for (auto &run : line.runs) {
@@ -51,7 +52,7 @@ void stops(Line &line, const std::vector<std::size_t> &paragraphBoundaries) {
         double left = std::numeric_limits<double>::max(), right = 0;
     };
     for (const auto &run : line.shaped.runs) {
-        if (run.glyphs.empty()) {
+        if (run.glyphs.empty() || run.tab) {
             line.caretStops.emplace_back(run.start, run.x + (run.rtl ? run.width : 0));
             line.caretStops.emplace_back(run.end, run.x + (run.rtl ? 0 : run.width));
             continue;
@@ -137,9 +138,6 @@ Layout LayoutEngine::compose(const Document &document) {
         if (found == cache_.end() || found->second.revision != paragraph.revision ||
             found->second.width != width || found->second.number != listNumber ||
             found->second.firstNote != firstNote || found->second.firstEndnote != firstEndnote) {
-            auto shapeRange = [&](std::size_t from, std::size_t to) {
-                return shaper_.shape(paragraph, from, to, firstNote, firstEndnote);
-            };
             ++result.measuredParagraphs;
             std::vector<Line> lines;
             const auto text = paragraph.text();
@@ -170,6 +168,9 @@ Layout LayoutEngine::compose(const Document &document) {
             const double otherLeft = paragraph.indentLeft + markerWidth;
             const double right = width - paragraph.indentRight;
             auto lineLeft = [&](std::size_t from) { return from == 0 ? firstLeft : otherLeft; };
+            auto shapeRange = [&](std::size_t from, std::size_t to) {
+                return shaper_.shape(paragraph, from, to, firstNote, firstEndnote, lineLeft(from));
+            };
             auto lineWidth = [&](std::size_t from) { return right - lineLeft(from); };
             const double textWidth = std::min(right - firstLeft, right - otherLeft);
             for (const auto &run : paragraph.runs)
@@ -195,16 +196,39 @@ Layout LayoutEngine::compose(const Document &document) {
                     fit = text.size();
                     fitted = std::move(complete);
                 }
+                if (!singleLine) {
+                    for (const auto &run : complete.runs) {
+                        if (!run.tab || run.tabAlignment == TabAlignment::Left || run.start <= start) continue;
+                        auto prefix = shapeRange(start, run.start);
+                        if (prefix.width <= available && run.start > fit) {
+                            fit = run.start; fitted = std::move(prefix);
+                        }
+                    }
+                }
                 for (auto boundary =
                          singleLine ? UBRK_DONE
                                     : ubrk_following(breaks.get(), static_cast<int32_t>(start));
                      boundary != UBRK_DONE; boundary = ubrk_next(breaks.get())) {
-                    auto candidate =
-                        shapeRange(start, static_cast<std::size_t>(boundary));
+                    if (!paragraph.tabs.empty() && boundary < static_cast<int32_t>(text.size()) &&
+                        text[boundary - 1] == u'\t')
+                        continue;
+                    if (boundary < static_cast<int32_t>(text.size())) {
+                        const auto tab = text.rfind(u'\t', boundary - 1);
+                        const bool aligned = std::any_of(complete.runs.begin(), complete.runs.end(), [&](const auto &r) {
+                            return r.tab && r.start == tab && r.tabAlignment != TabAlignment::Left;
+                        });
+                        if (tab != std::u16string::npos && tab >= start && aligned) {
+                            const auto next = text.find(u'\t', tab + 1);
+                            if (next == std::u16string::npos || static_cast<std::size_t>(boundary) < next) continue;
+                        }
+                    }
+                    auto candidate = shapeRange(start, static_cast<std::size_t>(boundary));
                     if (candidate.width > available)
                         break;
-                    fit = static_cast<std::size_t>(boundary);
-                    fitted = std::move(candidate);
+                    if (static_cast<std::size_t>(boundary) > fit) {
+                        fit = static_cast<std::size_t>(boundary);
+                        fitted = std::move(candidate);
+                    }
                 }
                 if (fit == start && start < text.size()) {
                     for (auto boundary = nextGrapheme(paragraph, start); boundary <= text.size();) {
@@ -233,8 +257,7 @@ Layout LayoutEngine::compose(const Document &document) {
                                 hanging += glyph.advance;
                     justify(line.shaped, text, fit, remaining + hanging);
                 }
-                line.x = lineLeft(start) +
-                         (paragraph.alignment == Alignment::Center  ? remaining / 2
+                line.x = lineLeft(start) + (paragraph.alignment == Alignment::Center ? remaining / 2
                           : paragraph.alignment == Alignment::Right ? remaining
                                                                     : 0);
                 if (start == 0 && !markerText.empty()) {
@@ -246,10 +269,9 @@ Layout LayoutEngine::compose(const Document &document) {
                 lines.push_back(std::move(line));
                 start = fit;
             } while (start < text.size());
-            cache_.insert_or_assign(
-                paragraph.id,
-                Cached{paragraph.revision, width, std::move(lines), listNumber, firstNote,
-                       firstEndnote});
+            cache_.insert_or_assign(paragraph.id,
+                                    Cached{paragraph.revision, width, std::move(lines), listNumber,
+                                           firstNote, firstEndnote});
             found = cache_.find(paragraph.id);
         }
         return found->second.lines;
@@ -296,9 +318,9 @@ Layout LayoutEngine::compose(const Document &document) {
         return blocks;
     };
     auto countNotes = [](const Paragraph &p, bool endnotes = false) {
-        return static_cast<std::size_t>(std::count_if(p.runs.begin(), p.runs.end(), [&](const Run &r) {
-            return r.note() && r.note()->endnote == endnotes;
-        }));
+        return static_cast<std::size_t>(
+            std::count_if(p.runs.begin(), p.runs.end(),
+                          [&](const Run &r) { return r.note() && r.note()->endnote == endnotes; }));
     };
     // Endnotes: numbered in reference order, listed after the last paragraph.
     std::vector<std::uint64_t> endnoteIds;
@@ -423,7 +445,8 @@ Layout LayoutEngine::compose(const Document &document) {
                 }
                 box.first = std::min(box.first, end);
                 box.last = std::max(box.last, end);
-                const bool ghost = (row != p.cell->row || column != p.cell->column) && p.text().empty();
+                const bool ghost =
+                    (row != p.cell->row || column != p.cell->column) && p.text().empty();
                 const double boxWidth = edges[column + box.columns] - edges[column];
                 if (!ghost)
                     box.height += p.spaceBefore;
@@ -439,7 +462,8 @@ Layout LayoutEngine::compose(const Document &document) {
                     line.x += 4 + edges[column];
                     line.markerX += 4 + edges[column];
                     if (ghost) {
-                        line.baseline = std::max(4.0, box.height - line.height) + line.shaped.ascent;
+                        line.baseline =
+                            std::max(4.0, box.height - line.height) + line.shaped.ascent;
                     } else {
                         line.baseline = box.height + line.shaped.ascent;
                         box.height += line.height;
@@ -473,8 +497,7 @@ Layout LayoutEngine::compose(const Document &document) {
                                                "shorten their content or split the cells"
                                              : "A table row is taller than the page; shorten its "
                                                "content or increase the page size");
-            if (y + groupHeight + notesHeight + notesNeed(groupNotes) >
-                    page.height - page.margin &&
+            if (y + groupHeight + notesHeight + notesNeed(groupNotes) > page.height - page.margin &&
                 y > sectionTop)
                 advance();
             addNotes(groupNotes);
@@ -578,7 +601,8 @@ Layout LayoutEngine::compose(const Document &document) {
                     if (texts[position]->empty())
                         continue;
                     Paragraph label;
-                    label.runs = {{bandText(*texts[position], number + 1, result.pageCount), style}};
+                    label.runs = {
+                        {bandText(*texts[position], number + 1, result.pageCount), style}};
                     Line line;
                     line.page = number;
                     line.end = label.runs.front().text().size();

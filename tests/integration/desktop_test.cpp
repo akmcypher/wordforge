@@ -96,6 +96,61 @@ class DesktopTest : public QObject {
         QCOMPARE(window.pageView()->document().paragraphs[0].runs[0].style.family,
                  std::string("Georgia"));
     }
+    void contentsLeadersSurviveMenuUpdateUndoAndSaveReopen() {
+        QTemporaryDir directory;
+        wf::Editor e;
+        e.replace(u"\nChapter one\nSection A");
+        e.selection = {{1, 0}, {1, 0}};
+        e.applyStyle("Heading1");
+        e.selection = {{2, 0}, {2, 0}};
+        e.applyStyle("Heading2");
+        wf::MainWindow window;
+        auto *view = window.pageView();
+        view->setDocument(e.document);
+        QTest::keyClick(view, Qt::Key_Home, Qt::ControlModifier);
+        auto *insert = window.findChild<QAction *>("tableOfContentsAction");
+        QVERIFY(insert);
+        insert->trigger();
+        QVERIFY(view->hasTableOfContents());
+        const auto original = view->document().text();
+        const auto width = e.document.page.width - 2 * e.document.page.margin;
+        for (std::size_t p = 0; p < 2; ++p) {
+            const auto &paragraph = view->document().paragraphs[p];
+            QCOMPARE(paragraph.tabs.size(), std::size_t(1));
+            QCOMPARE(paragraph.tabs[0].alignment, wf::TabAlignment::Right);
+            QCOMPARE(paragraph.tabs[0].leader, wf::TabLeader::Dots);
+            QVERIFY(std::abs(view->layout().caret({p, paragraph.text().size()}).x -
+                             e.document.page.margin - width) < 0.1);
+        }
+        // Update picks up the page geometry; undo restores the previous stops.
+        auto page = view->sectionPage();
+        page.margin += 18;
+        view->setPage(page);
+        auto *update = window.findChild<QAction *>("updateTableOfContentsAction");
+        QVERIFY(update);
+        update->trigger();
+        QCOMPARE(view->document().paragraphs[0].tabs[0].position, width - 36);
+        view->undo();
+        QCOMPARE(view->document().paragraphs[0].tabs[0].position, width);
+        view->redo();
+        for (const auto &suffix : {QString("wfg"), QString("docx")}) {
+            const auto path = directory.filePath("contents." + suffix);
+            window.saveFile(path);
+            wf::MainWindow reopened;
+            reopened.openFile(path);
+            const auto &document = reopened.pageView()->document();
+            QCOMPARE(document.text(), original);
+            QCOMPARE(document.fields.size(), std::size_t(1));
+            const auto &expected = view->document().paragraphs[0].tabs;
+            const auto &actual = document.paragraphs[0].tabs;
+            QCOMPARE(actual.size(), expected.size());
+            QCOMPARE(actual[0].alignment, expected[0].alignment);
+            QCOMPARE(actual[0].leader, expected[0].leader);
+            // DOCX positions are integer twips; WFG retains the exact point value.
+            QVERIFY(std::abs(actual[0].position - expected[0].position) <
+                    (suffix == "docx" ? 0.026 : 1e-9));
+        }
+    }
     void minimalShellShowsMenusToolbarAndPanelWithoutARibbon() {
         wf::MainWindow window;
         window.show();

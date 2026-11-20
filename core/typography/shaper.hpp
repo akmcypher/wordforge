@@ -14,6 +14,8 @@ struct GlyphRun {
     CharacterStyle style;
     std::size_t start = 0, end = 0;
     bool rtl = false;
+    bool tab = false;
+    TabAlignment tabAlignment = TabAlignment::Left;
     double x = 0, width = 0, ascent = 0, descent = 0;
     std::vector<Glyph> glyphs;
     std::optional<InlineImage> image;
@@ -32,7 +34,8 @@ class Shaper {
     // `firstNote` and `firstEndnote` are the numbers shown for the paragraph's first
     // footnote and endnote references (endnotes as lower-case Roman numerals).
     ShapedLine shape(const Paragraph &, std::size_t start, std::size_t end,
-                     std::size_t firstNote = 1, std::size_t firstEndnote = 1);
+                     std::size_t firstNote = 1, std::size_t firstEndnote = 1,
+                     double lineOrigin = 0);
     std::vector<std::string> families() const;
 
   private:

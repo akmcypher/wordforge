@@ -39,7 +39,16 @@ struct CharacterProperties {
     std::optional<ThemeColor> theme; // only with `color`, and only while it matches
     bool operator==(const CharacterProperties &) const = default;
 };
+enum class TabAlignment { Left, Center, Right };
+enum class TabLeader { None, Dots };
+struct TabStop {
+    double position = 0;
+    TabAlignment alignment = TabAlignment::Left;
+    TabLeader leader = TabLeader::None;
+    bool operator==(const TabStop &) const = default;
+};
 struct ParagraphProperties {
+    std::optional<std::vector<TabStop>> tabs;
     std::optional<Alignment> alignment;
     std::optional<ListKind> list;
     std::optional<double> indentLeft, spaceBefore, spaceAfter, lineSpacing;
@@ -111,7 +120,8 @@ enum ParagraphField : std::uint16_t {
     SpaceBeforeField = 1 << 3,
     SpaceAfterField = 1 << 4,
     LineSpacingField = 1 << 5,
-    AllParagraphFields = 0x3f,
+    TabsField = 1 << 6,
+    AllParagraphFields = 0x7f,
 };
 using CharacterMask = std::uint16_t;
 using ParagraphMask = std::uint16_t;

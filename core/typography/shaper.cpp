@@ -4,8 +4,8 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
-#include <iterator>
 #include <ft2build.h>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <stdexcept>
@@ -154,7 +154,7 @@ std::string romanNumeral(std::size_t number) {
     return text;
 }
 ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::size_t end,
-                         std::size_t firstNote, std::size_t firstEndnote) {
+                         std::size_t firstNote, std::size_t firstEndnote, double lineOrigin) {
     const auto text = paragraph.text();
     if (start > end || end > text.size())
         throw std::out_of_range("Shaping range outside paragraph");
@@ -198,10 +198,10 @@ ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::siz
             if (run.atom()) {
                 const bool endnote = run.note() && run.note()->endnote;
                 if (begin < finish)
-                    spans.push_back({begin, finish, shown, nullptr, previousScript, false,
-                                     run.image(), run.note(),
-                                     endnote ? firstEndnote + endnotesBefore
-                                             : firstNote + notesBefore});
+                    spans.push_back(
+                        {begin, finish, shown, nullptr, previousScript, false, run.image(),
+                         run.note(),
+                         endnote ? firstEndnote + endnotesBefore : firstNote + notesBefore});
                 if (run.note())
                     ++(endnote ? endnotesBefore : notesBefore);
                 runStart += 1;
@@ -330,6 +330,60 @@ ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::siz
             result.runs.push_back(std::move(shaped));
         }
     }
+    // Resolve fields after shaping, using their actual widths and retaining each tab range.
+    double x = 0;
+    for (std::size_t i = 0; i < result.runs.size(); ++i) {
+        auto &run = result.runs[i];
+        run.x = x;
+        if (run.end == run.start + 1 && text[run.start] == u'\t') {
+            double field = 0;
+            for (auto j = i + 1; j < result.runs.size(); ++j) {
+                const auto &next = result.runs[j];
+                if (text[next.start] == u'\t')
+                    break;
+                field += next.width;
+            }
+            const TabStop *chosen = nullptr;
+            auto fieldAlignment = TabAlignment::Left;
+            double target = lineOrigin + x;
+            for (const auto &tab : paragraph.tabs) {
+                if (tab.position <= target + 0.001)
+                    continue;
+                fieldAlignment = tab.alignment;
+                const double offset = tab.alignment == TabAlignment::Right    ? field
+                                      : tab.alignment == TabAlignment::Center ? field / 2
+                                                                              : 0;
+                if (tab.position - offset >= lineOrigin + x) {
+                    chosen = &tab;
+                    target = tab.position - offset;
+                    break;
+                }
+                target = tab.position;
+            }
+            if (!chosen)
+                target = (std::floor(target / 36) + 1) * 36;
+            run.tab = true;
+            run.tabAlignment = fieldAlignment;
+            run.width = std::max(0.0, target - lineOrigin - x);
+            if (chosen && chosen->leader == TabLeader::Dots) {
+                Paragraph dots;
+                dots.runs = {{u".", run.style}};
+                const auto dot = shape(dots, 0, 1);
+                if (!dot.runs.empty() && dot.width > 0) {
+                    run.fontPath = dot.runs[0].fontPath;
+                    run.faceIndex = dot.runs[0].faceIndex;
+                    for (double at = dot.width; at + dot.width < run.width; at += dot.width)
+                        for (auto glyph : dot.runs[0].glyphs) {
+                            glyph.x += at;
+                            glyph.cluster = run.start;
+                            run.glyphs.push_back(glyph);
+                        }
+                }
+            }
+        }
+        x += run.width;
+    }
+    result.width = x;
     return result;
 }
 std::vector<std::string> systemFontFiles() {

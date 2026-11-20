@@ -3,10 +3,46 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
-#include <map>
 #include <gtest/gtest.h>
+#include <map>
 #include <pugixml.hpp>
 using namespace wf;
+TEST(Tabs, WarnsAboutCustomDefaultIntervalAndPreservesSettings) {
+    Editor e;
+    e.replace(u"Heading\t12");
+    auto parts = opc::read(serializeDocx(e.document));
+    const std::string settings =
+        "<w:settings xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'>"
+        "<w:defaultTabStop w:val='1440'/></w:settings>";
+    parts["word/settings.xml"] = settings;
+    auto &types = parts["[Content_Types].xml"];
+    types.insert(types.rfind("</Types>"),
+                 "<Override PartName='/word/settings.xml' ContentType='application/"
+                 "vnd.openxmlformats-officedocument.wordprocessingml.settings+xml'/>");
+    auto &rels = parts["word/_rels/document.xml.rels"];
+    rels.insert(rels.rfind("</Relationships>"),
+                "<Relationship Id='customSettings' Type='http://schemas.openxmlformats.org/"
+                "officeDocument/2006/relationships/settings' Target='settings.xml'/>");
+    const auto imported = parseDocx(opc::write(parts));
+    EXPECT_TRUE(std::any_of(imported.warnings.begin(), imported.warnings.end(), [](const auto &w) {
+        return w.find("default tab interval") != std::string::npos;
+    }));
+    EXPECT_EQ(opc::read(serializeDocx(imported.document)).at("word/settings.xml"), settings);
+    auto &standard = parts["word/settings.xml"];
+    standard.replace(standard.find("1440"), 4, "720");
+    const auto usual = parseDocx(opc::write(parts));
+    EXPECT_TRUE(usual.warnings.empty());
+}
+TEST(Tabs, DocxRetainsAlignedStopsAndLeaders) {
+    Editor e;
+    e.replace(u"Heading\t12");
+    e.formatParagraph([](auto &p) { p.tabs = {{240, TabAlignment::Right, TabLeader::Dots}}; });
+    const auto bytes = serializeDocx(e.document);
+    const auto parts = opc::read(bytes);
+    EXPECT_NE(parts.at("word/document.xml").find("w:leader=\"dot\""), std::string::npos);
+    const auto restored = parseDocx(bytes);
+    EXPECT_EQ(restored.document.paragraphs[0].tabs, e.document.paragraphs[0].tabs);
+}
 TEST(Docx, ExportsRealRectangularTablesWithMultipleParagraphsAndImages) {
     Document document;
     document.page = {612, 792, 36};
@@ -59,7 +95,8 @@ TEST(Docx, ExportsRealRectangularTablesWithMultipleParagraphsAndImages) {
     EXPECT_EQ(back.tables[0].columns, 2u);
     ASSERT_EQ(back.paragraphs.size(), 7u);
     for (std::size_t index = 0; index < 7; ++index) {
-        EXPECT_EQ(back.paragraphs[index].cell.has_value(), document.paragraphs[index].cell.has_value());
+        EXPECT_EQ(back.paragraphs[index].cell.has_value(),
+                  document.paragraphs[index].cell.has_value());
         if (back.paragraphs[index].cell) {
             EXPECT_EQ(back.paragraphs[index].cell->row, document.paragraphs[index].cell->row);
             EXPECT_EQ(back.paragraphs[index].cell->column, document.paragraphs[index].cell->column);
@@ -348,7 +385,8 @@ TEST(Docx, RoundTripsCustomParagraphStylesWithBasesAndNextStyles) {
     EXPECT_NE(stylesXml.find("w:styleId=\"Pullquote\""), std::string::npos);
     EXPECT_NE(stylesXml.find("w:val=\"Pull quote\""), std::string::npos);
     EXPECT_NE(stylesXml.find("w:val=\"heading 1\""), std::string::npos);
-    EXPECT_NE(parts.at("word/document.xml").find("w:pStyle w:val=\"Pullquote\""), std::string::npos);
+    EXPECT_NE(parts.at("word/document.xml").find("w:pStyle w:val=\"Pullquote\""),
+              std::string::npos);
 
     const auto imported = parseDocx(bytes);
     EXPECT_TRUE(imported.warnings.empty());
@@ -360,10 +398,12 @@ TEST(Docx, RoundTripsCustomParagraphStylesWithBasesAndNextStyles) {
         EXPECT_EQ(style->name, original->name);
         EXPECT_EQ(style->basedOn, original->basedOn);
         EXPECT_EQ(style->next, original->next);
-        const auto a = resolveStyle(document.styles, id), b = resolveStyle(editor.document.styles, id);
+        const auto a = resolveStyle(document.styles, id),
+                   b = resolveStyle(editor.document.styles, id);
         EXPECT_EQ(a.character, b.character) << id;
         EXPECT_EQ(static_cast<const ParagraphFormat &>(a.paragraph),
-                  static_cast<const ParagraphFormat &>(b.paragraph)) << id;
+                  static_cast<const ParagraphFormat &>(b.paragraph))
+            << id;
     }
     for (std::size_t i = 0; i < 3; ++i) {
         const auto &p = document.paragraphs[i];
@@ -387,7 +427,8 @@ TEST(Docx, ImportsWordCustomStylesAndKeepsNamesUnique) {
         "<w:style w:type='paragraph' w:styleId='Unused'><w:name w:val='Unused'/></w:style>"
         "</w:styles>";
     parts["word/document.xml"] =
-        "<w:document xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'><w:body>"
+        "<w:document "
+        "xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'><w:body>"
         "<w:p><w:pPr><w:pStyle w:val='Fancy'/></w:pPr><w:r><w:t>fancy</w:t></w:r></w:p>"
         "<w:p><w:pPr><w:pStyle w:val='MyQuote'/></w:pPr><w:r><w:rPr><w:b/></w:rPr>"
         "<w:t>quote</w:t></w:r></w:p></w:body></w:document>";
@@ -429,7 +470,8 @@ TEST(Docx, RoundTripsCharacterStyles) {
     editor.createCharacterStyleFromSelection("Inline code");
     const auto bytes = serializeDocx(editor.document);
     const auto parts = opc::read(bytes);
-    EXPECT_NE(parts.at("word/document.xml").find("w:rStyle w:val=\"Inlinecode\""), std::string::npos);
+    EXPECT_NE(parts.at("word/document.xml").find("w:rStyle w:val=\"Inlinecode\""),
+              std::string::npos);
     EXPECT_NE(parts.at("word/styles.xml").find("w:type=\"character\""), std::string::npos);
     const auto imported = parseDocx(bytes);
     EXPECT_TRUE(imported.warnings.empty());
@@ -468,8 +510,11 @@ std::string drawing(const char *kind, const char *id, long long cx, long long cy
     return std::string("<w:r><w:drawing><wp:") + kind + "><wp:extent cx='" + std::to_string(cx) +
            "' cy='" + std::to_string(cy) +
            "'/><wp:docPr id='1' name='Photo' descr='A photo'/><a:graphic><a:graphicData><pic:pic>"
-           "<pic:blipFill><a:blip r:embed='" + id + "'/></pic:blipFill></pic:pic></a:graphicData>"
-           "</a:graphic></wp:" + kind + "></w:drawing></w:r>";
+           "<pic:blipFill><a:blip r:embed='" +
+           id +
+           "'/></pic:blipFill></pic:pic></a:graphicData>"
+           "</a:graphic></wp:" +
+           kind + "></w:drawing></w:r>";
 }
 std::string redBluePng() {
     const auto path =
@@ -483,13 +528,20 @@ TEST(Docx, ImportsWordTablesSplittingMergesAndFlatteningNestedTables) {
     const auto body =
         "<w:p><w:r><w:t>intro</w:t></w:r></w:p>"
         "<w:tbl><w:tblPr><w:tblStyle w:val='TableGrid'/><w:tblLook w:val='04A0'/></w:tblPr>"
-        "<w:tblGrid><w:gridCol w:w='3000'/><w:gridCol w:w='3000'/><w:gridCol w:w='3000'/></w:tblGrid>"
-        "<w:tr>" + cell("wide", "<w:tcPr><w:gridSpan w:val='2'/></w:tcPr>") + cell("c") + "</w:tr>"
-        "<w:tr>" + cell("a") + cell("b") + "</w:tr>"  // short row: padded with an empty cell
-        "<w:tr><w:tc><w:p><w:r><w:t>outer</w:t></w:r></w:p><w:tbl><w:tr>" + cell("inner") +
-        "</w:tr></w:tbl><w:p/></w:tc>" + cell("x") + cell("y", "<w:tcPr><w:vMerge/></w:tcPr>") +
+        "<w:tblGrid><w:gridCol w:w='3000'/><w:gridCol w:w='3000'/><w:gridCol "
+        "w:w='3000'/></w:tblGrid>"
+        "<w:tr>" +
+        cell("wide", "<w:tcPr><w:gridSpan w:val='2'/></w:tcPr>") + cell("c") +
+        "</w:tr>"
+        "<w:tr>" +
+        cell("a") + cell("b") +
+        "</w:tr>" // short row: padded with an empty cell
+        "<w:tr><w:tc><w:p><w:r><w:t>outer</w:t></w:r></w:p><w:tbl><w:tr>" +
+        cell("inner") + "</w:tr></w:tbl><w:p/></w:tc>" + cell("x") +
+        cell("y", "<w:tcPr><w:vMerge/></w:tcPr>") +
         "</w:tr></w:tbl>"
-        "<w:tbl><w:tr>" + cell("second") + "</w:tr></w:tbl>";
+        "<w:tbl><w:tr>" +
+        cell("second") + "</w:tr></w:tbl>";
     const auto imported = parseDocx(opc::write(wordDocument(body)));
     const auto &document = imported.document;
     EXPECT_NO_THROW(validateDocument(document));
@@ -501,7 +553,8 @@ TEST(Docx, ImportsWordTablesSplittingMergesAndFlatteningNestedTables) {
     auto cellText = [&](std::uint64_t table, std::size_t row, std::size_t column) {
         std::u16string text;
         for (const auto &p : document.paragraphs)
-            if (p.cell && p.cell->tableId == table && p.cell->row == row && p.cell->column == column)
+            if (p.cell && p.cell->tableId == table && p.cell->row == row &&
+                p.cell->column == column)
                 text += p.text() + u"|";
         return text;
     };
@@ -524,7 +577,8 @@ TEST(Docx, ImportsWordTablesSplittingMergesAndFlatteningNestedTables) {
             ++separators;
     EXPECT_EQ(separators, 1u);
     auto warned = [&](const char *text) {
-        return std::any_of(imported.warnings.begin(), imported.warnings.end(),
+        return std::any_of(
+            imported.warnings.begin(), imported.warnings.end(),
                            [&](const auto &warning) { return warning.find(text) != std::string::npos; });
     };
     EXPECT_FALSE(warned("Merged table cells"));
@@ -550,9 +604,9 @@ TEST(Docx, ImportsPicturesConvertingOtherFormatsAndFittingThePage) {
         "<Relationship Id='rJpg' Type='http://schemas.openxmlformats.org/officeDocument/2006/"
         "relationships/image' Target='media/b.jpeg'/>";
     // A 20-inch-wide inline PNG, and a floating "JPEG".
-    const auto body = "<w:p><w:r><w:t>see </w:t></w:r>" + drawing("inline", "rPng", 18288000, 9144000) +
-                      "<w:r><w:t> and </w:t></w:r>" + drawing("anchor", "rJpg", 914400, 914400) +
-                      "</w:p>";
+    const auto body = "<w:p><w:r><w:t>see </w:t></w:r>" +
+                      drawing("inline", "rPng", 18288000, 9144000) + "<w:r><w:t> and </w:t></w:r>" +
+                      drawing("anchor", "rJpg", 914400, 914400) + "</w:p>";
     auto parts = wordDocument(body, rels);
     parts["word/media/a.png"] = png;
     parts["word/media/b.jpeg"] = "\xff\xd8\xff\xe0 not really a jpeg";
@@ -571,7 +625,8 @@ TEST(Docx, ImportsPicturesConvertingOtherFormatsAndFittingThePage) {
     EXPECT_NEAR(picture->width / picture->height, 2.0, 0.01); // aspect ratio kept
     EXPECT_EQ(plain.images.at(picture->resourceId)->png, png);
     auto warned = [](const DocxImport &result, const char *text) {
-        return std::any_of(result.warnings.begin(), result.warnings.end(),
+        return std::any_of(
+            result.warnings.begin(), result.warnings.end(),
                            [&](const auto &warning) { return warning.find(text) != std::string::npos; });
     };
     EXPECT_TRUE(warned(withoutConverter, "unsupported format"));
@@ -625,8 +680,8 @@ TEST(Docx, ImportsWordHeadersAndFootersWithComplexFields) {
         "relationships/footer' Target='footer1.xml'/>"
         "<Relationship Id='rE' Type='http://schemas.openxmlformats.org/officeDocument/2006/"
         "relationships/header' Target='header2.xml'/>";
-    auto parts = wordDocument(
-        "<w:p><w:r><w:t>body</w:t></w:r></w:p><w:sectPr>"
+    auto parts =
+        wordDocument("<w:p><w:r><w:t>body</w:t></w:r></w:p><w:sectPr>"
         "<w:headerReference w:type='default' r:id='rH'/>"
         "<w:headerReference w:type='even' r:id='rE'/>"
         "<w:footerReference w:type='default' r:id='rF'/>"
@@ -636,7 +691,8 @@ TEST(Docx, ImportsWordHeadersAndFootersWithComplexFields) {
     const std::string ns =
         " xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'";
     // Header: "Title<tab><tab>Confidential" with a picture that is dropped.
-    parts["word/header1.xml"] = "<w:hdr" + ns +
+    parts["word/header1.xml"] =
+        "<w:hdr" + ns +
                                 "><w:p><w:r><w:t>Title</w:t></w:r><w:r><w:tab/></w:r><w:r><w:tab/>"
                                 "<w:t>Confidential</w:t></w:r><w:r><w:drawing/></w:r></w:p></w:hdr>";
     parts["word/header2.xml"] = "<w:hdr" + ns + "><w:p/></w:hdr>";
@@ -664,7 +720,8 @@ TEST(Docx, ImportsWordHeadersAndFootersWithComplexFields) {
     EXPECT_EQ(page.footer.left, u"");
     EXPECT_FALSE(page.differentFirstPage);
     auto warned = [&](const char *text) {
-        return std::any_of(imported.warnings.begin(), imported.warnings.end(),
+        return std::any_of(
+            imported.warnings.begin(), imported.warnings.end(),
                            [&](const auto &warning) { return warning.find(text) != std::string::npos; });
     };
     EXPECT_TRUE(warned("even-page"));
@@ -694,8 +751,11 @@ TEST(Docx, MergedCellsAndColumnWidthsRoundTrip) {
     ASSERT_TRUE(xml.load_string(parts.at("word/document.xml").c_str()));
     EXPECT_EQ(xml.select_nodes("//w:gridCol").size(), 3u);
     EXPECT_STREQ(xml.select_node("(//w:gridCol)[1]").node().attribute("w:w").value(), "3000");
-    EXPECT_STREQ(xml.select_node("//w:vMerge[@w:val='restart']/../w:gridSpan").node()
-                     .attribute("w:val").value(), "2");
+    EXPECT_STREQ(xml.select_node("//w:vMerge[@w:val='restart']/../w:gridSpan")
+                     .node()
+                     .attribute("w:val")
+                     .value(),
+                 "2");
     EXPECT_EQ(xml.select_nodes("//w:vMerge[not(@w:val)]").size(), 1u);
     EXPECT_EQ(xml.select_nodes("//w:tr[1]/w:tc").size(), 2u);
     EXPECT_EQ(xml.select_nodes("//w:tr[2]/w:tc").size(), 2u);
@@ -716,7 +776,8 @@ TEST(Docx, MergedCellsAndColumnWidthsRoundTrip) {
 
 namespace {
 std::string fixture(const char *name) {
-    std::ifstream file(std::filesystem::path(__FILE__).parent_path().parent_path() / "fixtures" / name,
+    std::ifstream file(std::filesystem::path(__FILE__).parent_path().parent_path() / "fixtures" /
+                           name,
                        std::ios::binary);
     return {std::istreambuf_iterator<char>(file), {}};
 }
@@ -763,17 +824,25 @@ TEST(Docx, KeepsDocumentPropertiesThemeSettingsAndCustomXmlThroughEditsAndSave) 
     ASSERT_TRUE(rels.load_string(saved.at("_rels/.rels").c_str()));
     ASSERT_TRUE(documentRels.load_string(saved.at("word/_rels/document.xml.rels").c_str()));
     ASSERT_TRUE(types.load_string(saved.at("[Content_Types].xml").c_str()));
-    EXPECT_STREQ(rels.select_node("//*[contains(@Type,'core-properties')]").node()
-                     .attribute("Target").value(),
+    EXPECT_STREQ(rels.select_node("//*[contains(@Type,'core-properties')]")
+                     .node()
+                     .attribute("Target")
+                     .value(),
                  "docProps/core.xml");
-    EXPECT_STREQ(documentRels.select_node("//*[contains(@Type,'/theme')]").node()
-                     .attribute("Target").value(),
+    EXPECT_STREQ(documentRels.select_node("//*[contains(@Type,'/theme')]")
+                     .node()
+                     .attribute("Target")
+                     .value(),
                  "theme/theme1.xml");
-    EXPECT_STREQ(documentRels.select_node("//*[contains(@Type,'/customXml')]").node()
-                     .attribute("Target").value(),
+    EXPECT_STREQ(documentRels.select_node("//*[contains(@Type,'/customXml')]")
+                     .node()
+                     .attribute("Target")
+                     .value(),
                  "../customXml/item1.xml");
-    EXPECT_STREQ(types.select_node("//*[@PartName='/customXml/itemProps1.xml']").node()
-                     .attribute("ContentType").value(),
+    EXPECT_STREQ(types.select_node("//*[@PartName='/customXml/itemProps1.xml']")
+                     .node()
+                     .attribute("ContentType")
+                     .value(),
                  "application/vnd.openxmlformats-officedocument.customXmlProperties+xml");
     // Every internal relationship target exists.
     for (const auto &[path, data] : saved) {
@@ -785,7 +854,8 @@ TEST(Docx, KeepsDocumentPropertiesThemeSettingsAndCustomXmlThroughEditsAndSave) 
         for (auto node : relationships.document_element().children()) {
             if (std::string_view(node.attribute("TargetMode").value()) == "External")
                 continue;
-            const auto target = (std::filesystem::path(directory) / node.attribute("Target").value())
+            const auto target =
+                (std::filesystem::path(directory) / node.attribute("Target").value())
                                     .lexically_normal()
                                     .generic_string();
             EXPECT_TRUE(saved.contains(target)) << path << " -> " << target;
@@ -800,17 +870,25 @@ TEST(Docx, KeepsDocumentPropertiesThemeSettingsAndCustomXmlThroughEditsAndSave) 
 TEST(Docx, NamesDroppedPartsAndKeepsOnlyCompleteOnes) {
     const std::string w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     const std::string rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
-    auto parts = wordDocument(
-        "<w:p><w:r><w:t>x</w:t></w:r></w:p>",
-        "<Relationship Id='s' Type='" + rel + "settings' Target='settings.xml'/>"
-        "<Relationship Id='t' Type='" + rel + "theme' Target='theme/theme1.xml'/>"
-        "<Relationship Id='c' Type='" + rel + "comments' Target='comments.xml'/>"
-        "<Relationship Id='f' Type='" + rel + "footnotes' Target='footnotes.xml'/>"
-        "<Relationship Id='e' Type='" + rel + "endnotes' Target='endnotes.xml'/>");
-    parts["word/endnotes.xml"] = "<w:endnotes xmlns:w='" + w +
-                                 "'><w:endnote w:id='1'><w:p/></w:endnote></w:endnotes>";
+    auto parts = wordDocument("<w:p><w:r><w:t>x</w:t></w:r></w:p>",
+                              "<Relationship Id='s' Type='" + rel +
+                                  "settings' Target='settings.xml'/>"
+                                  "<Relationship Id='t' Type='" +
+                                  rel +
+                                  "theme' Target='theme/theme1.xml'/>"
+                                  "<Relationship Id='c' Type='" +
+                                  rel +
+                                  "comments' Target='comments.xml'/>"
+                                  "<Relationship Id='f' Type='" +
+                                  rel +
+                                  "footnotes' Target='footnotes.xml'/>"
+                                  "<Relationship Id='e' Type='" +
+                                  rel + "endnotes' Target='endnotes.xml'/>");
+    parts["word/endnotes.xml"] =
+        "<w:endnotes xmlns:w='" + w + "'><w:endnote w:id='1'><w:p/></w:endnote></w:endnotes>";
     parts["word/settings.xml"] =
-        "<w:settings xmlns:w='" + w + "'><w:zoom w:percent='100'/><w:evenAndOddHeaders/>"
+        "<w:settings xmlns:w='" + w +
+        "'><w:zoom w:percent='100'/><w:evenAndOddHeaders/>"
         "<w:footnotePr><w:footnote w:id='-1'/></w:footnotePr><w:defaultTabStop w:val='720'/>"
         "</w:settings>";
     // The theme references an image that is missing: it is not kept.
@@ -818,9 +896,10 @@ TEST(Docx, NamesDroppedPartsAndKeepsOnlyCompleteOnes) {
                                      "drawingml/2006/main' name='T'/>";
     parts["word/theme/_rels/theme1.xml.rels"] =
         "<Relationships xmlns='http://schemas.openxmlformats.org/package/2006/relationships'>"
-        "<Relationship Id='i' Type='" + rel + "image' Target='../media/gone.png'/></Relationships>";
-    parts["word/comments.xml"] = "<w:comments xmlns:w='" + w +
-                                 "'><w:comment w:id='1'><w:p/></w:comment></w:comments>";
+        "<Relationship Id='i' Type='" +
+        rel + "image' Target='../media/gone.png'/></Relationships>";
+    parts["word/comments.xml"] =
+        "<w:comments xmlns:w='" + w + "'><w:comment w:id='1'><w:p/></w:comment></w:comments>";
     parts["word/footnotes.xml"] = "<w:footnotes xmlns:w='" + w +
                                   "'><w:footnote w:type='separator' w:id='-1'><w:p/></w:footnote>"
                                   "</w:footnotes>"; // separators only: nothing to miss
@@ -889,7 +968,8 @@ TEST(Docx, FootnotesRoundTripAndImportFromWord) {
     ASSERT_EQ(fromWord.document.footnotes.size(), 1u);
     EXPECT_EQ(fromWord.document.footnotes[0].text, u"See page 12. Also chapter 3.");
     auto warned = [&](const char *text) {
-        return std::any_of(fromWord.warnings.begin(), fromWord.warnings.end(),
+        return std::any_of(
+            fromWord.warnings.begin(), fromWord.warnings.end(),
                            [&](const auto &warning) { return warning.find(text) != std::string::npos; });
     };
     EXPECT_TRUE(warned("one paragraph of plain text"));
@@ -914,7 +994,8 @@ TEST(Docx, CommentsRoundTripAndImportFromWord) {
     EXPECT_EQ(body.select_nodes("//w:commentRangeStart").size(), 2u);
     EXPECT_EQ(body.select_nodes("//w:commentRangeEnd").size(), 2u);
     EXPECT_EQ(body.select_nodes("//w:commentReference").size(), 2u);
-    EXPECT_STREQ(comments.select_node("//w:comment[@w:id='0']").node().attribute("w:initials").value(),
+    EXPECT_STREQ(
+        comments.select_node("//w:comment[@w:id='0']").node().attribute("w:initials").value(),
                  "AL");
     // The text between the first comment's markers is exactly "beta".
     std::string between;
@@ -968,7 +1049,8 @@ TEST(Docx, CommentsRoundTripAndImportFromWord) {
     EXPECT_EQ(*start, (Position{0, 4}));
     EXPECT_EQ(*end, (Position{1, 5})); // after "three" in the paragraph made by the break
     auto warned = [&](const char *text) {
-        return std::any_of(fromWord.warnings.begin(), fromWord.warnings.end(),
+        return std::any_of(
+            fromWord.warnings.begin(), fromWord.warnings.end(),
                            [&](const auto &warning) { return warning.find(text) != std::string::npos; });
     };
     EXPECT_TRUE(warned("without a marked text range"));
@@ -1029,9 +1111,9 @@ TEST(Docx, TrackedChangesRoundTripAndImportFromWord) {
 TEST(Docx, TrackChangesSwitchFollowsKeptSettings) {
     const std::string w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     const std::string rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
-    auto parts = wordDocument("<w:p><w:r><w:t>x</w:t></w:r></w:p>",
-                              "<Relationship Id='s' Type='" + rel +
-                                  "settings' Target='settings.xml'/>");
+    auto parts =
+        wordDocument("<w:p><w:r><w:t>x</w:t></w:r></w:p>",
+                     "<Relationship Id='s' Type='" + rel + "settings' Target='settings.xml'/>");
     parts["word/settings.xml"] = "<w:settings xmlns:w='" + w +
                                  "'><w:zoom w:percent='100'/><w:trackRevisions/>"
                                  "<w:defaultTabStop w:val='720'/></w:settings>";
@@ -1086,7 +1168,8 @@ TEST(Docx, TableBordersAndShadingBothWays) {
         "<w:insideH w:val='dashed' w:sz='8'/></w:tblBorders></w:tblPr>"
         "<w:tr><w:tc><w:tcPr><w:vMerge w:val='restart'/><w:shd w:val='clear' w:fill='00FF00'/>"
         "</w:tcPr><w:p><w:r><w:t>a</w:t></w:r></w:p></w:tc>"
-        "<w:tc><w:tcPr><w:tcBorders><w:top w:val='single'/></w:tcBorders></w:tcPr><w:p/></w:tc></w:tr>"
+        "<w:tc><w:tcPr><w:tcBorders><w:top "
+        "w:val='single'/></w:tcBorders></w:tcPr><w:p/></w:tc></w:tr>"
         "<w:tr><w:tc><w:tcPr><w:vMerge/><w:shd w:val='clear' w:fill='00FF00'/></w:tcPr><w:p/>"
         "</w:tc><w:tc><w:tcPr><w:shd w:val='clear' w:fill='auto'/></w:tcPr><w:p/></w:tc></w:tr>"
         "</w:tbl><w:p/>");
@@ -1097,7 +1180,8 @@ TEST(Docx, TableBordersAndShadingBothWays) {
     ASSERT_EQ(table.shading.size(), 1u);
     EXPECT_EQ(table.shading[0], (CellShading{0, 0, 0xff00ff00}));
     auto warned = [&](const char *text) {
-        return std::any_of(fromWord.warnings.begin(), fromWord.warnings.end(),
+        return std::any_of(
+            fromWord.warnings.begin(), fromWord.warnings.end(),
                            [&](const auto &warning) { return warning.find(text) != std::string::npos; });
     };
     EXPECT_TRUE(warned("single lines"));
@@ -1120,8 +1204,9 @@ TEST(Docx, WordPageAndSectionBreaksStartNewPages) {
         got.emplace_back(paragraph.text(), paragraph.pageBreakBefore);
     const std::vector<std::pair<std::u16string, bool>> expected{
         // As in Word, the paragraph holding only the break starts the new page.
-        {u"one", false}, {u"", true}, {u"two", false}, {u"a", false}, {u"b", true},
-        {u"end of section", false}, {u"next section", false}};
+        {u"one", false},         {u"", true},  {u"two", false},
+        {u"a", false},           {u"b", true}, {u"end of section", false},
+        {u"next section", false}};
     EXPECT_EQ(got, expected);
     // The section ends at its paragraph; the next one starts on a new page.
     const auto &end = imported.document.paragraphs[5].sectionBreak;
@@ -1136,7 +1221,8 @@ TEST(Docx, ThemeFontsAndAutomaticColourSurvive) {
     auto word = wordDocument(
         "<w:p><w:r><w:rPr><w:rFonts w:asciiTheme='minorHAnsi' w:hAnsiTheme='minorHAnsi'/>"
         "<w:color w:val='auto'/></w:rPr><w:t>body</w:t></w:r></w:p>"
-        "<w:p><w:r><w:rPr><w:rFonts w:asciiTheme='majorHAnsi'/></w:rPr><w:t>heading</w:t></w:r></w:p>",
+        "<w:p><w:r><w:rPr><w:rFonts "
+        "w:asciiTheme='majorHAnsi'/></w:rPr><w:t>heading</w:t></w:r></w:p>",
         "<Relationship Id='t' Type='" + rel + "theme' Target='theme/theme1.xml'/>");
     word["word/theme/theme1.xml"] =
         "<a:theme xmlns:a='http://schemas.openxmlformats.org/drawingml/2006/main' name='T'>"
@@ -1240,7 +1326,8 @@ TEST(Docx, StrictOpenXmlLengthsWithUnits) {
     EXPECT_NEAR(p.indentRight, 36, 0.01);
     EXPECT_EQ(p.runs[0].style.size, 14);
     EXPECT_NEAR(imported.document.page.width, 595.3, 0.01);
-    EXPECT_THROW(parseDocx(opc::write(wordDocument("<w:p><w:pPr><w:ind w:start='3furlongs'/></w:pPr></w:p>"))),
+    EXPECT_THROW(parseDocx(opc::write(
+                     wordDocument("<w:p><w:pPr><w:ind w:start='3furlongs'/></w:pPr></w:p>"))),
                  std::runtime_error);
 }
 TEST(Docx, WordHeadingStylesAndThemeColoursSurviveARoundTrip) {
@@ -1255,7 +1342,8 @@ TEST(Docx, WordHeadingStylesAndThemeColoursSurviveARoundTrip) {
         "w:themeColor='accent1' w:themeShade='BF'/><w:sz w:val='40'/></w:rPr></w:style>"
         "</w:styles>";
     parts["word/document.xml"] =
-        "<w:document xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'><w:body>"
+        "<w:document "
+        "xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'><w:body>"
         "<w:p><w:pPr><w:pStyle w:val='Heading1'/></w:pPr><w:r><w:t>Heading</w:t></w:r></w:p>"
         "<w:p><w:r><w:rPr><w:color w:val='E97132' w:themeColor='accent2'/></w:rPr>"
         "<w:t>body</w:t></w:r></w:p></w:body></w:document>";
@@ -1391,7 +1479,8 @@ TEST(Docx, FieldsAndTablesOfContentsBothWays) {
                r(std::string("<w:t>") + page + "</w:t>") + fld("end") + "</w:hyperlink>";
     };
     parts["word/document.xml"] =
-        "<w:document xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'><w:body>" +
+        "<w:document "
+        "xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'><w:body>" +
         std::string("<w:p>") + fld("begin") + instr(" TOC \\o \"1-3\" \\h \\z \\u ") +
         fld("separate") + entry("_Toc1", "One", "1").substr(5) + "</w:p>" +
         entry("_Toc2", "Two", "2") + fld("end") + "</w:p>" +
@@ -1452,7 +1541,8 @@ TEST(Docx, SectionsWithOrientationAndColumnsBothWays) {
     EXPECT_EQ(body.select_nodes("//w:sectPr/w:cols[@w:num='2']").size(), 1u);
     EXPECT_EQ(body.select_nodes("//w:sectPr/w:pgSz[@w:orient='landscape']").size(), 2u);
     // The third section starts continuously: its own (body) sectPr says so.
-    EXPECT_EQ(body.select_nodes("/w:document/w:body/w:sectPr/w:type[@w:val='continuous']").size(), 1u);
+    EXPECT_EQ(body.select_nodes("/w:document/w:body/w:sectPr/w:type[@w:val='continuous']").size(),
+              1u);
     const auto imported = parseDocx(opc::write(parts));
     const auto &paragraphs = imported.document.paragraphs;
     ASSERT_EQ(paragraphs.size(), 3u);

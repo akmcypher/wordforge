@@ -200,3 +200,13 @@ Grouped transactions still copy the current document, fully validate it and scan
 IDs. This is O(N), not persistent/COW storage or incremental page layout. Single
 ordinary keystrokes do not acquire this new full batch-validation pass. The model
 benchmark measures this cost separately from layout and presentation.
+
+
+## WFG14 — paragraph tab stops (2026-11-19)
+
+Written only when tab stops or a paragraph style tab override are used. WFG1–13
+remain readable. Paragraphs and paragraph styles may carry a `tabs` attribute:
+space-separated `position/alignment/leader` triples in points. Alignments are 0 left,
+1 centre, 2 right; leaders 0 none, 1 dots. Stops must be strictly increasing, finite,
+within [0,2880], maximum 64. An empty style attribute explicitly clears inherited tabs.
+Paragraph direct mask bit 6 denotes tabs. Older versions reject the new attribute.

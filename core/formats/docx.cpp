@@ -12,8 +12,8 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
-#include <tuple>
 #include <string_view>
+#include <tuple>
 namespace wf {
 namespace {
 constexpr auto wordNs = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
@@ -225,7 +225,8 @@ void runProperties(pugi::xml_node properties, CharacterStyle &style,
                 style.family = family;
             if (const auto theme = attr(node, "asciiTheme"); !theme.empty()) {
                 // majorHAnsi / minorHAnsi... name the theme's heading or body font.
-                const auto &named = theme.starts_with("major") ? themeFonts.major : themeFonts.minor;
+                const auto &named =
+                    theme.starts_with("major") ? themeFonts.major : themeFonts.minor;
                 if (!named.empty())
                     style.family = named;
                 else
@@ -326,8 +327,8 @@ void readIndent(pugi::xml_node node, ParagraphFormat &paragraph,
         paragraph.indentFirstLine = -twips(attr(node, "hanging")) / 20;
     else if (!attr(node, "firstLine").empty())
         paragraph.indentFirstLine = twips(attr(node, "firstLine")) / 20;
-    for (const char *chars : {"leftChars", "startChars", "rightChars", "endChars", "hangingChars",
-                              "firstLineChars"})
+    for (const char *chars :
+         {"leftChars", "startChars", "rightChars", "endChars", "hangingChars", "firstLineChars"})
         if (!attr(node, chars).empty() && attr(node, chars) != "0") {
             warn(warnings, "Indents measured in characters are approximated in points.");
             break;
@@ -369,7 +370,34 @@ void paragraphProperties(pugi::xml_node properties, Paragraph &paragraph,
             }
         } else if (is(node, "ind"))
             readIndent(node, paragraph, warnings);
-        else if (!is(node, "pStyle") && !is(node, "numPr") && !is(node, "rPr") &&
+        else if (is(node, "tabs")) {
+            for (auto item : node.children()) {
+                if (!is(item, "tab"))
+                    continue;
+                const double pos = twips(attr(item, "pos")) / 20;
+                const auto kind = attr(item, "val"), leader = attr(item, "leader");
+                if (kind == "start" || kind == "end") warn(warnings, "Directional tabs are approximated as physical left/right stops.");
+                std::erase_if(paragraph.tabs,
+                              [&](const auto &t) { return std::abs(t.position - pos) < 0.001; });
+                if (kind == "clear")
+                    continue;
+                if (pos < 0 || pos > 2880 || paragraph.tabs.size() >= 64 ||
+                    (kind != "left" && kind != "right" && kind != "center" && kind != "start" &&
+                     kind != "end")) {
+                    warn(warnings, "Unsupported tab stops are omitted.");
+                    continue;
+                }
+                if (!leader.empty() && leader != "none" && leader != "dot")
+                    warn(warnings, "Unsupported tab leaders are shown without leaders.");
+                paragraph.tabs.push_back({pos,
+                                          kind == "right" || kind == "end" ? TabAlignment::Right
+                                          : kind == "center"               ? TabAlignment::Center
+                                                                           : TabAlignment::Left,
+                                          leader == "dot" ? TabLeader::Dots : TabLeader::None});
+            }
+            std::sort(paragraph.tabs.begin(), paragraph.tabs.end(),
+                      [](const auto &a, const auto &b) { return a.position < b.position; });
+        } else if (!is(node, "pStyle") && !is(node, "numPr") && !is(node, "rPr") &&
                    !is(node, "sectPr"))
             warn(warnings, "Some paragraph options are not supported: " + local(node.name()));
     }
@@ -466,29 +494,76 @@ std::string withTrackRevisions(const std::string &data, bool on) {
     for (auto node : existing)
         root.remove_child(node);
     if (on) {
-        static const std::set<std::string> later{
-            "doNotTrackMoves", "doNotTrackFormatting", "documentProtection", "autoFormatOverride",
-            "styleLockTheme", "styleLockQFSet", "defaultTabStop", "autoHyphenation",
-            "consecutiveHyphenLimit", "hyphenationZone", "doNotHyphenateCaps", "showEnvelope",
-            "summaryLength", "clickAndTypeStyle", "defaultTableStyle", "evenAndOddHeaders",
-            "bookFoldRevPrinting", "bookFoldPrinting", "bookFoldPrintingSheets",
-            "drawingGridHorizontalSpacing", "drawingGridVerticalSpacing",
-            "displayHorizontalDrawingGridEvery", "displayVerticalDrawingGridEvery",
-            "doNotUseMarginsForDrawingGridOrigin", "drawingGridHorizontalOrigin",
-            "drawingGridVerticalOrigin", "doNotShadeFormData", "noPunctuationKerning",
-            "characterSpacingControl", "printTwoOnOne", "strictFirstAndLastChars",
-            "noLineBreaksAfter", "noLineBreaksBefore", "savePreviewPicture",
-            "doNotValidateAgainstSchema", "saveInvalidXml", "ignoreMixedContent",
-            "alwaysShowPlaceholderText", "doNotDemarcateInvalidXml", "saveXmlDataOnly",
-            "useXSLTWhenSaving", "saveThroughXslt", "showXMLTags", "alwaysMergeEmptyNamespace",
-            "updateFields", "hdrShapeDefaults", "footnotePr", "endnotePr", "compat", "docVars",
-            "rsids", "mathPr", "attachedSchema", "themeFontLang", "clrSchemeMapping",
-            "doNotIncludeSubdocsInStats", "doNotAutoCompressPictures", "forceUpgrade",
-            "captions", "readModeInkLockDown", "smartTagType", "schemaLibrary",
-            "shapeDefaults", "doNotEmbedSmartTags", "decimalSymbol", "listSeparator"};
+        static const std::set<std::string> later{"doNotTrackMoves",
+                                                 "doNotTrackFormatting",
+                                                 "documentProtection",
+                                                 "autoFormatOverride",
+                                                 "styleLockTheme",
+                                                 "styleLockQFSet",
+                                                 "defaultTabStop",
+                                                 "autoHyphenation",
+                                                 "consecutiveHyphenLimit",
+                                                 "hyphenationZone",
+                                                 "doNotHyphenateCaps",
+                                                 "showEnvelope",
+                                                 "summaryLength",
+                                                 "clickAndTypeStyle",
+                                                 "defaultTableStyle",
+                                                 "evenAndOddHeaders",
+                                                 "bookFoldRevPrinting",
+                                                 "bookFoldPrinting",
+                                                 "bookFoldPrintingSheets",
+                                                 "drawingGridHorizontalSpacing",
+                                                 "drawingGridVerticalSpacing",
+                                                 "displayHorizontalDrawingGridEvery",
+                                                 "displayVerticalDrawingGridEvery",
+                                                 "doNotUseMarginsForDrawingGridOrigin",
+                                                 "drawingGridHorizontalOrigin",
+                                                 "drawingGridVerticalOrigin",
+                                                 "doNotShadeFormData",
+                                                 "noPunctuationKerning",
+                                                 "characterSpacingControl",
+                                                 "printTwoOnOne",
+                                                 "strictFirstAndLastChars",
+                                                 "noLineBreaksAfter",
+                                                 "noLineBreaksBefore",
+                                                 "savePreviewPicture",
+                                                 "doNotValidateAgainstSchema",
+                                                 "saveInvalidXml",
+                                                 "ignoreMixedContent",
+                                                 "alwaysShowPlaceholderText",
+                                                 "doNotDemarcateInvalidXml",
+                                                 "saveXmlDataOnly",
+                                                 "useXSLTWhenSaving",
+                                                 "saveThroughXslt",
+                                                 "showXMLTags",
+                                                 "alwaysMergeEmptyNamespace",
+                                                 "updateFields",
+                                                 "hdrShapeDefaults",
+                                                 "footnotePr",
+                                                 "endnotePr",
+                                                 "compat",
+                                                 "docVars",
+                                                 "rsids",
+                                                 "mathPr",
+                                                 "attachedSchema",
+                                                 "themeFontLang",
+                                                 "clrSchemeMapping",
+                                                 "doNotIncludeSubdocsInStats",
+                                                 "doNotAutoCompressPictures",
+                                                 "forceUpgrade",
+                                                 "captions",
+                                                 "readModeInkLockDown",
+                                                 "smartTagType",
+                                                 "schemaLibrary",
+                                                 "shapeDefaults",
+                                                 "doNotEmbedSmartTags",
+                                                 "decimalSymbol",
+                                                 "listSeparator"};
         const std::string rootName = root.name();
         const auto colon = rootName.find(':');
-        const auto prefix = colon == std::string::npos ? std::string() : rootName.substr(0, colon + 1);
+        const auto prefix =
+            colon == std::string::npos ? std::string() : rootName.substr(0, colon + 1);
         pugi::xml_node before;
         for (auto node : root.children()) {
             if (node.type() != pugi::node_element)
@@ -568,7 +643,8 @@ std::shared_ptr<const PreservedPackage> preservePackage(const opc::Parts &parts,
             return false;
         const auto rels = relationshipsPath(path);
         const auto relsFound = parts.find(rels);
-        const auto size = found->second.size() + (relsFound == parts.end() ? 0 : relsFound->second.size());
+        const auto size =
+            found->second.size() + (relsFound == parts.end() ? 0 : relsFound->second.size());
         if (total + size > maxPreservedBytes || package->parts.size() + 2 > maxPreservedParts) {
             tooLarge = true;
             return false;
@@ -618,17 +694,21 @@ std::shared_ptr<const PreservedPackage> preservePackage(const opc::Parts &parts,
     std::set<std::string> lost;
     for (const auto &relation : relationshipsOf(parts, main)) {
         const auto kind = relationshipKind(relation.type);
-        static const std::set<std::string> handled{
-            "styles",     "numbering", "image",       "header",      "footer",
-            "theme",      "settings",  "fontTable",   "webSettings", "customXml",
-            "hyperlink",  "stylesWithEffects", "footnotes", "endnotes", "comments",
-            "commentsExtended",
-            "commentsIds",
-            "commentsExtensible", "people"};
+        static const std::set<std::string> handled{"styles",      "numbering",
+                                                   "image",       "header",
+                                                   "footer",      "theme",
+                                                   "settings",    "fontTable",
+                                                   "webSettings", "customXml",
+                                                   "hyperlink",   "stylesWithEffects",
+                                                   "footnotes",   "endnotes",
+                                                   "comments",    "commentsExtended",
+                                                   "commentsIds", "commentsExtensible",
+                                                   "people"};
         if (relation.target.empty() || handled.contains(kind))
             continue;
         const auto found = parts.find(relation.target);
-        if (found != parts.end() && (kind == "footnotes" || kind == "endnotes" || kind == "comments")) {
+        if (found != parts.end() &&
+            (kind == "footnotes" || kind == "endnotes" || kind == "comments")) {
             bool content = false;
             try {
                 auto notes = xml(found->second);
@@ -736,8 +816,33 @@ void writeIndent(pugi::xml_node ind, const ParagraphFormat &value) {
     else if (first > 0)
         set(ind, "firstLine", first * 20);
 }
+void writeTabs(pugi::xml_node ppr, const std::vector<TabStop> &value,
+               const std::vector<TabStop> &base = {}) {
+    if (value == base)
+        return;
+    auto tabs = element(ppr, "tabs");
+    for (const auto &old : base) {
+        if (std::none_of(value.begin(), value.end(),
+                         [&](const auto &t) { return t.position == old.position; })) {
+            auto tab = element(tabs, "tab");
+            set(tab, "val", std::string("clear"));
+            set(tab, "pos", old.position * 20);
+        }
+    }
+    for (const auto &t : value) {
+        auto tab = element(tabs, "tab");
+        set(tab, "val",
+            std::string(t.alignment == TabAlignment::Right    ? "right"
+                        : t.alignment == TabAlignment::Center ? "center"
+                                                              : "left"));
+        set(tab, "pos", t.position * 20);
+        if (t.leader == TabLeader::Dots)
+            set(tab, "leader", std::string("dot"));
+    }
+}
 // Paragraph counterpart of writeCharacter (lists are written on paragraphs only).
 void writeParagraph(pugi::xml_node ppr, const ParagraphFormat &value, const ParagraphFormat *base) {
+    writeTabs(ppr, value.tabs, base ? base->tabs : std::vector<TabStop>{});
     auto differs = [&](auto member) { return !base || value.*member != base->*member; };
     if (differs(&ParagraphFormat::spaceBefore) || differs(&ParagraphFormat::spaceAfter) ||
         differs(&ParagraphFormat::lineSpacing)) {
@@ -926,9 +1031,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             if (author.size() > 80)
                 author.resize(80);
             auto date = attr(comment, "date");
-            if (date.size() > 64 || std::any_of(date.begin(), date.end(), [](char c) {
-                    return c < 0x20 || c > 0x7e;
-                }))
+            if (date.size() > 64 ||
+                std::any_of(date.begin(), date.end(), [](char c) { return c < 0x20 || c > 0x7e; }))
                 date.clear();
             commentTexts[attr(comment, "id")] = {utf8(author), date, text};
         }
@@ -974,8 +1078,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         } catch (const std::invalid_argument &) {
             author = "Unknown";
         }
-        if (date.size() > 64 || std::any_of(date.begin(), date.end(),
-                                            [](char c) { return c < 0x20 || c > 0x7e; }))
+        if (date.size() > 64 ||
+            std::any_of(date.begin(), date.end(), [](char c) { return c < 0x20 || c > 0x7e; }))
             date.clear();
         const auto found = revisionIds.find({author, date});
         if (found != revisionIds.end())
@@ -1113,7 +1217,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         style.basedOn = importCharacterStyle(val(child(node, "basedOn")), depth + 1);
         style.id = id;
         if (id.size() > 128 || document.styles.find(id) || document.styles.findCharacter(id) ||
-            std::any_of(id.begin(), id.end(), [](char ch) { return static_cast<unsigned char>(ch) < 32; }))
+            std::any_of(id.begin(), id.end(),
+                        [](char ch) { return static_cast<unsigned char>(ch) < 32; }))
             style.id = uniqueStyleId(document.styles, id);
         auto name = val(child(node, "name"));
         if (name.empty() || name.size() > 200)
@@ -1130,7 +1235,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         try {
             validateStyles(trial);
         } catch (const std::exception &) {
-            warn(warnings, "A character style could not be kept; its formatting is applied directly.");
+            warn(warnings,
+                 "A character style could not be kept; its formatting is applied directly.");
             return {};
         }
         document.styles = std::move(trial);
@@ -1162,8 +1268,9 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         const auto base = parent.empty() ? ResolvedStyle{} : resolveStyle(document.styles, parent);
         ParagraphStyle style;
         style.id = id;
-        if (id.empty() || id.size() > 128 ||
-            std::any_of(id.begin(), id.end(), [](char ch) { return static_cast<unsigned char>(ch) < 32; }))
+        if (id.empty() || id.size() > 128 || std::any_of(id.begin(), id.end(), [](char ch) {
+                return static_cast<unsigned char>(ch) < 32;
+            }))
             style.id = uniqueStyleId(document.styles, id);
         style.basedOn = parent;
         auto name = val(child(node, "name"));
@@ -1180,7 +1287,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         try {
             validateStyles(trial);
         } catch (const std::exception &) {
-            warn(warnings, "A document style could not be kept; its formatting is applied directly.");
+            warn(warnings,
+                 "A document style could not be kept; its formatting is applied directly.");
             return importedStyles[id] = parent.empty() ? std::string("Normal") : parent;
         }
         document.styles = std::move(trial);
@@ -1211,13 +1319,15 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             validateStyles(trial);
             document.styles = std::move(trial);
         } catch (const std::exception &) {
-            warn(warnings, "A document style could not be kept; its formatting is applied directly.");
+            warn(warnings,
+                 "A document style could not be kept; its formatting is applied directly.");
         }
     }
     // Inline (and floating, placed inline) pictures: PNG directly, other formats through
     // the converter. Sizes come from the drawing's extent and are fitted to the page later.
     std::size_t pictureBytes = 0;
-    auto readPicture = [&](pugi::xml_node drawing, const CharacterStyle &style) -> std::optional<Run> {
+    auto readPicture = [&](pugi::xml_node drawing,
+                           const CharacterStyle &style) -> std::optional<Run> {
         auto frame = childIn(drawing, "inline", placementNs);
         if (!frame) {
             frame = childIn(drawing, "anchor", placementNs);
@@ -1288,9 +1398,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                 ch = ' ';
         const auto id = document.allocateId();
         document.images[id] = std::move(resource);
-        return Run::fromImage({id, std::max(1.0, width * scale), std::max(1.0, height * scale),
-                               description},
-                              style);
+        return Run::fromImage(
+            {id, std::max(1.0, width * scale), std::max(1.0, height * scale), description}, style);
     };
     // A page break that ended a paragraph starts the next body paragraph on a new page.
     bool pendingBreak = false;
@@ -1389,7 +1498,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                 if (paragraph.list == ListKind::None)
                     warn(warnings, "An unsupported list format was omitted.");
                 if (approximateNumbering[id])
-                    warn(warnings, "Custom list labels, starts, marker styles or indentation are "
+                        warn(warnings,
+                             "Custom list labels, starts, marker styles or indentation are "
                                    "approximated.");
                 if (!previousNum.empty() && previousNum != id)
                     warn(warnings, "Adjacent list restarts may be renumbered.");
@@ -1400,7 +1510,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             // Word: the paragraph's own indent, else its list level's, else its style's.
             if (paragraph.list != ListKind::None && !child(properties, "ind")) {
                 const auto &levels = levelIndents[id];
-                if (auto found = levels.find(level.empty() ? "0" : level); found != levels.end())
+                    if (auto found = levels.find(level.empty() ? "0" : level);
+                        found != levels.end())
                     readIndent(found->second, paragraph, warnings);
             }
             previousNum = id;
@@ -1424,7 +1535,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         }
         paragraph.indentLeft = std::min(paragraph.indentLeft, 360.0);
         paragraph.indentRight = std::min(paragraph.indentRight, 360.0);
-        paragraph.indentFirstLine = std::clamp(paragraph.indentFirstLine, -paragraph.indentLeft, 360.0);
+            paragraph.indentFirstLine =
+                std::clamp(paragraph.indentFirstLine, -paragraph.indentLeft, 360.0);
         std::vector<CommentMark> marks; // offsets in this paragraph before line-break splits
         std::function<void(pugi::xml_node, unsigned)> readRuns = [&](pugi::xml_node parent,
                                                                      unsigned depth) {
@@ -1475,7 +1587,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                     std::string target;
                     if (const auto anchor = attr(run, "anchor"); !anchor.empty())
                         target = "#" + anchor;
-                    else if (const auto found = linkTargets.find(attrIn(run, "id", relationshipsNs));
+                        else if (const auto found =
+                                     linkTargets.find(attrIn(run, "id", relationshipsNs));
                              found != linkTargets.end())
                         target = found->second;
                     try {
@@ -1493,7 +1606,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                     const auto firstRun = paragraph.runs.size();
                     auto style = base;
                     std::set<std::string> runSeen;
-                    applyStyle(val(child(child(run, "rPr"), "rStyle")), paragraph, style, runSeen);
+                        applyStyle(val(child(child(run, "rPr"), "rStyle")), paragraph, style,
+                                   runSeen);
                     // A footnote reference's own formatting (superscript, its character
                     // style) is Wordforge's to draw, so it is not reported or imported.
                     const bool noteRun =
@@ -1502,13 +1616,15 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                     runProperties(child(run, "rPr"), style, noteRun ? ignored : warnings);
                     std::u16string text;
                     const auto characterStyle =
-                        noteRun ? std::string()
+                            noteRun
+                                ? std::string()
                                 : importCharacterStyle(val(child(child(run, "rPr"), "rStyle")), 0);
                     bool pictures = false;
                     for (auto item : run.children()) {
                         if (is(item, "commentReference") || is(item, "annotationRef")) {
                             // The comment mark; its range markers carry the position.
-                        } else if (is(item, "footnoteReference") || is(item, "endnoteReference")) {
+                            } else if (is(item, "footnoteReference") ||
+                                       is(item, "endnoteReference")) {
                             pictures = true;
                             const bool endnote = is(item, "endnoteReference");
                             const auto &texts = endnote ? endnoteTexts : footnoteTexts;
@@ -1556,7 +1672,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                                 here += existing.text().size();
                             const auto type = attr(item, "fldCharType");
                             if (type == "begin")
-                                openFields.push_back({"\1f" + std::to_string(++fieldCount), {}});
+                                    openFields.push_back(
+                                        {"\1f" + std::to_string(++fieldCount), {}});
                             else if (type == "separate" && !openFields.empty() &&
                                      !openFields.back().separated) {
                                 openFields.back().separated = true;
@@ -1573,8 +1690,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                             if (!openFields.empty() && !openFields.back().separated)
                                 openFields.back().instruction += item.text().get();
                         } else if (!is(item, "rPr") && !is(item, "lastRenderedPageBreak"))
-                            warn(warnings,
-                                 "Unsupported inline content was omitted: " + local(item.name()));
+                                warn(warnings, "Unsupported inline content was omitted: " +
+                                                   local(item.name()));
                     }
                     if (!text.empty() || !pictures) {
                         paragraph.runs.push_back({std::move(text), std::move(style)});
@@ -1686,7 +1803,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                     readParagraph(item, cell);
                 else if (is(item, "tbl")) {
                     if (!nestedWarned)
-                        warn(warnings, "Nested tables are flattened into the cell that holds them.");
+                        warn(warnings,
+                             "Nested tables are flattened into the cell that holds them.");
                     nestedWarned = true;
                     for (auto row : item.children())
                         if (is(row, "tr"))
@@ -1722,8 +1840,10 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             std::vector<pugi::xml_node> cells;
             for (auto cell : row.children()) {
                 if (!is(cell, "tc")) {
-                    if (cell.type() == pugi::node_element && !is(cell, "trPr") && !is(cell, "tblPrEx"))
-                        warn(warnings, "Unsupported table content was omitted: " + local(cell.name()));
+                    if (cell.type() == pugi::node_element && !is(cell, "trPr") &&
+                        !is(cell, "tblPrEx"))
+                        warn(warnings,
+                             "Unsupported table content was omitted: " + local(cell.name()));
                     continue;
                 }
                 const auto properties = child(cell, "tcPr");
@@ -1744,7 +1864,9 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                 const auto vMerge = child(properties, "vMerge");
                 const auto vMergeValue = attr(vMerge, "val");
                 spans.push_back({rows.size(), cells.size(), static_cast<std::size_t>(count),
-                                 !vMerge ? 0 : vMergeValue == "restart" ? 1 : 2});
+                                 !vMerge                    ? 0
+                                 : vMergeValue == "restart" ? 1
+                                                            : 2});
                 cells.push_back(cell);
                 for (int extra = 1; extra < static_cast<int>(count); ++extra)
                     cells.emplace_back();
@@ -1755,7 +1877,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         if (rows.empty() || !columns)
             return;
         if (columns > 10 || rows.size() > 1000) {
-            warn(warnings, "A table with more than 10 columns or 1000 rows was imported as paragraphs.");
+            warn(warnings,
+                 "A table with more than 10 columns or 1000 rows was imported as paragraphs.");
             for (const auto &row : rows)
                 for (auto cell : row)
                     if (cell)
@@ -1859,9 +1982,9 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                 const auto w = attr(column, "w");
                 widths.push_back(w.empty() ? 0 : twips(w) / 20);
             }
-        if (widths.size() == columns &&
-            std::all_of(widths.begin(), widths.end(),
-                        [](double w) { return std::isfinite(w) && w > 0 && w <= 2880; }))
+        if (widths.size() == columns && std::all_of(widths.begin(), widths.end(), [](double w) {
+                return std::isfinite(w) && w > 0 && w <= 2880;
+            }))
             created.widths = std::move(widths);
         document.tables.push_back(created);
         for (std::size_t r = 0; r < rows.size(); ++r)
@@ -2059,7 +2182,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         bool shrunk = false;
         for (auto &paragraph : document.paragraphs) {
             const double available =
-                paragraph.cell ? content / static_cast<double>(columns.at(paragraph.cell->tableId)) - 8
+                paragraph.cell
+                    ? content / static_cast<double>(columns.at(paragraph.cell->tableId)) - 8
                                : content;
             const double marker = paragraph.list != ListKind::None ? 18 : 0;
             const double used = paragraph.indentLeft + std::max(0.0, paragraph.indentFirstLine) +
@@ -2083,8 +2207,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         for (const auto &table : document.tables)
             tableColumns[table.id] = table.columns;
         for (auto &paragraph : document.paragraphs) {
-            double available = paragraph.cell ? content / tableColumns.at(paragraph.cell->tableId) - 8
-                                              : content;
+            double available =
+                paragraph.cell ? content / tableColumns.at(paragraph.cell->tableId) - 8 : content;
             available -= paragraph.indentLeft + std::max(0.0, paragraph.indentFirstLine) +
                          paragraph.indentRight + (paragraph.list != ListKind::None ? 40 : 0) + 1;
             double tallest = 0;
@@ -2095,8 +2219,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                                      tallest - 1;
             for (auto &run : paragraph.runs)
                 if (const auto *image = run.image()) {
-                    const auto scale = std::min(
-                        {1.0, available / image->width, maxHeight / image->height});
+                    const auto scale =
+                        std::min({1.0, available / image->width, maxHeight / image->height});
                     if (scale >= 1)
                         continue;
                     auto fitted = *image;
@@ -2111,8 +2235,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
     // Enter after an imported style continues with its DOCX "next" style when that was kept.
     for (const auto &[id, node] : createdStyles) {
         const auto next = val(child(node, "next"));
-        const auto target = isBuiltinStyle(next) ? next : importedStyles.contains(next)
-                                                              ? importedStyles.at(next)
+        const auto target = isBuiltinStyle(next)            ? next
+                            : importedStyles.contains(next) ? importedStyles.at(next)
                                                               : std::string();
         if (!target.empty() && target != id)
             document.styles.find(id)->next = target;
@@ -2223,7 +2347,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             warn(warnings, "Some fields were kept as plain text.");
     }
     document.preserved = preservePackage(parts, main, warnings);
-    // Word's "Track Changes" switch lives in the (kept) settings part.
+    // Read settings that affect editing; retain the original package bytes.
     if (document.preserved)
         for (const auto &part : document.preserved->parts)
             if (part.contentType ==
@@ -2235,6 +2359,9 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                             document.trackChanges = attr(node, "val") != "false" &&
                                                     attr(node, "val") != "0" &&
                                                     attr(node, "val") != "off";
+                        else if (is(node, "defaultTabStop") && twips(attr(node, "val")) != 720)
+                            warn(warnings, "The custom default tab interval is preserved, but "
+                                           "Wordforge displays automatic tabs every 36 points.");
             }
     validateDocument(document);
     return result;
@@ -2506,6 +2633,8 @@ std::string serializeDocx(const Document &document) {
         set(spacing, "after", paragraph.spaceAfter * 20);
         set(spacing, "line", paragraph.lineSpacing * 240);
         set(spacing, "lineRule", std::string("auto"));
+        writeTabs(ppr, paragraph.tabs,
+                  resolveStyle(document.styles, paragraph.style).paragraph.tabs);
         writeIndent(element(ppr, "ind"), paragraph);
         property(ppr, "jc", jcValue(paragraph.alignment));
         if (const auto &end = paragraph.sectionBreak) {
@@ -2513,7 +2642,8 @@ std::string serializeDocx(const Document &document) {
             previousContinuous = end->continuous;
         }
         // Runs split where comment ranges start or end, with the markers between them.
-        const auto paragraphIndex = static_cast<std::size_t>(&paragraph - document.paragraphs.data());
+        const auto paragraphIndex =
+            static_cast<std::size_t>(&paragraph - document.paragraphs.data());
         const auto paragraphMarkers = markers.find(paragraphIndex);
         std::vector<std::pair<std::size_t, Run>> pieces;
         {
@@ -2524,7 +2654,8 @@ std::string serializeDocx(const Document &document) {
                 if (!run.atom() && paragraphMarkers != markers.end())
                     for (const auto &marker : paragraphMarkers->second)
                         if (marker.offset > offset + from && marker.offset < offset + size) {
-                            pieces.emplace_back(offset + from, run.slice(from, marker.offset - offset));
+                            pieces.emplace_back(offset + from,
+                                                run.slice(from, marker.offset - offset));
                             from = marker.offset - offset;
                         }
                 pieces.emplace_back(offset + from, from ? run.slice(from, size) : run);
@@ -2874,12 +3005,14 @@ std::string serializeDocx(const Document &document) {
             auto entry = types.document_element().append_child("Override");
             entry.append_attribute("PartName") = ("/word/" + name + ".xml").c_str();
             entry.append_attribute("ContentType") =
-                header ? "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"
+                header
+                    ? "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"
                        : "application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml";
             auto relation = relationships.document_element().append_child("Relationship");
             relation.append_attribute("Id") = name.c_str();
             relation.append_attribute("Type") =
-                header ? "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header"
+                header
+                    ? "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header"
                        : "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer";
             relation.append_attribute("Target") = (name + ".xml").c_str();
             parts.emplace("word/" + name + ".xml", std::move(xmlText));
@@ -2936,9 +3069,9 @@ std::string serializeDocx(const Document &document) {
         auto root = notes.append_child(("w:" + kind).c_str());
         root.append_attribute("xmlns:w") = wordNs;
         // The separator notes Word expects, then one note per reference.
-        for (auto [id, type, mark] : {std::tuple{-1, "separator", "separator"},
-                                      std::tuple{0, "continuationSeparator",
-                                                 "continuationSeparator"}}) {
+        for (auto [id, type, mark] :
+             {std::tuple{-1, "separator", "separator"},
+              std::tuple{0, "continuationSeparator", "continuationSeparator"}}) {
             auto note = element(root, item.c_str());
             set(note, "type", std::string(type));
             set(note, "id", static_cast<double>(id));
@@ -3018,7 +3151,8 @@ std::string serializeDocx(const Document &document) {
                 part.contentType ==
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml";
             if (!parts
-                     .emplace(part.path, settings ? withTrackRevisions(part.data, document.trackChanges)
+                     .emplace(part.path, settings
+                                             ? withTrackRevisions(part.data, document.trackChanges)
                                                   : part.data)
                      .second)
                 throw std::runtime_error("A kept document part collides with generated content");

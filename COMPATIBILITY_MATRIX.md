@@ -3,6 +3,13 @@
 2026-11-13. Starting published baseline: 32b1461. The 0.4 DOCX/handoff commits extend it.
 These are capability statements, not production-readiness checkmarks.
 
+2026-11-19 branch addition (PR #40, unmerged): left/centre/right paragraph tab stops
+and dots through styles, WFG14 and DOCX; TOCs use right-aligned page numbers.
+Custom automatic intervals stay in DOCX settings but display at 36 pt with a warning.
+Decimal/bar tabs, other leaders, RTL-specific geometry and a ruler are unsupported.
+Windows six-suite and six-document Word structural checks passed; interactive/visual
+parity remains unverified. See `docs/evidence/2026-11-19-tabs-acceptance.md`.
+
 | Area | Starting baseline | Current additions through 0.6 | Major remaining requirement |
 |---|---|---|---|
 | Native stack | C++20, Qt6, Skia, HarfBuzz, FreeType, ICU | libzip for DOCX | Preserve architecture while extending semantics |

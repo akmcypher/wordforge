@@ -36,8 +36,7 @@ void validatePreserved(const PreservedPackage &package) {
         return path == "_rels/.rels" || path == "word/_rels/document.xml.rels" ||
                path == "word/document.xml" || path == "word/styles.xml" ||
                path == "word/numbering.xml" || path == "word/footnotes.xml" ||
-               path == "word/comments.xml" ||
-               path.starts_with("word/media/") ||
+               path == "word/comments.xml" || path.starts_with("word/media/") ||
                path == "word/header.xml" || path == "word/footer.xml" ||
                path == "word/headerFirst.xml" || path == "word/footerFirst.xml";
     };
@@ -106,8 +105,7 @@ void validateDocument(const Document &document) {
         if (!revision.id || revision.id >= document.nextId || !ids.insert(revision.id).second)
             throw std::invalid_argument("Invalid revision identifier");
         validateCommentAuthor(revision.author);
-        if (revision.date.size() > 64 ||
-            std::any_of(revision.date.begin(), revision.date.end(),
+        if (revision.date.size() > 64 || std::any_of(revision.date.begin(), revision.date.end(),
                         [](char c) { return c < 0x20 || c > 0x7e; }))
             throw std::invalid_argument("Invalid revision date");
     }
@@ -121,15 +119,18 @@ void validateDocument(const Document &document) {
         // Inherited values must equal the style's: the style, not a stale copy, is authoritative.
         auto style = resolved.find(paragraph.style);
         if (style == resolved.end())
-            style = resolved.emplace(paragraph.style, resolveStyle(document.styles, paragraph.style)).first;
+            style =
+                resolved.emplace(paragraph.style, resolveStyle(document.styles, paragraph.style))
+                    .first;
         if ((paragraph.direct & ~AllParagraphFields) ||
-            (differingFields(static_cast<const ParagraphFormat &>(paragraph), style->second.paragraph) &
+            (differingFields(static_cast<const ParagraphFormat &>(paragraph),
+                             style->second.paragraph) &
              ~paragraph.direct))
             throw std::invalid_argument("Paragraph formatting disagrees with its style");
         for (const auto &run : paragraph.runs) {
             if ((run.direct & ~AllCharacterFields) ||
-                (differingFields(run.style, inheritedCharacter(document.styles,
-                                                               style->second.character,
+                (differingFields(run.style,
+                                 inheritedCharacter(document.styles, style->second.character,
                                                                run.characterStyle)) &
                  ~run.direct))
                 throw std::invalid_argument("Character formatting disagrees with its style");
@@ -167,8 +168,7 @@ void validateDocument(const Document &document) {
             throw std::invalid_argument("Invalid comment identifier");
         validateCommentText(comment.text);
         validateCommentAuthor(comment.author);
-        if (comment.date.size() > 64 ||
-            std::any_of(comment.date.begin(), comment.date.end(),
+        if (comment.date.size() > 64 || std::any_of(comment.date.begin(), comment.date.end(),
                         [](char c) { return c < 0x20 || c > 0x7e; }))
             throw std::invalid_argument("Invalid comment date");
         const auto start = document.resolve(comment.start), end = document.resolve(comment.end);
@@ -214,22 +214,31 @@ void validateDocument(const Document &document) {
     }
 }
 void validateParagraphFormat(const ParagraphFormat &value) {
+    double previous = -1;
+    if (value.tabs.size() > 64)
+        throw std::invalid_argument("Too many tab stops");
+    for (const auto &tab : value.tabs) {
+        if (!std::isfinite(tab.position) || tab.position < 0 || tab.position <= previous || tab.position > 2880 ||
+            static_cast<unsigned>(tab.alignment) > 2 || static_cast<unsigned>(tab.leader) > 1)
+            throw std::invalid_argument("Invalid tab stop");
+        previous = tab.position;
+    }
     if (!std::isfinite(value.indentLeft) || value.indentLeft < 0 || value.indentLeft > 360 ||
         !std::isfinite(value.spaceBefore) || value.spaceBefore < 0 || value.spaceBefore > 200 ||
         !std::isfinite(value.spaceAfter) || value.spaceAfter < 0 || value.spaceAfter > 200 ||
         !std::isfinite(value.lineSpacing) || value.lineSpacing < 1 || value.lineSpacing > 3 ||
         !std::isfinite(value.indentFirstLine) || value.indentFirstLine < -value.indentLeft ||
-        value.indentFirstLine > 360 || !std::isfinite(value.indentRight) ||
-        value.indentRight < 0 || value.indentRight > 360 ||
-        static_cast<unsigned>(value.alignment) > 3 || static_cast<unsigned>(value.list) > 2)
+        value.indentFirstLine > 360 || !std::isfinite(value.indentRight) || value.indentRight < 0 ||
+        value.indentRight > 360 || static_cast<unsigned>(value.alignment) > 3 ||
+        static_cast<unsigned>(value.list) > 2)
         throw std::invalid_argument("Invalid paragraph formatting");
 }
 void validatePage(const PageStyle &page) {
     if (!std::isfinite(page.width) || !std::isfinite(page.height) || !std::isfinite(page.margin) ||
         page.width < 72 || page.width > 2880 || page.height < 72 || page.height > 2880 ||
-        page.margin < 0 || page.width - 2 * page.margin < 36 || page.height - 2 * page.margin < 36 ||
-        page.columns < 1 || page.columns > 6 || !std::isfinite(page.columnGap) ||
-        page.columnGap < 0 || page.columnGap > 144 ||
+        page.margin < 0 || page.width - 2 * page.margin < 36 ||
+        page.height - 2 * page.margin < 36 || page.columns < 1 || page.columns > 6 ||
+        !std::isfinite(page.columnGap) || page.columnGap < 0 || page.columnGap > 144 ||
         (page.width - 2 * page.margin - (page.columns - 1) * page.columnGap) / page.columns < 36)
         throw std::invalid_argument("Invalid page geometry");
     for (const auto *band : {&page.header, &page.footer})
@@ -353,7 +362,8 @@ void append(std::vector<Run> &runs, Run run) {
         return;
     if (!run.atom() && !runs.empty() && !runs.back().atom() && runs.back().style == run.style &&
         runs.back().direct == run.direct && runs.back().characterStyle == run.characterStyle &&
-        runs.back().link == run.link && runs.back().inserted == run.inserted && runs.back().deleted == run.deleted)
+        runs.back().link == run.link && runs.back().inserted == run.inserted &&
+        runs.back().deleted == run.deleted)
         runs.back().appendText(run.text());
     else
         runs.push_back(std::move(run));
@@ -515,7 +525,8 @@ ChangeSet Editor::transact(const std::function<void(Editor &)> &command) {
                                document.trackChanges != candidate.document.trackChanges;
     for (const auto &revision : candidate.document.revisions)
         if (revision.id < idHighWater_ &&
-            std::none_of(document.revisions.begin(), document.revisions.end(),
+            std::none_of(
+                document.revisions.begin(), document.revisions.end(),
                          [&](const Revision &old) { return old.id == revision.id; }))
             throw std::invalid_argument("Transaction reuses a retired revision identifier");
     for (const auto &table : candidate.document.tables)
@@ -557,13 +568,11 @@ ChangeSet Editor::transact(const std::function<void(Editor &)> &command) {
         else
             previousOrder.push_back(paragraph.id);
     changes.orderChanged = previousOrder != nextOrder;
-    const bool contentChanged = changes.pageChanged || changes.orderChanged ||
-                                changes.bookmarksChanged || changes.resourcesChanged ||
-                                changes.tablesChanged || changes.notesChanged ||
-                                changes.commentsChanged || changes.fieldsChanged ||
-                                changes.revisionsChanged ||
-                                !changes.inserted.empty() ||
-                                !changes.removed.empty() || !changes.changed.empty();
+    const bool contentChanged =
+        changes.pageChanged || changes.orderChanged || changes.bookmarksChanged ||
+        changes.resourcesChanged || changes.tablesChanged || changes.notesChanged ||
+        changes.commentsChanged || changes.fieldsChanged || changes.revisionsChanged ||
+        !changes.inserted.empty() || !changes.removed.empty() || !changes.changed.empty();
     if (contentChanged) {
         candidate.document.revision = ++candidate.serial_;
         std::unordered_set<std::uint64_t> dirty(changes.changed.begin(), changes.changed.end());
@@ -650,23 +659,22 @@ void Editor::replaceRange(const std::u16string &input, Selection range, const Ru
             run.direct |= differingFields(
                 run.style, inheritedCharacter(document.styles, inherited, run.characterStyle));
     // Typed text joins a link only inside it, not at its start or end (as in Word).
-    const auto typedLink = forcedLink_ ? *forcedLink_
-                                       : linkInside(document.paragraphs[start.paragraph], start.offset);
+    const auto typedLink =
+        forcedLink_ ? *forcedLink_ : linkInside(document.paragraphs[start.paragraph], start.offset);
     // Right after a link, typed text drops the link's blue underline too.
     auto typing = typingStyle;
     if (const auto &before = document.runAt(start);
         !forcedLink_ && typedLink.empty() && !before.link.empty() && typing == before.style) {
-        const auto plain = inheritedCharacter(document.styles,
-                                              resolveStyle(document.styles, prototype.style).character,
+        const auto plain = inheritedCharacter(
+            document.styles, resolveStyle(document.styles, prototype.style).character,
                                               before.characterStyle);
         typing.color = plain.color;
         typing.theme = plain.theme;
         typing.underline = plain.underline;
     }
     // Typed text continues the character style of the run it is typed into.
-    const auto typedCharacterStyle = forcedCharacterStyle_
-                                         ? *forcedCharacterStyle_
-                                         : document.runAt(start).characterStyle;
+    const auto typedCharacterStyle =
+        forcedCharacterStyle_ ? *forcedCharacterStyle_ : document.runAt(start).characterStyle;
     const auto typedInherited = inheritedCharacter(document.styles, inherited, typedCharacterStyle);
     const auto newParagraphs =
         static_cast<std::uint64_t>(std::count(text.begin(), text.end(), u'\n'));
@@ -692,9 +700,9 @@ void Editor::replaceRange(const std::u16string &input, Selection range, const Ru
         p.runs = replacement.empty() ? std::move(prefix) : std::vector<Run>{};
         if (object) {
             auto inserted = *object;
-            inserted.direct |= differingFields(
-                inserted.style,
-                inheritedCharacter(document.styles, inherited, inserted.characterStyle));
+            inserted.direct |=
+                differingFields(inserted.style, inheritedCharacter(document.styles, inherited,
+                                                                   inserted.characterStyle));
             append(p.runs, std::move(inserted));
         } else {
             auto typed = styledRun(text.substr(offset, split - offset), typing, typedInherited);
@@ -836,7 +844,9 @@ void Editor::formatParagraph(const std::function<void(ParagraphFormat &)> &chang
         paragraph.revision = serial_;
     }
 }
-void Editor::applyPreset(ParagraphPreset preset) { applyStyle(presetStyleId(preset)); }
+void Editor::applyPreset(ParagraphPreset preset) {
+    applyStyle(presetStyleId(preset));
+}
 void Editor::applyStyle(const std::string &id) {
     validate(selection);
     const auto style = resolveStyle(document.styles, id);
@@ -886,13 +896,15 @@ void Editor::restyle() {
     for (auto &paragraph : document.paragraphs) {
         auto found = resolved.find(paragraph.style);
         if (found == resolved.end())
-            found = resolved.emplace(paragraph.style, resolveStyle(document.styles, paragraph.style)).first;
+            found =
+                resolved.emplace(paragraph.style, resolveStyle(document.styles, paragraph.style))
+                    .first;
         const auto before = paragraph;
         inheritFields(paragraph, found->second.paragraph, paragraph.direct);
         for (auto &run : paragraph.runs)
-            inheritFields(run.style,
-                          inheritedCharacter(document.styles, found->second.character,
-                                             run.characterStyle),
+            inheritFields(
+                run.style,
+                inheritedCharacter(document.styles, found->second.character, run.characterStyle),
                           run.direct);
         if (paragraph != before)
             paragraph.revision = serial_ + 1;
@@ -941,9 +953,9 @@ std::string Editor::createStyleFromSelection(const std::string &name) {
         paragraph.direct =
             differingFields(static_cast<const ParagraphFormat &>(paragraph), resolved.paragraph);
         for (auto &run : paragraph.runs)
-            run.direct = differingFields(
-                run.style,
-                inheritedCharacter(document.styles, resolved.character, run.characterStyle));
+            run.direct =
+                differingFields(run.style, inheritedCharacter(document.styles, resolved.character,
+                                                              run.characterStyle));
         paragraph.revision = serial_ + 1;
     }
     document.revision = ++serial_;
@@ -1025,7 +1037,8 @@ void Editor::applyCharacterStyle(const std::string &id) {
     if (!id.empty() && !document.styles.findCharacter(id))
         throw std::invalid_argument("Unknown character style: " + id);
     const auto [start, end] = ordered(selection);
-    const auto caret = resolveStyle(document.styles, document.paragraphs[selection.focus.paragraph].style);
+    const auto caret =
+        resolveStyle(document.styles, document.paragraphs[selection.focus.paragraph].style);
     if (start == end) {
         typingStyle = inheritedCharacter(document.styles, caret.character, id);
         return;
@@ -1057,7 +1070,8 @@ std::string Editor::createCharacterStyleFromSelection(const std::string &name) {
     validate(selection);
     const auto [start, end] = ordered(selection);
     if (start == end)
-        throw std::invalid_argument("Select the text whose formatting the character style should use");
+        throw std::invalid_argument(
+            "Select the text whose formatting the character style should use");
     // The look of the first selected text, relative to its paragraph style.
     auto first = start;
     while (first.offset == document.paragraphs[first.paragraph].text().size() && first < end)
@@ -1075,8 +1089,8 @@ std::string Editor::createCharacterStyleFromSelection(const std::string &name) {
     document.styles = std::move(styles);
     for (auto i = start.paragraph; i <= end.paragraph; ++i) {
         auto &p = document.paragraphs[i];
-        const auto inherited =
-            inheritedCharacter(document.styles, resolveStyle(document.styles, p.style).character, style.id);
+        const auto inherited = inheritedCharacter(
+            document.styles, resolveStyle(document.styles, p.style).character, style.id);
         const auto a = i == start.paragraph ? start.offset : 0,
                    b = i == end.paragraph ? end.offset : p.text().size();
         auto runs = slice(p, 0, a);
@@ -1391,8 +1405,7 @@ void Editor::trackedErase(bool backward) {
     const auto size = paragraph.text().size();
     // Paragraph marks are not tracked: at a paragraph's edge the caret just moves on.
     if (backward && !start.offset) {
-        if (start.paragraph &&
-            document.paragraphs[start.paragraph - 1].cell == paragraph.cell) {
+        if (start.paragraph && document.paragraphs[start.paragraph - 1].cell == paragraph.cell) {
             const Position previous{start.paragraph - 1,
                                     document.paragraphs[start.paragraph - 1].text().size()};
             selection = {previous, previous};
@@ -1680,6 +1693,18 @@ TocEntries tocEntries(const Document &document, const Editor::PageOf &pageOf,
     }
     return entries;
 }
+void formatTocEntry(Editor &e, std::size_t paragraph, bool indented, bool numbered) {
+    const auto page = sectionPage(e.document, paragraph);
+    const double width =
+        (page.width - 2 * page.margin - (page.columns - 1) * page.columnGap) / page.columns;
+    e.selection = {{paragraph, 0}, {paragraph, 0}};
+    e.formatParagraph([&](ParagraphFormat &f) {
+        f.indentLeft = indented ? 18 : 0;
+        f.indentFirstLine = f.indentRight = 0;
+        f.tabs = numbered ? std::vector<TabStop>{{width, TabAlignment::Right, TabLeader::Dots}}
+                          : std::vector<TabStop>{};
+    });
+}
 } // namespace
 std::uint64_t Editor::insertTableOfContents(const PageOf &pageOf) {
     std::uint64_t id = 0;
@@ -1701,10 +1726,7 @@ std::uint64_t Editor::insertTableOfContents(const PageOf &pageOf) {
         e.replace(entries.text);
         const auto last = e.selection.focus;
         for (std::size_t k = 0; k < entries.indented.size(); ++k)
-            if (entries.indented[k]) {
-                e.selection = {{first + k, 0}, {first + k, 0}};
-                e.formatParagraph([](ParagraphFormat &f) { f.indentLeft = 18; });
-            }
+            formatTocEntry(e, first + k, entries.indented[k], bool(pageOf));
         e.document.nextId = std::max(e.document.nextId, e.idHighWater_);
         id = e.document.allocateId();
         e.document.fields.push_back({id, "TOC \\o \"1-3\" \\h \\z \\u",
@@ -1748,9 +1770,7 @@ bool Editor::updateTablesOfContents(const PageOf &pageOf) {
             const auto last = e.selection.focus;
             const auto first = last.paragraph + 1 - entries.indented.size();
             for (std::size_t k = 0; k < entries.indented.size(); ++k) {
-                e.selection = {{first + k, 0}, {first + k, 0}};
-                const bool indent = entries.indented[k];
-                e.formatParagraph([&](ParagraphFormat &f) { f.indentLeft = indent ? 18 : 0; });
+                formatTocEntry(e, first + k, entries.indented[k], bool(pageOf));
             }
             field.start = e.document.anchorAt({first, start->offset}, Affinity::Before);
             field.end = e.document.anchorAt(last, Affinity::After);

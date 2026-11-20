@@ -33,6 +33,8 @@ void apply(CharacterStyle &target, const CharacterProperties &properties) {
 }
 
 void apply(ParagraphFormat &target, const ParagraphProperties &properties) {
+    if (properties.tabs)
+        target.tabs = *properties.tabs;
     if (properties.alignment)
         target.alignment = *properties.alignment;
     if (properties.list)
@@ -58,12 +60,10 @@ void checkText(const std::string &value, std::size_t limit, bool allowEmpty, con
         if (ch < 32)
             throw std::invalid_argument(std::string("Invalid style ") + what);
 }
-constexpr const char *themeNames[] = {"dark1",     "light1",    "dark2",
-                                       "light2",    "accent1",   "accent2",
-                                       "accent3",   "accent4",   "accent5",
-                                       "accent6",   "hyperlink", "followedHyperlink",
-                                       "background1", "text1",   "background2",
-                                       "text2"};
+constexpr const char *themeNames[] = {"dark1",       "light1",  "dark2",       "light2",
+                                      "accent1",     "accent2", "accent3",     "accent4",
+                                      "accent5",     "accent6", "hyperlink",   "followedHyperlink",
+                                      "background1", "text1",   "background2", "text2"};
 } // namespace
 
 const char *themeColorName(std::uint8_t index) {
@@ -206,6 +206,7 @@ void fillUnset(ParagraphProperties &target, const ParagraphProperties &fallback)
     fill(target.spaceBefore, fallback.spaceBefore);
     fill(target.spaceAfter, fallback.spaceAfter);
     fill(target.lineSpacing, fallback.lineSpacing);
+    fill(target.tabs, fallback.tabs);
 }
 
 std::string uniqueStyleId(const StyleSheet &sheet, const std::string &name) {
@@ -340,6 +341,8 @@ ParagraphMask differingFields(const ParagraphFormat &a, const ParagraphFormat &b
         mask |= SpaceAfterField;
     if (a.lineSpacing != b.lineSpacing)
         mask |= LineSpacingField;
+    if (a.tabs != b.tabs)
+        mask |= TabsField;
     return mask;
 }
 
@@ -365,6 +368,8 @@ void inheritFields(CharacterStyle &target, const CharacterStyle &source, Charact
 }
 
 void inheritFields(ParagraphFormat &target, const ParagraphFormat &source, ParagraphMask keep) {
+    if (!(keep & TabsField))
+        target.tabs = source.tabs;
     if (!(keep & AlignmentField))
         target.alignment = source.alignment;
     if (!(keep & ListField))
@@ -408,6 +413,8 @@ CharacterProperties propertiesFor(const CharacterStyle &base, const CharacterSty
 
 ParagraphProperties propertiesFor(const ParagraphFormat &base, const ParagraphFormat &value) {
     ParagraphProperties result;
+    if (base.tabs != value.tabs)
+        result.tabs = value.tabs;
     if (base.alignment != value.alignment)
         result.alignment = value.alignment;
     if (base.list != value.list)
@@ -435,7 +442,9 @@ void adoptStyles(Document &document) {
             paragraph.style = "Normal";
         auto found = resolved.find(paragraph.style);
         if (found == resolved.end())
-            found = resolved.emplace(paragraph.style, resolveStyle(document.styles, paragraph.style)).first;
+            found =
+                resolved.emplace(paragraph.style, resolveStyle(document.styles, paragraph.style))
+                    .first;
         paragraph.direct |= differingFields(static_cast<const ParagraphFormat &>(paragraph),
                                             found->second.paragraph);
         for (auto &run : paragraph.runs) {
