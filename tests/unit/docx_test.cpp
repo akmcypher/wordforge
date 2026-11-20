@@ -5,8 +5,100 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <map>
+#include <sstream>
 #include <pugixml.hpp>
 using namespace wf;
+TEST(Pagination, DocumentDefaultsRemainInheritedWithoutNormalDefinition) {
+    auto parts = opc::read(serializeDocx(Document{}));
+    parts["word/styles.xml"] =
+        "<w:styles xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'>"
+        "<w:docDefaults><w:pPrDefault><w:pPr><w:keepNext/><w:keepLines/>"
+        "</w:pPr></w:pPrDefault></w:docDefaults></w:styles>";
+    const auto imported = parseDocx(opc::write(parts));
+    EXPECT_TRUE(resolveStyle(imported.document.styles, "Normal").paragraph.keepWithNext);
+    EXPECT_TRUE(resolveStyle(imported.document.styles, "Normal").paragraph.keepLines);
+    Editor e;
+    e.reset(imported.document);
+    e.applyStyle("Normal");
+    EXPECT_TRUE(e.document.paragraphs[0].keepWithNext);
+    EXPECT_TRUE(e.document.paragraphs[0].keepLines);
+}
+TEST(Pagination, DocxPreservesExplicitKeepsWithoutPinningInheritance) {
+    Editor e;
+    e.document.styles.find("Normal")->paragraph.keepWithNext = true;
+    e.document.styles.find("Heading1")->paragraph.keepWithNext = true;
+    e.applyStyle("Normal");
+    e.replace(u"direct\ninherited\nheading");
+    e.applyStyle("Heading1");
+    auto parts = opc::read(serializeDocx(e.document));
+    pugi::xml_document body, styles;
+    ASSERT_TRUE(body.load_string(parts.at("word/document.xml").c_str()));
+    EXPECT_EQ(body.select_nodes("//w:body/w:p[2]/w:pPr/w:keepNext").size(), 0u);
+    auto first = body.select_node("//w:body/w:p[1]/w:pPr").node();
+    auto direct = first.child("w:keepNext");
+    if (!direct) direct = first.append_child("w:keepNext");
+    if (!direct.attribute("w:val")) direct.append_attribute("w:val");
+    direct.attribute("w:val").set_value("1");
+    std::ostringstream xml;
+    body.save(xml); parts["word/document.xml"] = xml.str();
+    const auto imported = parseDocx(opc::write(parts));
+    EXPECT_NE(imported.document.paragraphs[0].direct & KeepWithNextField, 0);
+    EXPECT_EQ(imported.document.paragraphs[1].direct & KeepWithNextField, 0);
+    EXPECT_EQ(imported.document.styles.find("Heading1")->paragraph.keepWithNext,
+              std::optional<bool>(true));
+    auto saved = opc::read(serializeDocx(imported.document));
+    ASSERT_TRUE(styles.load_string(saved.at("word/styles.xml").c_str()));
+    auto normal = styles.select_node("//w:style[@w:styleId='Normal']/w:pPr/w:keepNext").node();
+    ASSERT_TRUE(normal);
+    normal.attribute("w:val").set_value("0");
+    std::ostringstream changed;
+    styles.save(changed); saved["word/styles.xml"] = changed.str();
+    const auto redefined = parseDocx(opc::write(saved));
+    EXPECT_TRUE(redefined.document.paragraphs[0].keepWithNext);
+    EXPECT_FALSE(redefined.document.paragraphs[1].keepWithNext);
+    EXPECT_TRUE(redefined.document.paragraphs[2].keepWithNext);
+}
+TEST(Pagination, TableBoundaryKeepIsPreservedWithWarning) {
+    Editor e;
+    e.replace(u"Heading");
+    e.insertTable(1, 1);
+    e.selection = {{0, 0}, {0, 0}};
+    e.formatParagraph([](auto &p) { p.keepWithNext = true; });
+    const auto imported = parseDocx(serializeDocx(e.document));
+    EXPECT_TRUE(imported.document.paragraphs[0].keepWithNext);
+    EXPECT_TRUE(std::any_of(imported.warnings.begin(), imported.warnings.end(), [](const auto &w) {
+        return w.find("Keep with next across table") != std::string::npos;
+    }));
+}
+TEST(Pagination, DocxKeepsStyleInheritanceAndExplicitFalse) {
+    Editor e;
+    e.document.styles.find("Heading1")->paragraph.keepWithNext = true;
+    e.document.styles.find("Heading1")->paragraph.keepLines = true;
+    e.applyStyle("Heading1");
+    e.replace(u"Heading\nSecond");
+    e.selection = {{0, 0}, {0, 0}};
+    e.formatParagraph([](auto &p) { p.keepWithNext = p.keepLines = false; });
+    const auto parts = opc::read(serializeDocx(e.document));
+    pugi::xml_document body, styles;
+    ASSERT_TRUE(body.load_string(parts.at("word/document.xml").c_str()));
+    ASSERT_TRUE(styles.load_string(parts.at("word/styles.xml").c_str()));
+    EXPECT_EQ(body.select_nodes("//w:body/w:p[1]/w:pPr/w:keepNext[@w:val='0']").size(), 1);
+    EXPECT_EQ(body.select_nodes("//w:body/w:p[1]/w:pPr/w:keepLines[@w:val='0']").size(), 1);
+    EXPECT_EQ(styles.select_nodes("//w:style[@w:styleId='Heading1']/w:pPr/w:keepNext").size(), 1);
+    const auto imported = parseDocx(opc::write(parts));
+    EXPECT_TRUE(imported.warnings.empty());
+    EXPECT_FALSE(imported.document.paragraphs[0].keepWithNext);
+    EXPECT_FALSE(imported.document.paragraphs[0].keepLines);
+    EXPECT_TRUE(resolveStyle(imported.document.styles, "Heading1").paragraph.keepWithNext);
+    // Omitted w:val is true; explicit off remains false.
+    auto changed = parts;
+    auto keep = body.select_node("//w:body/w:p[1]/w:pPr/w:keepNext").node();
+    keep.remove_attribute("w:val");
+    std::ostringstream xml;
+    body.save(xml);
+    changed["word/document.xml"] = xml.str();
+    EXPECT_TRUE(parseDocx(opc::write(changed)).document.paragraphs[0].keepWithNext);
+}
 TEST(Tabs, WarnsAboutCustomDefaultIntervalAndPreservesSettings) {
     Editor e;
     e.replace(u"Heading\t12");

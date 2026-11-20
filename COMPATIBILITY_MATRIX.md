@@ -9,6 +9,13 @@ Custom automatic intervals stay in DOCX settings but display at 36 pt with a war
 Decimal/bar tabs, other leaders, RTL-specific geometry and a ruler are unsupported.
 Windows six-suite and six-document Word structural checks passed; interactive/visual
 parity remains unverified. See `docs/evidence/2026-11-19-tabs-acceptance.md`.
+2026-11-20 branch addition: paragraph keep-with-next and keep-lines in the style
+cascade, native WFG15, DOCX and Format panel. Explicit style/direct overrides retain
+their presence, including false; inherited paragraphs remain inherited after DOCX
+export. Text grouping handles columns, continuous sections and footnote reservation.
+Table-boundary keep-next stays preserved with an import warning; it is not laid out.
+Widow/orphan and incremental/background pagination remain unsupported. This branch
+is separate from unmerged PR #40's WFG14 tab-stop work. See the pagination evidence.
 
 | Area | Starting baseline | Current additions through 0.6 | Major remaining requirement |
 |---|---|---|---|

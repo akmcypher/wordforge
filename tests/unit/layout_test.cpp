@@ -5,6 +5,177 @@
 #include <gtest/gtest.h>
 #include <map>
 using namespace wf;
+TEST(Pagination, KeepsHeadingAndShortParagraphTogether) {
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    Editor e;
+    e.replace(u"filler\nheading\nbody\nmore");
+    e.selection = {{0, 0}, {3, 4}};
+    e.formatParagraph([](auto &p) { p.spaceBefore = p.spaceAfter = 0; p.lineSpacing = 1; });
+    const auto natural = engine.compose(e.document);
+    const double height = natural.lines[0].height;
+    e.document.page = {300, height * 2.5 + 40, 20};
+    e.selection = {{1, 0}, {1, 0}};
+    e.formatParagraph([](auto &p) { p.keepWithNext = true; });
+    const auto kept = engine.compose(e.document);
+    ASSERT_EQ(kept.lines.size(), 4u);
+    EXPECT_EQ(kept.lines[0].page, 0u);
+    EXPECT_EQ(kept.lines[1].page, 1u);
+    EXPECT_EQ(kept.lines[2].page, 1u);
+    e.undo();
+    EXPECT_EQ(engine.compose(e.document).lines[1].page, 0u);
+    // A two-line paragraph fits on a page, but not below the filler.
+    e.selection = {{1, 0}, {1, 7}};
+    e.replace(u"words words words words words words words words words words words words");
+    e.formatParagraph([](auto &p) { p.keepLines = true; });
+    const auto together = engine.compose(e.document);
+    std::size_t count = 0;
+    for (const auto &line : together.lines)
+        if (line.paragraph == 1) { EXPECT_EQ(line.page, 1u); ++count; }
+    EXPECT_EQ(count, 2u);
+}
+TEST(Pagination, KeepsUseColumnsAndExplicitBreaksWin) {
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    Editor e;
+    e.replace(u"filler\nheading\nbody");
+    e.selection = {{0, 0}, {2, 4}};
+    e.formatParagraph([](auto &p) { p.spaceBefore = p.spaceAfter = 0; p.lineSpacing = 1; });
+    const double height = engine.compose(e.document).lines[0].height;
+    auto page = e.document.page;
+    page.width = 320; page.height = height * 2.5 + 40; page.margin = 20; page.columns = 2;
+    e.setPage(page);
+    e.selection = {{1, 0}, {1, 0}};
+    e.formatParagraph([](auto &p) { p.keepWithNext = true; });
+    const auto kept = engine.compose(e.document);
+    ASSERT_EQ(kept.lines.size(), 3u);
+    EXPECT_EQ(kept.lines[1].page, 0u);
+    EXPECT_GT(kept.lines[1].x, kept.lines[0].x);
+    EXPECT_DOUBLE_EQ(kept.lines[1].x, kept.lines[2].x);
+    e.selection = {{2, 0}, {2, 0}};
+    e.formatParagraph([](auto &p) { p.pageBreakBefore = true; });
+    const auto broken = engine.compose(e.document);
+    EXPECT_EQ(broken.lines[1].page, 0u);
+    EXPECT_DOUBLE_EQ(broken.lines[1].x, broken.lines[0].x);
+    EXPECT_EQ(broken.lines[2].page, 1u);
+    // A fresh engine is the oracle after changes; cached measurement must not retain placement.
+    LayoutEngine fresh(shaper);
+    const auto oracle = fresh.compose(e.document);
+    ASSERT_EQ(broken.lines.size(), oracle.lines.size());
+    for (std::size_t i = 0; i < broken.lines.size(); ++i) {
+        EXPECT_EQ(broken.lines[i].page, oracle.lines[i].page);
+        EXPECT_DOUBLE_EQ(broken.lines[i].baseline, oracle.lines[i].baseline);
+    }
+    e.document.paragraphs[2].pageBreakBefore = false;
+    e.document.paragraphs[1].sectionBreak = SectionBreak{e.document.page, false};
+    const auto section = engine.compose(e.document);
+    EXPECT_EQ(section.lines[1].page, 0u);
+    EXPECT_DOUBLE_EQ(section.lines[1].x, section.lines[0].x);
+    EXPECT_EQ(section.lines[2].page, 1u);
+}
+TEST(Pagination, FootnotesMoveWithTheKeptGroup) {
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    Editor e;
+    e.replace(u"filler\nfiller\nfiller\nheading\nbody");
+    e.selection = {{0, 0}, {4, 4}};
+    e.formatParagraph([](auto &p) { p.spaceBefore = p.spaceAfter = 0; p.lineSpacing = 1; });
+    const double height = engine.compose(e.document).lines[0].height;
+    e.document.page = {300, height * 5 + 40, 20};
+    e.selection = {{4, 4}, {4, 4}};
+    e.insertFootnote(u"A footnote.");
+    e.selection = {{3, 0}, {3, 0}};
+    e.formatParagraph([](auto &p) { p.keepWithNext = true; });
+    const auto kept = engine.compose(e.document);
+    EXPECT_EQ(kept.lines[3].page, 1u);
+    EXPECT_EQ(kept.lines[4].page, 1u);
+    ASSERT_FALSE(kept.furniture.empty());
+    EXPECT_EQ(kept.furniture[0].page, 1u);
+}
+TEST(Pagination, OversizedKeepsSplitWithoutBlankPages) {
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    Editor e;
+    e.replace(u"filler\na\nb\nc\nd\ne\nf\ng\nh");
+    e.selection = {{0, 0}, {8, 1}};
+    e.formatParagraph([](auto &p) { p.spaceBefore = p.spaceAfter = 0; p.lineSpacing = 1; });
+    const double height = engine.compose(e.document).lines[0].height;
+    e.document.page = {300, height * 3.5 + 40, 20};
+    e.selection = {{1, 0}, {8, 1}};
+    e.formatParagraph([](auto &p) { p.keepWithNext = p.keepLines = true; });
+    const auto kept = engine.compose(e.document);
+    EXPECT_EQ(kept.lines[0].page, 0u);
+    EXPECT_EQ(kept.lines[1].page, 1u);
+    EXPECT_EQ(kept.pageCount, 4u);
+    for (std::size_t page = 0; page < kept.pageCount; ++page)
+        EXPECT_TRUE(std::any_of(kept.lines.begin(), kept.lines.end(),
+                               [&](const auto &line) { return line.page == page; }));
+    e.selection = {{1, 0}, {1, 1}};
+    e.replace(std::u16string(500, u'W'));
+    const auto longParagraph = engine.compose(e.document);
+    EXPECT_GT(longParagraph.pageCount, 4u);
+    EXPECT_EQ(longParagraph.lines.back().paragraph, 8u);
+}
+TEST(Pagination, ContinuousSectionPreflightsItsFirstKeptHeading) {
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    Editor e;
+    e.replace(u"first\nsecond\nheading\nbody");
+    e.selection = {{0, 0}, {3, 4}};
+    e.formatParagraph([](auto &p) { p.spaceBefore = p.spaceAfter = 0; p.lineSpacing = 1; });
+    const double height = engine.compose(e.document).lines[0].height;
+    e.document.page = {300, height * 3.5 + 40, 20};
+    e.document.paragraphs[1].sectionBreak = SectionBreak{e.document.page, true};
+    e.selection = {{2, 0}, {2, 0}};
+    e.formatParagraph([](auto &p) { p.keepWithNext = true; });
+    const auto kept = engine.compose(e.document);
+    EXPECT_EQ(kept.lines[2].page, 1u);
+    EXPECT_EQ(kept.lines[3].page, 1u);
+}
+TEST(Pagination, KeptColumnNotesDoNotOverlapEarlierColumns) {
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    Editor e;
+    e.replace(u"a\nb\nc\nd\nheading\nbody");
+    e.selection = {{0, 0}, {5, 4}};
+    e.formatParagraph([](auto &p) { p.spaceBefore = p.spaceAfter = 0; p.lineSpacing = 1; });
+    const double height = engine.compose(e.document).lines[0].height;
+    e.document.page = {320, height * 4.5 + 40, 20};
+    e.document.page.columns = 2;
+    e.selection = {{5, 4}, {5, 4}};
+    e.insertFootnote(u"A note.");
+    e.selection = {{4, 0}, {4, 0}};
+    e.formatParagraph([](auto &p) { p.keepWithNext = true; });
+    const auto kept = engine.compose(e.document);
+    EXPECT_EQ(kept.lines[4].page, 1u);
+    EXPECT_EQ(kept.lines[5].page, 1u);
+    ASSERT_EQ(kept.noteSeparators.size(), 1u);
+    for (const auto &line : kept.lines)
+        if (line.page == kept.noteSeparators[0].first)
+            EXPECT_LE(line.baseline - line.shaped.ascent + line.height,
+                      kept.noteSeparators[0].second);
+}
+TEST(Pagination, OversizedChainStillHonoursIndividualKeepLines) {
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    Editor e;
+    const auto twice = u"words words words words words words words words words words words words";
+    e.replace(std::u16string(twice) + u"\n" + twice + u"\n" + twice + u"\nend");
+    e.selection = {{0, 0}, {3, 3}};
+    e.formatParagraph([](auto &p) {
+        p.spaceBefore = p.spaceAfter = 0; p.lineSpacing = 1; p.keepWithNext = true;
+    });
+    const double height = engine.compose(e.document).lines[0].height;
+    e.document.page = {300, height * 3.5 + 40, 20};
+    e.selection = {{1, 0}, {1, 0}};
+    e.formatParagraph([](auto &p) { p.keepLines = true; });
+    const auto kept = engine.compose(e.document);
+    std::vector<std::size_t> pages;
+    for (const auto &line : kept.lines)
+        if (line.paragraph == 1) pages.push_back(line.page);
+    ASSERT_EQ(pages.size(), 2u);
+    EXPECT_EQ(pages[0], pages[1]);
+}
 TEST(Tabs, AlignmentsUseShapedFieldsAcrossFormattingAndIndents) {
     Shaper shaper(systemFontFiles());
     LayoutEngine engine(shaper);

@@ -1,6 +1,61 @@
 # Wordforge handoff — start here
 
-## Current state (2026-11-19) — authoritative checkpoint
+## Current state (2026-11-20) — 0.6.9 release preparation
+
+The owner requested "release and show analytics" after the feature increments.
+That authorizes integrating the approved work and publishing/promoting 0.6.9 after
+verification; earlier deferral below is historical. Do not publish failing builds.
+
+Active branch `codex/release-0.6.9` integrates PRs #39, #40 and #41 without rewriting
+their history. Sections were already on main dd2730a. Version is bumped to 0.6.9 /
+Snap 0.6.9-preview; release notes are `docs/releases/v0.6.9.md`.
+
+WFG1–15 now read together; WFG15 includes tabs and pagination, WFG14 remains the
+tabs-only version. Paragraph masks are 0x3f before WFG14, 0x7f for WFG14, 0x1ff for
+WFG15. Integration tests retain mixed style/direct settings and explicit clears.
+All feature regression tests were retained when resolving merges. Fresh Windows
+ARM64 build and six suites pass (18.30 s). Ubuntu and hosted release/package checks
+must also pass before advancing main/tagging. No running user editor was closed.
+
+Release order: combined PR into main, green CI, fast-forward push to main, annotated
+v0.6.9 tag, verify GitHub Windows artifacts and exact Snap revisions, then promote
+those revisions to stable. Keep unsigned/partial DOCX/accessibility limits explicit.
+
+Analytics are read-only; current snapshot under ignored out/analytics-2026-11-20.
+Snap metrics are delayed; country-attributed devices and _INTERNAL must be kept
+distinct. No analytics secrets or machine paths belong in release notes.
+
+## Historical feature checkpoints (2026-11-19/20)
+
+Release remains v0.6.8. Main is dd2730a (sections merged); the historical a19fa8c
+and unfinished feat/sections notes below are superseded. PR #39 (toolbar/caret font)
+and draft #40 (tabs/TOC leaders, 40b05bf) remain unmerged. Their work is intact.
+
+Active branch: `codex/wordforge-paragraph-pagination`, based independently on main.
+Plan: `docs/superpowers/plans/2026-11-20-paragraph-pagination.md`. Implements
+keep-with-next and keep-lines through paragraph styles/direct formatting, WFG15,
+DOCX and the Format panel. Text-group preflight uses measured lines and footnote
+reservations. Explicit breaks win; infeasible groups split; feasible individual
+keep-lines survives oversized chains. Columns/continuous sections are covered.
+Table-boundary keep-next is preserved with a DOCX warning, not laid out.
+
+WFG14 and mask bit 6 belong to PR #40; this independent main-based branch reserves
+them and uses WFG15 / bits 7 and 8. Resolve version-reader and mask integration
+when those branches are merged, then rerun all suites. Do not assign conflicting
+meanings to those versions or advertise this branch as a combined preview.
+
+Fresh Windows ARM64 Release build and six suites passed after independent review
+fixes. Ubuntu ARM64 final rebuild and six suites also passed (7.17 s).
+See `docs/evidence/2026-11-20-paragraph-pagination.md` for results.
+The new controls were inspected in a native snapshot; interactive/accessibility
+and full Word visual parity are not certified. Background/incremental pagination,
+widow/orphan control and table-row chaining remain future work.
+
+Owner explicitly deferred promotion until more features are ready. No main merge,
+Snap upload/promotion, public release or app version bump is authorized by this task.
+Continue focused PR increments; preserve running editors and use fresh build dirs.
+
+## Historical checkpoint (2026-11-18)
 
 Published release remains **v0.6.8**. Remote main is dd2730a (sections merged).
 PR #39 (toolbar/caret font fixes) and draft PR #40 (paragraph tabs and TOC leaders)

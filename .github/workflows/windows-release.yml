@@ -10,6 +10,8 @@ on:
     tags: ['v*']
   pull_request:
     paths:
+      # Version bumps must build/test both installer architectures before tagging.
+      - 'CMakeLists.txt'
       - '.github/workflows/windows-release.yml'
       - 'packaging/windows/**'
       - 'tools/package-windows.py'

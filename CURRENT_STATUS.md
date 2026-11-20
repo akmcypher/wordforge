@@ -1,5 +1,12 @@
 # Current status
 
+2026-11-20 — Release 0.6.9 integration in progress at the owner's request. Combined
+toolbar/caret fixes, tab stops/TOC leaders and paragraph keeps with already-merged
+sections. WFG1–15 reader/masks integrated, including combined tabs/keeps and old
+mask rejection tests. Fresh Windows six-suite run passes (18.30 s). Release notes
+and version bump prepared; hosted packaging/Ubuntu checks precede publication.
+This entry records preparation, not a completed release or Snap promotion.
+
 2026-11-18 — Section UI verification and caret/toolbar fixes. Native Windows checks
 exercised next-page/continuous section breaks, two-column text and a landscape section;
 the first section kept Portrait/One column. Removed the compact toolbar's CSS minimum
@@ -28,6 +35,18 @@ pass. Ubuntu build invocation has not produced output yet and is unverified. Dec
 tabs, other leaders, custom default intervals and RTL-specific tab geometry remain
 unsupported. No tab-ruler UI, visual Word certification or pagination work in this slice.
 See docs/superpowers/plans/2026-11-19-tabs.md for the remaining acceptance checks.
+2026-11-20 — Paragraph pagination, branch `codex/wordforge-paragraph-pagination`.
+Keep-with-next / keep-lines now flow through styles, direct formatting, WFG15,
+DOCX and two Format panel controls. Actual line/footnote measurements preflight
+text groups; explicit page/section breaks take priority, infeasible chains split,
+and independent keep-lines remains effective. Regressions cover columns, continuous
+sections, footnotes, oversized groups, style/default inheritance and explicit true/
+false, native schema masks, selected-paragraph editing, undo and save/reopen.
+Windows six suites pass after review fixes. Final Ubuntu verification is recorded
+in docs/evidence/2026-11-20-paragraph-pagination.md. Table-boundary keeps warn and
+remain preserved; widow/orphan and incremental/background layout are not implemented.
+Main-based branch reserves WFG14/bit 6 for unmerged tabs PR #40. No Snap promotion,
+merge, release or version bump; the owner wants more features first.
 
 2026-11-18 — Sections and columns (Milestone 1/3, WFG13). A paragraph can end a section;
 each section has its own page size, orientation, margin and 1–6 equal columns, while

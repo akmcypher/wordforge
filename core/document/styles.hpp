@@ -53,6 +53,7 @@ struct ParagraphProperties {
     std::optional<ListKind> list;
     std::optional<double> indentLeft, spaceBefore, spaceAfter, lineSpacing;
     std::optional<double> indentFirstLine, indentRight;
+    std::optional<bool> keepWithNext, keepLines;
     bool operator==(const ParagraphProperties &) const = default;
 };
 
@@ -121,7 +122,9 @@ enum ParagraphField : std::uint16_t {
     SpaceAfterField = 1 << 4,
     LineSpacingField = 1 << 5,
     TabsField = 1 << 6,
-    AllParagraphFields = 0x7f,
+    KeepWithNextField = 1 << 7,
+    KeepLinesField = 1 << 8,
+    AllParagraphFields = 0x1ff,
 };
 using CharacterMask = std::uint16_t;
 using ParagraphMask = std::uint16_t;

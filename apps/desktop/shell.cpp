@@ -2,6 +2,7 @@
 #include "apps/desktop/commands.hpp"
 #include "apps/desktop/page_view.hpp"
 #include <QAction>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
@@ -262,6 +263,21 @@ FormatPanel::FormatPanel(PageView *view, Commands &commands, QWidget *parent)
                         [](auto &p, double value) { p.spaceBefore = value; });
     auto *after = spin("panelSpaceAfter", "Space after", 200, 6,
                        [](auto &p, double value) { p.spaceAfter = value; });
+    auto keep = [&](const QString &name, const QString &label, bool ParagraphFormat::*member) {
+        auto *box = new QCheckBox(label);
+        box->setObjectName(name);
+        box->setAccessibleName(label);
+        paragraph->addRow(box);
+        connect(box, &QCheckBox::toggled, this, [view, member](bool checked) {
+            view->formatParagraph([&](auto &p) { p.*member = checked; });
+        });
+        return box;
+    };
+    auto *keepNext = keep("panelKeepWithNext", "Keep with next paragraph",
+                          &ParagraphFormat::keepWithNext);
+    keepNext->setToolTip("Keep with the following text paragraph; explicit breaks take priority");
+    auto *keepLines = keep("panelKeepLines", "Keep lines together", &ParagraphFormat::keepLines);
+    keepLines->setToolTip("Keep this paragraph on one page or column when it fits");
 
     auto *picture = section("Picture");
     auto *pictureSize = new QPushButton("Picture size…");
@@ -328,13 +344,16 @@ FormatPanel::FormatPanel(PageView *view, Commands &commands, QWidget *parent)
         const auto &p = view->document().paragraphs[selectedParagraphs(view->selection()).first];
         const auto page = view->sectionPage();
         QSignalBlocker s(spacing), i(indent), fl(firstLine), ri(rightIndent), b(before),
-            a(after), m(margins), o(orientation), pa(paper), c(columns);
+            a(after), m(margins), o(orientation), pa(paper), c(columns),
+            kn(keepNext), kl(keepLines);
         spacing->setCurrentIndex(spacing->findData(p.lineSpacing));
         indent->setValue(p.indentLeft);
         firstLine->setValue(p.indentFirstLine);
         rightIndent->setValue(p.indentRight);
         before->setValue(p.spaceBefore);
         after->setValue(p.spaceAfter);
+        keepNext->setChecked(p.keepWithNext);
+        keepLines->setChecked(p.keepLines);
         const QList<double> marginValues{56.7, 72, 54, 36};
         int marginIndex = -1;
         for (int n = 0; n < marginValues.size(); ++n)

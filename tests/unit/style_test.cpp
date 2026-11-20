@@ -3,6 +3,75 @@
 #include <gtest/gtest.h>
 
 using namespace wf;
+TEST(NativeIntegration, TabsAndKeepsShareWfg15WithoutLosingOverrides) {
+    Editor e;
+    e.document.styles.find("Normal")->paragraph.tabs =
+        std::vector<TabStop>{{240, TabAlignment::Right, TabLeader::Dots}};
+    e.document.styles.find("Normal")->paragraph.keepWithNext = true;
+    e.applyStyle("Normal");
+    e.replace(u"Heading\t12");
+    e.formatParagraph([](auto &p) { p.keepLines = true; });
+    const auto bytes = serializeNative(e.document);
+    EXPECT_NE(bytes.find("version=\"15\""), std::string::npos);
+    const auto restored = parseNative(bytes);
+    EXPECT_EQ(restored.styles, e.document.styles);
+    EXPECT_EQ(static_cast<const ParagraphFormat &>(restored.paragraphs[0]),
+              static_cast<const ParagraphFormat &>(e.document.paragraphs[0]));
+    e.formatParagraph([](auto &p) { p.tabs.clear(); p.keepWithNext = false; });
+    const auto cleared = parseNative(serializeNative(e.document));
+    EXPECT_TRUE(cleared.paragraphs[0].tabs.empty());
+    EXPECT_FALSE(cleared.paragraphs[0].keepWithNext);
+    EXPECT_TRUE(cleared.paragraphs[0].keepLines);
+    EXPECT_NE(cleared.paragraphs[0].direct & TabsField, 0);
+    EXPECT_NE(cleared.paragraphs[0].direct & KeepWithNextField, 0);
+}
+TEST(Pagination, NativeMasksRespectFormatVersions) {
+    for (const auto &version : {std::string("13"), std::string("14"), std::string("15")})
+        for (int mask : {64, 128, 256, 512}) {
+            // Inject a mask into a complete valid file, leaving no new attributes
+            // so the direct mask is the only invalid input.
+            Editor e;
+            e.formatParagraph([](auto &p) { p.keepWithNext = true; });
+            auto bytes = serializeNative(e.document);
+            bytes.replace(bytes.find("version=\"15\""), 12, "version=\"" + version + "\"");
+            auto at = bytes.find("keepNext=\"true\"");
+            bytes.erase(at, std::string("keepNext=\"true\"").size());
+            at = bytes.find("direct=\"128\"");
+            bytes.replace(at, 12, "direct=\"" + std::to_string(mask) + "\"");
+            if (version == "13" || mask == 512 || (version == "14" && mask != 64))
+                EXPECT_THROW(parseNative(bytes), std::runtime_error);
+            else
+                EXPECT_NO_THROW(parseNative(bytes));
+        }
+}
+TEST(Pagination, StyleAndNativeKeepsRetainFalseOverridesAndUndo) {
+    Editor e;
+    e.replace(u"heading");
+    e.document.styles.find("Heading1")->paragraph.keepWithNext = true;
+    e.document.styles.find("Heading1")->paragraph.keepLines = true;
+    e.applyStyle("Heading1");
+    ASSERT_TRUE(e.document.paragraphs[0].keepWithNext);
+    ASSERT_TRUE(e.document.paragraphs[0].keepLines);
+    e.formatParagraph([](auto &p) { p.keepWithNext = p.keepLines = false; });
+    const auto bytes = serializeNative(e.document);
+    EXPECT_NE(bytes.find("version=\"15\""), std::string::npos);
+    const auto restored = parseNative(bytes);
+    EXPECT_FALSE(restored.paragraphs[0].keepWithNext);
+    EXPECT_FALSE(restored.paragraphs[0].keepLines);
+    EXPECT_EQ(restored.styles, e.document.styles);
+    EXPECT_TRUE(resolveStyle(restored.styles, "Heading1").paragraph.keepWithNext);
+    auto older = bytes;
+    older.replace(older.find("version=\"15\""), 12, "version=\"13\"");
+    EXPECT_THROW(parseNative(older), std::runtime_error);
+    e.undo();
+    EXPECT_TRUE(e.document.paragraphs[0].keepWithNext);
+    EXPECT_TRUE(e.document.paragraphs[0].keepLines);
+    Editor toggled;
+    toggled.formatParagraph([](auto &p) { p.keepWithNext = true; });
+    toggled.formatParagraph([](auto &p) { p.keepWithNext = false; });
+    const auto directFalse = parseNative(serializeNative(toggled.document));
+    EXPECT_NE(directFalse.paragraphs[0].direct & KeepWithNextField, 0);
+}
 TEST(Tabs, NativeAndStyleOverridesRoundTrip) {
     Editor e;
     e.replace(u"Heading\t12");

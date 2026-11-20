@@ -357,6 +357,10 @@ void paragraphProperties(pugi::xml_node properties, Paragraph &paragraph,
                 warn(warnings, "Some paragraph alignments are not supported: " + alignment);
         } else if (is(node, "pageBreakBefore"))
             paragraph.pageBreakBefore = enabled(node);
+        else if (is(node, "keepNext"))
+            paragraph.keepWithNext = enabled(node);
+        else if (is(node, "keepLines"))
+            paragraph.keepLines = enabled(node);
         else if (is(node, "spacing")) {
             if (!attr(node, "before").empty())
                 paragraph.spaceBefore = twips(attr(node, "before")) / 20;
@@ -401,6 +405,14 @@ void paragraphProperties(pugi::xml_node properties, Paragraph &paragraph,
                    !is(node, "sectPr"))
             warn(warnings, "Some paragraph options are not supported: " + local(node.name()));
     }
+}
+// Keep properties retain XML presence as well as their resolved value, so an explicit
+// true/false equal to the base continues to override later changes to that base.
+void readKeeps(pugi::xml_node ppr, ParagraphProperties &properties) {
+    if (auto node = child(ppr, "keepNext"))
+        properties.keepWithNext = enabled(node);
+    if (auto node = child(ppr, "keepLines"))
+        properties.keepLines = enabled(node);
 }
 std::string relationship(const opc::Parts &parts, const std::string &owner, const char *type,
                          const std::string &id = {}) {
@@ -1109,6 +1121,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         runProperties(child(child(defaults, "rPrDefault"), "rPr"), defaultRun, warnings);
         paragraphProperties(child(child(defaults, "pPrDefault"), "pPr"), defaultParagraph,
                             warnings);
+        readKeeps(child(child(defaults, "pPrDefault"), "pPr"),
+                  document.styles.find("Normal")->paragraph);
         for (auto node : root.children())
             if (is(node, "style")) {
                 const auto id = attr(node, "styleId");
@@ -1281,6 +1295,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         for (int n = 2; taken(style.name); ++n)
             style.name = name + " (" + std::to_string(n) + ")";
         style.paragraph = propertiesFor(base.paragraph, format);
+        readKeeps(child(node, "pPr"), style.paragraph);
         style.character = propertiesFor(base.character, character);
         auto trial = document.styles;
         trial.paragraphStyles.push_back(style);
@@ -1314,6 +1329,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         const auto base =
             style->basedOn.empty() ? ResolvedStyle{} : resolveStyle(trial, style->basedOn);
         style->paragraph = propertiesFor(base.paragraph, format);
+        readKeeps(child(found->second, "pPr"), style->paragraph);
         style->character = propertiesFor(base.character, character);
         try {
             validateStyles(trial);
@@ -1461,6 +1477,10 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         applyStyle(styleId, paragraph, base, seen);
         paragraph.style = styleId.empty() ? std::string("Normal") : importStyle(styleId);
         paragraphProperties(properties, paragraph, warnings);
+        if (child(properties, "keepNext"))
+            paragraph.direct |= KeepWithNextField;
+        if (child(properties, "keepLines"))
+            paragraph.direct |= KeepLinesField;
         if (cell) {
             paragraph.cell = cell;
             paragraph.pageBreakBefore = false; // not allowed inside a table
@@ -2346,6 +2366,11 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         if (dropped)
             warn(warnings, "Some fields were kept as plain text.");
     }
+    for (std::size_t i = 0; i + 1 < document.paragraphs.size(); ++i) {
+        const auto &p = document.paragraphs[i], &next = document.paragraphs[i + 1];
+        if (p.keepWithNext && p.cell != next.cell && (p.cell || next.cell))
+            warn(warnings, "Keep with next across table boundaries is preserved, but not laid out.");
+    }
     document.preserved = preservePackage(parts, main, warnings);
     // Read settings that affect editing; retain the original package bytes.
     if (document.preserved)
@@ -2614,6 +2639,10 @@ std::string serializeDocx(const Document &document) {
         // Paragraphs and runs still carry complete formatting, so a reader that ignores
         // styles shows the same result.
         property(ppr, "pStyle", paragraph.style);
+        if (paragraph.direct & KeepWithNextField)
+            property(ppr, "keepNext", paragraph.keepWithNext ? 1.0 : 0.0);
+        if (paragraph.direct & KeepLinesField)
+            property(ppr, "keepLines", paragraph.keepLines ? 1.0 : 0.0);
         if (paragraph.pageBreakBefore)
             element(ppr, "pageBreakBefore");
         if (paragraph.list != ListKind::None) {
@@ -2886,7 +2915,12 @@ std::string serializeDocx(const Document &document) {
         const auto base = definition.basedOn.empty()
                               ? defaults
                               : resolveStyle(document.styles, definition.basedOn);
-        writeParagraph(element(style, "pPr"), self.paragraph, &base.paragraph);
+        auto ppr = element(style, "pPr");
+        writeParagraph(ppr, self.paragraph, &base.paragraph);
+        if (definition.paragraph.keepWithNext)
+            property(ppr, "keepNext", *definition.paragraph.keepWithNext ? 1.0 : 0.0);
+        if (definition.paragraph.keepLines)
+            property(ppr, "keepLines", *definition.paragraph.keepLines ? 1.0 : 0.0);
         writeCharacter(element(style, "rPr"), self.character, &base.character);
     }
     for (const auto &definition : document.styles.characterStyles) {
