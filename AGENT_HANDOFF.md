@@ -1,6 +1,36 @@
 # Wordforge handoff — start here
 
-## Current state (2026-11-18) — authoritative; everything below this section is history
+## Current state (2026-11-20) — authoritative checkpoint
+
+Release remains v0.6.8. Main is dd2730a (sections merged); the historical a19fa8c
+and unfinished feat/sections notes below are superseded. PR #39 (toolbar/caret font)
+and draft #40 (tabs/TOC leaders, 40b05bf) remain unmerged. Their work is intact.
+
+Active branch: `codex/wordforge-paragraph-pagination`, based independently on main.
+Plan: `docs/superpowers/plans/2026-11-20-paragraph-pagination.md`. Implements
+keep-with-next and keep-lines through paragraph styles/direct formatting, WFG15,
+DOCX and the Format panel. Text-group preflight uses measured lines and footnote
+reservations. Explicit breaks win; infeasible groups split; feasible individual
+keep-lines survives oversized chains. Columns/continuous sections are covered.
+Table-boundary keep-next is preserved with a DOCX warning, not laid out.
+
+WFG14 and mask bit 6 belong to PR #40; this independent main-based branch reserves
+them and uses WFG15 / bits 7 and 8. Resolve version-reader and mask integration
+when those branches are merged, then rerun all suites. Do not assign conflicting
+meanings to those versions or advertise this branch as a combined preview.
+
+Fresh Windows ARM64 Release build and six suites passed after independent review
+fixes. Ubuntu ARM64 final rebuild and six suites also passed (7.17 s).
+See `docs/evidence/2026-11-20-paragraph-pagination.md` for results.
+The new controls were inspected in a native snapshot; interactive/accessibility
+and full Word visual parity are not certified. Background/incremental pagination,
+widow/orphan control and table-row chaining remain future work.
+
+Owner explicitly deferred promotion until more features are ready. No main merge,
+Snap upload/promotion, public release or app version bump is authorized by this task.
+Continue focused PR increments; preserve running editors and use fresh build dirs.
+
+## Historical checkpoint (2026-11-18)
 
 **Released and live: v0.6.8** (tag `v0.6.8`, `main` a19fa8c).
 - Windows: <https://github.com/akmcypher/wordforge/releases/tag/v0.6.8>. The x64 and ARM64

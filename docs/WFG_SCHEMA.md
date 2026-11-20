@@ -1,5 +1,18 @@
 # Native WFG schema and migration
 
+**WFG15 (paragraph pagination, unmerged branch)** is written when a paragraph uses
+keep-with-next/keep-lines, sets their direct-formatting bits, or a paragraph style
+contains either optional override (including false). Paragraph and paragraph-style
+attributes `keepNext` and `keepLines` are booleans; omitted paragraph values are
+false, while omitted style attributes inherit. Direct masks reserve bit 7 for
+keep-with-next and bit 8 for keep-lines. Explicit false is retained by the mask.
+Older versions reject the new attributes and bits; other documents retain the
+previous version-selection rules and their old defaults.
+
+WFG14 and bit 6 are reserved for unmerged PR #40's tab stops. This independent
+main-based branch reads versions 1–13 and 15, not PR #40's development files.
+The readers/masks must be integrated before shipping both changes together.
+
 **WFG13 (sections and columns)** is written only when a paragraph ends a section or the
 last section has columns. The root may carry `columns` (1–6) and `columnGap` (0–144
 points) for the last section. `p` may carry `section` (`page`: the next section starts on

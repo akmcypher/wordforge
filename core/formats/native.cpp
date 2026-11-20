@@ -96,6 +96,10 @@ void writeStyle(pugi::xml_node root, const ParagraphStyle &style) {
         node.append_attribute("after") = *p.spaceAfter;
     if (p.lineSpacing)
         node.append_attribute("line") = *p.lineSpacing;
+    if (p.keepWithNext)
+        node.append_attribute("keepNext") = *p.keepWithNext;
+    if (p.keepLines)
+        node.append_attribute("keepLines") = *p.keepLines;
     writeCharacterProperties(node, style.character);
 }
 void writeCharacterProperties(pugi::xml_node node, const CharacterProperties &c) {
@@ -156,12 +160,13 @@ CharacterProperties readCharacterProperties(pugi::xml_node node) {
 }
 // `indented`: WFG11, which adds first-line and right indents and justified alignment.
 // `themed`: WFG12, which adds Word theme colours.
-ParagraphStyle readStyle(pugi::xml_node node, bool indented, bool themed) {
+ParagraphStyle readStyle(pugi::xml_node node, bool indented, bool themed, bool kept) {
     if (indented)
         attributes(node, {"id", "name", "basedOn", "next", "align", "list", "indent", "firstLine",
                           "rightIndent", "before", "after", "line", "family", "size", "bold",
                           "italic", "underline", "strike", "color", "highlight",
-                          themed ? "theme" : "id"});
+                          themed ? "theme" : "id", kept ? "keepNext" : "id",
+                          kept ? "keepLines" : "id"});
     else
         attributes(node, {"id", "name", "basedOn", "next", "align", "list", "indent", "before",
                           "after", "line", "family", "size", "bold", "italic", "underline",
@@ -182,6 +187,8 @@ ParagraphStyle readStyle(pugi::xml_node node, bool indented, bool themed) {
     style.paragraph.spaceBefore = real(node, "before", 0, 200);
     style.paragraph.spaceAfter = real(node, "after", 0, 200);
     style.paragraph.lineSpacing = real(node, "line", 1, 3);
+    style.paragraph.keepWithNext = flag(node, "keepNext");
+    style.paragraph.keepLines = flag(node, "keepLines");
     style.character = readCharacterProperties(node);
     return style;
 }
@@ -271,9 +278,21 @@ std::string serializeNative(const Document &document) {
         document.page.columns != 1 || document.page.columnGap != 36 ||
         std::any_of(document.paragraphs.begin(), document.paragraphs.end(),
                     [](const Paragraph &p) { return p.sectionBreak.has_value(); });
+    const bool kept =
+        std::any_of(document.paragraphs.begin(), document.paragraphs.end(),
+                    [](const Paragraph &p) {
+                        return p.keepWithNext || p.keepLines ||
+                               (p.direct & (KeepWithNextField | KeepLinesField));
+                    }) ||
+        std::any_of(document.styles.paragraphStyles.begin(), document.styles.paragraphStyles.end(),
+                    [](const ParagraphStyle &s) {
+                        return s.paragraph.keepWithNext.has_value() || s.paragraph.keepLines.has_value();
+                    });
     const bool semantic =
-        styled || banded || preserving || noted || reviewed || decorated || themed || sectioned;
-    root.append_attribute("version") = sectioned                    ? "13"
+        styled || banded || preserving || noted || reviewed || decorated || themed || sectioned || kept;
+    // WFG14 is reserved for tab stops in PR #40.
+    root.append_attribute("version") = kept                         ? "15"
+                                       : sectioned                  ? "13"
                                        : themed                     ? "12"
                                        : decorated                  ? "11"
                                        : reviewed                   ? "10"
@@ -442,6 +461,10 @@ std::string serializeNative(const Document &document) {
             paragraph.append_attribute("line") = p.lineSpacing;
         if (p.pageBreakBefore)
             paragraph.append_attribute("break") = true;
+        if (p.keepWithNext)
+            paragraph.append_attribute("keepNext") = true;
+        if (p.keepLines)
+            paragraph.append_attribute("keepLines") = true;
         if (const auto &end = p.sectionBreak) {
             paragraph.append_attribute("section") = end->continuous ? "continuous" : "page";
             paragraph.append_attribute("sectionWidth") = end->page.width;
@@ -541,11 +564,13 @@ Document parseNative(const std::string &input) {
     if (std::string_view(root.name()) != "wordforge" ||
         (version != "1" && version != "2" && version != "3" && version != "4" && version != "5" &&
          version != "6" && version != "7" && version != "8" && version != "9" &&
-         version != "10" && version != "11" && version != "12" && version != "13"))
+         version != "10" && version != "11" && version != "12" && version != "13" &&
+         version != "15"))
         throw std::runtime_error("Unsupported native document version");
     // WFG7 is WFG6 plus character styles; WFG8 adds headers and footers.
     // WFG9 adds DOCX package parts kept from an imported file.
-    const bool v13 = version == "13";
+    const bool v15 = version == "15";
+    const bool v13 = version == "13" || v15;
     const bool v12 = version == "12" || v13;
     const bool v11 = version == "11" || v12;
     const bool v10 = version == "10" || v11;
@@ -693,7 +718,7 @@ Document parseNative(const std::string &input) {
             continue;
         }
         if (v6 && std::string_view(p.name()) == "style") {
-            document.styles.paragraphStyles.push_back(readStyle(p, v11, v12));
+            document.styles.paragraphStyles.push_back(readStyle(p, v11, v12, v15));
             continue;
         }
         if (v7 && std::string_view(p.name()) == "charStyle") {
@@ -791,7 +816,8 @@ Document parseNative(const std::string &input) {
                            "rightIndent", "before", "line", "break", "id", "table", "row",
                            "column", v13 ? "section" : "id", v13 ? "sectionWidth" : "id",
                            v13 ? "sectionHeight" : "id", v13 ? "sectionMargin" : "id",
-                           v13 ? "sectionColumns" : "id", v13 ? "sectionGap" : "id"});
+                           v13 ? "sectionColumns" : "id", v13 ? "sectionGap" : "id",
+                           v15 ? "keepNext" : "id", v15 ? "keepLines" : "id"});
         else if (v6)
             attributes(p, {"align", "after", "list", "style", "direct", "indent", "before", "line",
                            "break", "id", "table", "row", "column"});
@@ -819,7 +845,7 @@ Document parseNative(const std::string &input) {
             if (p.attribute("style"))
                 paragraph.style = p.attribute("style").value();
             if (p.attribute("direct"))
-                paragraph.direct = mask(p, AllParagraphFields);
+                paragraph.direct = mask(p, v15 ? AllParagraphFields : 0x3f);
         } else
             paragraph.style = presetStyleId(static_cast<ParagraphPreset>(static_cast<int>(preset)));
         paragraph.indentLeft = number(p, "indent", 0, 0, 360);
@@ -828,6 +854,8 @@ Document parseNative(const std::string &input) {
         paragraph.spaceBefore = number(p, "before", 0, 0, 200);
         paragraph.lineSpacing = number(p, "line", 1.15, 1, 3);
         paragraph.pageBreakBefore = boolean(p, "break");
+        paragraph.keepWithNext = boolean(p, "keepNext");
+        paragraph.keepLines = boolean(p, "keepLines");
         if (p.attribute("section")) {
             const std::string_view kind = p.attribute("section").value();
             if (kind != "page" && kind != "continuous")

@@ -508,6 +508,69 @@ Layout LayoutEngine::compose(const Document &document) {
         listNumber = paragraph.list == ListKind::Decimal ? listNumber + 1 : 0;
         if (index && paragraph.pageBreakBefore)
             newPage();
+        if ((y > page.margin || sectionBottom > page.margin) &&
+            (paragraph.keepWithNext || paragraph.keepLines)) {
+            // Measure the minimum group before placing it. Explicit breaks and table
+            // boundaries end a text group; oversized groups use ordinary line splitting.
+            double bodyHeight = 0, noteHeight = 0;
+            double ownBody = 0, ownNotes = 0;
+            bool chainHasLink = false;
+            auto number = listNumber, noteNumber = notesSoFar + 1;
+            auto endnoteNumber = endnoteIds.size() + 1;
+            for (auto k = index; k < document.paragraphs.size(); ++k) {
+                const auto &p = document.paragraphs[k];
+                const bool follows = p.keepWithNext && !p.sectionBreak &&
+                    k + 1 < document.paragraphs.size() &&
+                    !document.paragraphs[k + 1].cell &&
+                    !document.paragraphs[k + 1].pageBreakBefore;
+                const auto &lines = measure(p, columnWidth, number, noteNumber, endnoteNumber);
+                const bool whole = p.keepLines || follows;
+                const auto end = whole ? lines.back().end : lines.front().end;
+                if (k != index)
+                    bodyHeight += p.spaceBefore;
+                for (const auto &line : lines) {
+                    bodyHeight += line.height;
+                    if (!whole) break;
+                }
+                for (const auto &block : notesIn(p, noteNumber, 0, end))
+                    noteHeight += block.height;
+                if (k == index) {
+                    ownBody = bodyHeight;
+                    ownNotes = noteHeight;
+                    chainHasLink = follows;
+                }
+                if (!follows || bodyHeight + noteHeight > availableHeight)
+                    break;
+                bodyHeight += p.spaceAfter;
+                noteNumber += countNotes(p);
+                endnoteNumber += countNotes(p, true);
+                number = document.paragraphs[k + 1].list == ListKind::Decimal ? number + 1 : 0;
+            }
+            const bool oversized = bodyHeight + noteHeight + (noteHeight > 0 ? noteGap : 0) >
+                                   availableHeight;
+            if (paragraph.keepLines && oversized) {
+                bodyHeight = ownBody;
+                noteHeight = ownNotes;
+            }
+            const double freshNeed = bodyHeight + noteHeight + (noteHeight > 0 ? noteGap : 0);
+            auto fitsHere = [&] {
+                const double before = y > sectionTop ? paragraph.spaceBefore : 0;
+                const double rule = noteHeight > 0 && pageNotes.empty() ? noteGap : 0;
+                return std::max(y + before + bodyHeight, sectionBottom) +
+                           notesHeight + noteHeight + rule <=
+                       page.height - page.margin;
+            };
+            const bool startsChain = chainHasLink &&
+                (index == 0 || !document.paragraphs[index - 1].keepWithNext ||
+                 document.paragraphs[index - 1].sectionBreak);
+            if ((startsChain && oversized) || (!fitsHere() && freshNeed <= availableHeight)) {
+                advance();
+                // A continuous section or notes already on this page can leave all
+                // remaining columns too short even when a fresh page can hold it.
+                if (freshNeed <= availableHeight && !fitsHere())
+                    newPage();
+            }
+        }
         if (y > sectionTop)
             y += paragraph.spaceBefore;
         const auto firstNote = notesSoFar + 1;

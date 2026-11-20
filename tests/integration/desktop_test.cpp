@@ -44,6 +44,38 @@
 class DesktopTest : public QObject {
     Q_OBJECT
   private slots:
+    void paragraphKeepsApplyToSelectionUndoAndPersist() {
+        QTemporaryDir directory;
+        wf::MainWindow window;
+        auto *view = window.pageView();
+        view->insertText("Heading\nBody\nLast");
+        auto *next = window.findChild<QCheckBox *>("panelKeepWithNext");
+        auto *lines = window.findChild<QCheckBox *>("panelKeepLines");
+        QVERIFY(next && lines);
+        view->selectAll();
+        next->click();
+        lines->click();
+        for (const auto &p : view->document().paragraphs) {
+            QVERIFY(p.keepWithNext);
+            QVERIFY(p.keepLines);
+        }
+        view->undo();
+        QVERIFY(next->isChecked());
+        QVERIFY(!lines->isChecked());
+        view->redo();
+        QVERIFY(lines->isChecked());
+        for (const auto &suffix : {QString("wfg"), QString("docx")}) {
+            const auto path = directory.filePath("keeps." + suffix);
+            window.saveFile(path);
+            wf::MainWindow restored;
+            restored.openFile(path);
+            QCOMPARE(restored.pageView()->document().text(), view->document().text());
+            for (const auto &p : restored.pageView()->document().paragraphs) {
+                QVERIFY(p.keepWithNext);
+                QVERIFY(p.keepLines);
+            }
+        }
+    }
     void minimalShellShowsMenusToolbarAndPanelWithoutARibbon() {
         wf::MainWindow window;
         window.show();

@@ -189,6 +189,13 @@ with documented policies. Mixed edits, undo branches and migration have regressi
 
 **Status: existing paragraph measurements and basic pages; v2 planned.**
 
+2026-11-20 branch slice of 2B: keep-with-next and keep-lines now participate in text
+group placement, including columns, continuous sections and footnote reservations,
+with style/WFG15/DOCX and Format panel integration. These group dependencies must
+be included in future 2A checkpoints; convergence and background layout are still
+planned. Table-row keep chaining and widow/orphan control remain open. Evidence:
+`docs/evidence/2026-11-20-paragraph-pagination.md`.
+
 Files: `core/layout/layout.*`, proposed `inline_layout.*`, `pagination.*`,
 `checkpoints.*`, `hit_testing.*`; `page_view.*` presentation boundary.
 

@@ -1,5 +1,18 @@
 # Current status
 
+2026-11-20 — Paragraph pagination, branch `codex/wordforge-paragraph-pagination`.
+Keep-with-next / keep-lines now flow through styles, direct formatting, WFG15,
+DOCX and two Format panel controls. Actual line/footnote measurements preflight
+text groups; explicit page/section breaks take priority, infeasible chains split,
+and independent keep-lines remains effective. Regressions cover columns, continuous
+sections, footnotes, oversized groups, style/default inheritance and explicit true/
+false, native schema masks, selected-paragraph editing, undo and save/reopen.
+Windows six suites pass after review fixes. Final Ubuntu verification is recorded
+in docs/evidence/2026-11-20-paragraph-pagination.md. Table-boundary keeps warn and
+remain preserved; widow/orphan and incremental/background layout are not implemented.
+Main-based branch reserves WFG14/bit 6 for unmerged tabs PR #40. No Snap promotion,
+merge, release or version bump; the owner wants more features first.
+
 2026-11-18 — Sections and columns (Milestone 1/3, WFG13). A paragraph can end a section;
 each section has its own page size, orientation, margin and 1–6 equal columns, while
 headers and footers stay document-wide. Layout gives every page its section's geometry,

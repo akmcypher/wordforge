@@ -3,6 +3,14 @@
 2026-11-13. Starting published baseline: 32b1461. The 0.4 DOCX/handoff commits extend it.
 These are capability statements, not production-readiness checkmarks.
 
+2026-11-20 branch addition: paragraph keep-with-next and keep-lines in the style
+cascade, native WFG15, DOCX and Format panel. Explicit style/direct overrides retain
+their presence, including false; inherited paragraphs remain inherited after DOCX
+export. Text grouping handles columns, continuous sections and footnote reservation.
+Table-boundary keep-next stays preserved with an import warning; it is not laid out.
+Widow/orphan and incremental/background pagination remain unsupported. This branch
+is separate from unmerged PR #40's WFG14 tab-stop work. See the pagination evidence.
+
 | Area | Starting baseline | Current additions through 0.6 | Major remaining requirement |
 |---|---|---|---|
 | Native stack | C++20, Qt6, Skia, HarfBuzz, FreeType, ICU | libzip for DOCX | Preserve architecture while extending semantics |

@@ -49,6 +49,10 @@ void apply(ParagraphFormat &target, const ParagraphProperties &properties) {
         target.spaceAfter = *properties.spaceAfter;
     if (properties.lineSpacing)
         target.lineSpacing = *properties.lineSpacing;
+    if (properties.keepWithNext)
+        target.keepWithNext = *properties.keepWithNext;
+    if (properties.keepLines)
+        target.keepLines = *properties.keepLines;
 }
 
 void checkText(const std::string &value, std::size_t limit, bool allowEmpty, const char *what) {
@@ -206,6 +210,8 @@ void fillUnset(ParagraphProperties &target, const ParagraphProperties &fallback)
     fill(target.spaceBefore, fallback.spaceBefore);
     fill(target.spaceAfter, fallback.spaceAfter);
     fill(target.lineSpacing, fallback.lineSpacing);
+    fill(target.keepWithNext, fallback.keepWithNext);
+    fill(target.keepLines, fallback.keepLines);
 }
 
 std::string uniqueStyleId(const StyleSheet &sheet, const std::string &name) {
@@ -340,6 +346,10 @@ ParagraphMask differingFields(const ParagraphFormat &a, const ParagraphFormat &b
         mask |= SpaceAfterField;
     if (a.lineSpacing != b.lineSpacing)
         mask |= LineSpacingField;
+    if (a.keepWithNext != b.keepWithNext)
+        mask |= KeepWithNextField;
+    if (a.keepLines != b.keepLines)
+        mask |= KeepLinesField;
     return mask;
 }
 
@@ -380,6 +390,10 @@ void inheritFields(ParagraphFormat &target, const ParagraphFormat &source, Parag
         target.spaceAfter = source.spaceAfter;
     if (!(keep & LineSpacingField))
         target.lineSpacing = source.lineSpacing;
+    if (!(keep & KeepWithNextField))
+        target.keepWithNext = source.keepWithNext;
+    if (!(keep & KeepLinesField))
+        target.keepLines = source.keepLines;
 }
 
 CharacterProperties propertiesFor(const CharacterStyle &base, const CharacterStyle &value) {
@@ -424,6 +438,10 @@ ParagraphProperties propertiesFor(const ParagraphFormat &base, const ParagraphFo
         result.spaceAfter = value.spaceAfter;
     if (base.lineSpacing != value.lineSpacing)
         result.lineSpacing = value.lineSpacing;
+    if (base.keepWithNext != value.keepWithNext)
+        result.keepWithNext = value.keepWithNext;
+    if (base.keepLines != value.keepLines)
+        result.keepLines = value.keepLines;
     return result;
 }
 
