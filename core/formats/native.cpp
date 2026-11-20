@@ -329,7 +329,7 @@ std::string serializeNative(const Document &document) {
                     [](const Paragraph &p) { return p.sectionBreak.has_value(); });
     const bool tabbed =
         std::any_of(document.paragraphs.begin(), document.paragraphs.end(),
-                    [](const auto &p) { return !p.tabs.empty(); }) ||
+                    [](const auto &p) { return !p.tabs.empty() || (p.direct & TabsField); }) ||
         std::any_of(document.styles.paragraphStyles.begin(), document.styles.paragraphStyles.end(),
                     [](const auto &s) { return s.paragraph.tabs.has_value(); });
     const bool kept =

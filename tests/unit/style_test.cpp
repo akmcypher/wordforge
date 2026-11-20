@@ -3,6 +3,21 @@
 #include <gtest/gtest.h>
 
 using namespace wf;
+TEST(NativeIntegration, ClearedDirectTabsChooseCompatibleVersion) {
+    for (std::size_t columns : {1u, 2u}) {
+        Editor e;
+        e.document.page.columns = columns;
+        e.formatParagraph([](auto &p) { p.tabs = {{240, TabAlignment::Right}}; });
+        e.formatParagraph([](auto &p) { p.tabs.clear(); });
+        const auto bytes = serializeNative(e.document);
+        EXPECT_NE(bytes.find("version=\"14\""), std::string::npos);
+        EXPECT_NO_THROW({
+            const auto restored = parseNative(bytes);
+            EXPECT_TRUE(restored.paragraphs[0].tabs.empty());
+            EXPECT_NE(restored.paragraphs[0].direct & TabsField, 0);
+        });
+    }
+}
 TEST(NativeIntegration, TabsAndKeepsShareWfg15WithoutLosingOverrides) {
     Editor e;
     e.document.styles.find("Normal")->paragraph.tabs =
