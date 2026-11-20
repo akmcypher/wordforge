@@ -2,7 +2,7 @@
 
 ## Current state (2026-11-18) — authoritative; everything below this section is history
 
-**Released and live: v0.6.8** (tag `v0.6.8`, `main` a19fa8c).
+**Released and live: v0.6.8** (tag `v0.6.8`, release commit a19fa8c).
 - Windows: <https://github.com/akmcypher/wordforge/releases/tag/v0.6.8>. The x64 and ARM64
   `-setup.exe` installers (Inno Setup, per-user, unsigned), portable ZIPs and
   `SHA256SUMS.txt`.
@@ -12,19 +12,22 @@
   20 topics and the homepage link are set. Not done (they need the user's accounts): Google
   Search Console with the sitemap, and the repo's social preview image.
 
-**In progress, not merged: branch `feat/sections` (off main a19fa8c).** Commit 9cb7c0b,
-"Add sections and columns" (WFG13), plus uncommitted doc updates: WFG_SCHEMA, AGENTS.md,
-README, COMPATIBILITY_MATRIX, CURRENT_STATUS and this file. All 6 suites passed on Windows
-ARM64 in `build\theme-1`. To finish it:
-1. Read the Word harness result in `out/fidelity/run9/report.md`. It was running against the
-   frozen tool `build\theme-1\roundtrip-sections.exe`. Before this branch, sections changed
-   in 3 documents (055–057) and the structure score was 99.7%. Add a "Sections" column to
-   the table in `docs/WORD_FIDELITY.md` and update its "Still lost" text.
-2. Commit the docs, push, and open a PR into `main`. Merge only when CI is green and the
-   user approves (see Working rules).
-3. Not yet checked interactively in the app: try Insert > Section break, Columns in the
-   Format panel, and a landscape section. `wordforge.exe --snapshot out.png file.docx`
-   captures the window (used for `out/showcase/`).
+**Sections merged: PR #38, `main` dd2730a.** Both hosted Windows ARM64 and Ubuntu x64
+CI passed before the owner's approved fast-forward. The run9 Word results are recorded in
+`docs/WORD_FIDELITY.md`: 114 generated documents, matching structure and Word page counts;
+this is not visual or customer-document certification. No release or stable promotion.
+
+**Current UI slice: `codex/wordforge-section-ui`, based on dd2730a.** Native Windows
+checks exercised next-page and continuous breaks, two columns and a landscape section,
+with the first section retaining Portrait/One column. Fixed the two recorded flaws:
+the toolbar's shared CSS minimum width let Qt shrink labels below their content size;
+document reset used Arial 12 instead of the initial caret's formatting, affecting both
+the controls and immediate typing. Three regressions cover sizing/overflow and DOCX
+open/typing through the core and desktop. See `docs/evidence/2026-11-18-section-ui.md`
+for verification, limitations and the separate Escape-key warning found during checking.
+Older notes calling `feat/sections` unmerged are historical.
+
+**Merged section behavior:**
 - What it does: `Paragraph::sectionBreak` (`SectionBreak{PageStyle page; bool continuous}`)
   ends a section. `PageStyle` gains `columns` (1–6) and `columnGap`. Header, footer and
   first-page settings stay on `document.page` and must be empty in breaks.
@@ -58,18 +61,15 @@ layout). Word harness: 100/100 rounded (99.6).
 tables/pictures, headers/footers, merges and widths.
 
 **Next work, in order:**
-1. Finish and merge `feat/sections`. Release 0.6.9 only when the user asks (same flow as
-   0.6.8).
-2. Two small UI flaws seen in the 0.6.8 screenshot: the toolbar labels are cut off
-   ("I…t", "Fo…at", "Com…nds"), and the font box shows Arial for Word text in another font
-   (the typing style at the caret?).
-3. Fidelity follow-ups: right-aligned TOC page numbers with dot leaders (needs tab stops;
+1. Review the focused section-UI PR; merge only after green CI and owner approval.
+   Public releases and Snap stable promotion remain separate tasks.
+2. Fidelity follow-ups: right-aligned TOC page numbers with dot leaders (needs tab stops;
    `tabs` paragraph option unsupported), formatted footnotes/comments, comment replies,
    nested list marker styles, per-cell borders, floating pictures, unequal margins and
    columns, per-section headers, column balancing.
-4. Interop: `.doc`, `.odt`, RTF import; LibreOffice testing (it is not installed; ask
+3. Interop: `.doc`, `.odt`, RTF import; LibreOffice testing (it is not installed; ask
    before installing).
-5. Milestone 2 performance (incremental pagination, background layout, 100/500/1,000-page
+4. Milestone 2 performance (incremental pagination, background layout, 100/500/1,000-page
    measurements), then Milestone 4 (code signing, accessibility, fresh-install testing).
 
 **Analytics (2026-11-17):** about 9 outside snap devices (US 5, India 2, Germany, France),

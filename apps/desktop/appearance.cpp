@@ -112,7 +112,7 @@ void applyAppearance(QWidget &window, Theme theme) {
         QToolButton:focus { border-color: %1; }
         QToolButton:disabled { color: palette(placeholder-text); }
         QToolBar#compactToolbar { padding: 4px 8px; border-bottom: 1px solid %2; }
-        QToolBar#compactToolbar QToolButton { padding: 3px 5px; min-width: 22px; }
+        QToolBar#compactToolbar QToolButton { padding: 3px 5px; }
         QToolBar#compactToolbar::separator { width: 1px; background: %2; margin: 6px 6px; }
         QDockWidget#formatPanel::title { padding: 8px 12px; font-weight: 600; }
         QLabel#panelSection { color: %4; font-weight: 600; }

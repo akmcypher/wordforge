@@ -1,5 +1,16 @@
 # Current status
 
+2026-11-18 — Section UI verification and caret/toolbar fixes. Native Windows checks
+exercised next-page/continuous section breaks, two-column text and a landscape section;
+the first section kept Portrait/One column. Removed the compact toolbar's CSS minimum
+width, which let Qt shrink text below its content size; narrow windows use Qt overflow.
+Editor::reset now initializes typing formatting from the initial caret, fixing the font
+box and immediate typing after opening a formatted document. Three regressions added in
+document_test.cpp and desktop_test.cpp; desktop tests now use the app's Fusion style and
+Windows font. All six CTest suites pass on Windows ARM64 (one Ubuntu-only font case
+skipped) and WSL Ubuntu ARM64. Evidence and limits: docs/evidence/2026-11-18-section-ui.md.
+PR #38 is merged at main dd2730a; the public release remains v0.6.8.
+
 2026-11-18 — Sections and columns (Milestone 1/3, WFG13). A paragraph can end a section;
 each section has its own page size, orientation, margin and 1–6 equal columns, while
 headers and footers stay document-wide. Layout gives every page its section's geometry,

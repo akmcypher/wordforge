@@ -44,6 +44,58 @@
 class DesktopTest : public QObject {
     Q_OBJECT
   private slots:
+    void toolbarTextFitsWithoutElision() {
+        wf::MainWindow window;
+        window.resize(1600, 850);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        for (int width : {1600, 1180, 800}) {
+            window.resize(width, 850);
+            QApplication::processEvents();
+            for (const auto *name :
+                 {"insertMenuButton", "formatPanelToolButton", "commandPaletteToolButton"}) {
+                auto *button = window.findChild<QToolButton *>(name);
+                QVERIFY(button);
+                if (!button->isVisible()) {
+                    QVERIFY(width < 1600);
+                    auto *extension = window.findChild<QToolButton *>("qt_toolbar_ext_button");
+                    QVERIFY(extension && extension->isVisible());
+                    continue;
+                }
+                // Qt's content minimum includes the label, padding and menu indicator.
+                const auto required = button->minimumSizeHint().width();
+                QVERIFY2(button->width() >= required,
+                         qPrintable(QString("%1: %2 < %3")
+                                        .arg(name)
+                                        .arg(button->width())
+                                        .arg(required)));
+            }
+        }
+    }
+    void openingFormattedDocumentUpdatesFontAndImmediateTyping() {
+        wf::Editor source;
+        source.replace(u"Formatted text");
+        source.selection = {{0, 0}, {0, 14}};
+        source.format([](auto &s) {
+            s.family = "Georgia";
+            s.size = 19;
+        });
+        QTemporaryDir directory;
+        const auto path = directory.filePath("formatted.docx");
+        wf::MainWindow writer;
+        writer.pageView()->setDocument(source.document);
+        writer.saveFile(path);
+        QVERIFY(QFile::exists(path));
+        wf::MainWindow window;
+        window.openFile(path);
+        auto *family = window.findChild<QComboBox *>("fontFamilyCombo");
+        QCOMPARE(family->currentIndex() < 0 ? family->placeholderText() : family->currentText(),
+                 QString("Georgia"));
+        QCOMPARE(window.findChild<QSpinBox *>("fontSizeSpin")->value(), 19);
+        window.pageView()->insertText("X");
+        QCOMPARE(window.pageView()->document().paragraphs[0].runs[0].style.family,
+                 std::string("Georgia"));
+    }
     void minimalShellShowsMenusToolbarAndPanelWithoutARibbon() {
         wf::MainWindow window;
         window.show();
@@ -377,6 +429,10 @@ class DesktopTest : public QObject {
     }
     void initTestCase() {
         QStandardPaths::setTestModeEnabled(true);
+        QApplication::setStyle("Fusion");
+#ifdef Q_OS_WIN
+        QApplication::setFont(QFont("Segoe UI", 10));
+#endif
     }
     void periodicRecoveryIsRemovedOnlyAfterFormattedSave() {
         QTemporaryDir directory;

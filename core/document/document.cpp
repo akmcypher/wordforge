@@ -1154,7 +1154,8 @@ void Editor::reset(Document d) {
         throw std::logic_error("Reset cannot run inside a transaction");
     d.pruneUnusedImages();
     validateDocument(d);
-    restore({std::move(d), {}, {}}, false);
+    const auto initialStyle = d.styleAt({0, 0});
+    restore({std::move(d), {}, initialStyle}, false);
     undo_.clear();
     redo_.clear();
 }
