@@ -1,5 +1,12 @@
 # Current status
 
+2026-11-22 save/handoff: baseline-text feature code 66ce15f is committed/pushed
+on `codex/wordforge-baseline-text`; PR #45 remains open. Native CI run 45037411672
+was in progress at checkpoint time, not yet green. Current continuation instructions:
+`docs/handoffs/2026-11-22-agent-continuation.md`. Owner requests frequent verified
+Git saves and continued autonomous feature implementation.
+
+
 2026-11-22 — Superscript/subscript feature on `codex/wordforge-baseline-text`,
 based on merged PR #44 / main bdf5012. Typed character baseline follows paragraph
 and character styles, explicit direct formatting, undo, WFG17 and DOCX vertAlign.

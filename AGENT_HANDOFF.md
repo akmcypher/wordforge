@@ -1,5 +1,12 @@
 # Wordforge handoff — start here
 
+Latest continuation checkpoint: [docs/handoffs/2026-11-22-agent-continuation.md](docs/handoffs/2026-11-22-agent-continuation.md).
+The owner explicitly requested frequent saves and a handoff for another agent.
+Feature code 66ce15f is pushed on `codex/wordforge-baseline-text`, open PR #45;
+CI was in progress at save time. Inspect the live PR head before continuing.
+Keep saving focused verified increments and update this handoff at each checkpoint.
+
+
 ## Current work (2026-11-22) — superscript/subscript
 
 The owner asked for continued implementation after PR #44 was pushed to main at
