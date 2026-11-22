@@ -92,6 +92,23 @@ tables/images, broader desktop testing and recovery across upgrades remain open.
 
 ## Publication record
 
+* 2026-11-23 IST: stable updated to 0.6.9-preview, amd64 revision 60 / ARM64 59,
+  clean source 53f8fdcefacaa8207438f97286e30ae304dd5266. Run 45058770992 passed
+  both installed strict-confinement checks before edge upload. Manual promotion
+  run 45060433513 succeeded after verifying both Store archives and repeated
+  public stable verification afterward. No version-label or Windows release change.
+  Source includes widow/orphan control and superscript/subscript. WFG16/17 files
+  require the newer reader.
+
+Manual promotion is now available through `snap-promote.yml` workflow_dispatch on
+main, with `source_commit`, `amd64_revision` and `arm64_revision` inputs. Use only
+after explicit owner authorization. Both current edge archives, clean source and
+architecture, Store SHA3-384 and executable SHA256, and source ancestry on main
+must verify before either release. The existing CI publishing secret is used;
+stable pointers and archive identity are verified afterward. Only stale-pointer
+propagation retries; checksum/source failures stop. Architecture releases are
+sequential, not atomic. Inspect both channels after a failure; never infer rollback.
+
 * 2026-11-13: name `wordforge` registered. First upload (revision 1) was rejected
   by the Store: `desktop` is not allowed in a packed snap's `meta/snap.yaml`; the
   launcher now ships as `meta/gui/wordforge.desktop` (d344e7e). Released to

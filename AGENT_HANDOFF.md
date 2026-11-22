@@ -1,5 +1,24 @@
 # Wordforge handoff — start here
 
+## Snap stable published (2026-11-23 IST)
+
+Owner-authorized publication is complete: stable `0.6.9-preview`, amd64 revision
+**60** and ARM64 revision **59**, clean source
+`53f8fdcefacaa8207438f97286e30ae304dd5266`. Both archives passed installed strict
+confinement in run 45058770992; Store SHA3-384, source/architecture/clean state and
+executable SHA256 were verified before and after promotion. Do not repeat promotion.
+
+PR #45 is merged. PR #46 added the reviewed main-only manual promotion workflow
+using the existing CI publishing secret because local Snap authentication was
+unavailable. Its Windows/Ubuntu CI passed (45059784254), and it merged at 81ab0aa.
+Promotion run 45060433513 succeeded, including public stable verification:
+https://github.com/akmcypher/wordforge/actions/runs/45060433513
+
+No version-label change or new Windows release/tag. Released Windows 0.6.9 still
+predates WFG16/17; new native files require the newer reader. The roadmap remains
+unfinished. Continue autonomous engineering and verified saves. Older notes below
+saying PR #45 is open or stable is revisions 56/55 are historical.
+
 Latest continuation checkpoint: [docs/handoffs/2026-11-22-agent-continuation.md](docs/handoffs/2026-11-22-agent-continuation.md).
 The owner explicitly requested frequent saves and a handoff for another agent.
 Feature code 66ce15f is pushed on `codex/wordforge-baseline-text`, open PR #45;

@@ -1,5 +1,18 @@
 # Continue Wordforge engineering from this checkpoint
 
+## Superseding publication checkpoint, 2026-11-23 IST
+
+PR #45 is merged at 53f8fdc. Owner-authorized Snap stable publication is complete:
+`0.6.9-preview`, amd64 revision 60 and ARM64 revision 59. Both embed clean source
+53f8fdcefacaa8207438f97286e30ae304dd5266 and passed strict-confinement tests in
+run 45058770992. Store archives and executable hashes were independently verified
+before/after promotion. Do not repeat it. PR #46 added the reviewed manual promotion
+workflow, passed native CI 45059784254, and merged at 81ab0aa. Promotion run
+45060433513 succeeded, including public stable verification. Older open/pending/
+revision 56/55 statements below describe the previous checkpoint. Version label and
+Windows downloads remain unchanged; WFG16/17 files need the newer reader. Continue
+the unfinished engineering roadmap and frequent verified saves.
+
 Saved 2026-11-22, approximately 20:50 IST. This is an engineering handoff, not a
 claim that the Word alternative is complete. Read AGENTS.md and its ordered entry
 documents first; this file supplies the current continuation point.

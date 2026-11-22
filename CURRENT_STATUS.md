@@ -1,5 +1,12 @@
 # Current status
 
+2026-11-23 IST — Snap stable publication complete: `0.6.9-preview`, amd64 60 /
+ARM64 59, clean source 53f8fdc. Both installed strict-confinement checks passed;
+Store archives/source/executable hashes verified before and after promotion.
+PR #45 is merged; promotion workflow PR #46 merged at 81ab0aa after green CI.
+Promotion run 45060433513 succeeded. No version-label or Windows release change.
+Earlier pending/open/revision 56/55 entries below are historical.
+
 2026-11-22 save/handoff: baseline-text feature code 66ce15f is committed/pushed
 on `codex/wordforge-baseline-text`; PR #45 remains open. Native CI run 45037411672
 was in progress at checkpoint time, not yet green. Current continuation instructions:
