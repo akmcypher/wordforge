@@ -92,6 +92,11 @@ tables/images, broader desktop testing and recovery across upgrades remain open.
 
 ## Publication record
 
+* 2026-11-23 IST: stable updated to 0.6.10-preview, amd64 revision 64 / ARM64 63,
+  source 7eedc2b2e78f98beef27fa2b4e2e9ab5e22982b7 (tag v0.6.10). Edge run 45065655776
+  passed strict-confinement checks (the amd64 upload was rerun after a Store
+  "Connection aborted"). Promotion run 45070162245 verified both archives before
+  release and the public stable pointers afterward.
 * 2026-11-23 IST: stable updated to 0.6.9-preview, amd64 revision 60 / ARM64 59,
   clean source 53f8fdcefacaa8207438f97286e30ae304dd5266. Run 45058770992 passed
   both installed strict-confinement checks before edge upload. Manual promotion

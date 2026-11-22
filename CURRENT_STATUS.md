@@ -8,11 +8,12 @@ per-feature support table.
 
 | Channel | Version | Source | Notes |
 |---|---|---|---|
-| GitHub release (Windows x64/ARM64) | 0.6.9 | d7afd47 | Reads WFG1–15 |
-| Snap stable (amd64 60 / arm64 59) | 0.6.9-preview label | 53f8fdc | Includes WFG16/17 features |
-| In preparation | 0.6.10 | `release/v0.6.10` | Realigns both channels |
+| GitHub release (Windows x64/ARM64) | 0.6.10 | 7eedc2b | Released 2026-11-23, checksums verified |
+| Snap stable (amd64 64 / arm64 63) | 0.6.10-preview | 7eedc2b | Promotion run 45070162245 |
 
-## Implemented since 0.6.9 (on main)
+Both channels read WFG1–17. Previous release: 0.6.9 (d7afd47).
+
+## In 0.6.10 (since 0.6.9)
 
 - **Widow/orphan control** (PR #44):
   - Covers styles, direct formatting, WFG16, DOCX and the Format panel.

@@ -6,13 +6,12 @@ Condensed on 2026-11-23. The full earlier notes are kept verbatim in
 
 ## Current state
 
-- `main` holds everything through PR #47: sections/columns, tab stops and TOC dot
+- `main` holds everything through PR #48 (release 0.6.10): sections/columns, tab stops and TOC dot
   leaders, keep-with-next/keep-lines, widow/orphan control and superscript/subscript.
   Native format WFG17; the reader supports WFG1–17.
-- Last published release: **v0.6.9** (Windows, tag at d7afd47). Snap stable is labelled
-  `0.6.9-preview` (amd64 rev 60, arm64 rev 59, source 53f8fdc), but it already includes
-  WFG16/17 features that Windows 0.6.9 can't read. **0.6.10** realigns the two (branch
-  `release/v0.6.10`, notes in `docs/releases/v0.6.10.md`).
+- Last published release: **v0.6.10** (tag at 7eedc2b, 2026-11-23). Windows installers
+  and ZIPs are checksum-verified; Snap stable is `0.6.10-preview`, amd64 rev 64 / arm64
+  rev 63, promoted by verified run 45070162245. Both channels read WFG1–17.
 - PR #43 (0.6.9 publication evidence) is open on `codex/release-0.6.9-handoff`.
   Preserve it, and don't delete other branches or worktrees without asking.
 - Latest verification: a fresh Windows build of main 56ab612 passes all six CTest suites
@@ -22,23 +21,21 @@ Condensed on 2026-11-23. The full earlier notes are kept verbatim in
 
 ## Next work (in order)
 
-1. Finish the 0.6.10 release: PR, then green CI, then user approval, then
-   fast-forward merge, then tag. Promote the Snap to stable only on explicit approval.
-2. **Phase 2A incremental pagination** (M2 performance, not started). Look at
+1. **Phase 2A incremental pagination** (M2 performance, not started). Look at
    `ChangeSet`, `LayoutEngine` and `PageView` first. Compare against a full-layout
    oracle for early, middle and end edits. Dependency signatures must cover styles,
    sections, keeps, widow/orphan, lists, tables and notes. Reusing the measurement cache
    is not the same as incremental page composition.
-3. Phase 1C/3/4 from `ENGINEERING_ROADMAP.md`:
+2. Phase 1C/3/4 from `ENGINEERING_ROADMAP.md`:
    - numbering definitions
    - table styles and row splitting
    - theme fonts
    - character spacing, language and OpenType controls
    - DOCX fidelity
    - accessibility
-4. Rerun the Word fidelity harness for widow/orphan and superscript/subscript once Word
+3. Rerun the Word fidelity harness for widow/orphan and superscript/subscript once Word
    COM works.
-5. Housekeeping: about 35 local / 48 remote stale branches and old `build/` folders.
+4. Housekeeping: about 35 local / 48 remote stale branches and old `build/` folders.
    Ask before deleting.
 
 Known debt:
