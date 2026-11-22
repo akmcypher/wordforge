@@ -37,7 +37,14 @@ writes, not every document people have.
 
 ## Results
 
-2026-11-17–18, Microsoft Word 16.0 (build 16.0.20527), 114 documents:
+Release 0.6.9 was rechecked on 2026-11-20 with Microsoft Word 16.0 (build
+16.0.20527), using all 114 generated documents. Word opened all outputs; body/other
+text, paragraph formatting, structural counts and Word page counts matched at
+100%; sampled character formatting matched at 99.5%. The rounded score remains
+100/100. These structural samples do not establish pixel parity or full DOCX
+preservation. See `docs/evidence/2026-11-20-release-0.6.9.md`.
+
+Earlier runs, 2026-11-17–18, Microsoft Word 16.0 (build 16.0.20527), 114 documents:
 
 | Measure | First run | Page breaks, fonts, colour | Indents, justification | Styles, theme colours, links, endnotes | Fields | Sections |
 |---|---|---|---|---|---|---|

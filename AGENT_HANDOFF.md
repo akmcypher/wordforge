@@ -1,5 +1,13 @@
 # Wordforge handoff — start here
 
+**Canonical continuation handoff (2026-11-23 IST):**
+[docs/handoffs/2026-11-23-final-handoff.md](docs/handoffs/2026-11-23-final-handoff.md).
+This integration reconciles PR #43's original release evidence and PR #47's latest
+Snap record, retaining all feature and promotion work from PRs #44–46. The owner
+authorized merging everything and requested this fresh handoff. Older snapshots
+below are historical; their open/pending/old revision statements are superseded.
+Continue the unfinished roadmap autonomously and save verified checkpoints often.
+
 ## Snap stable published (2026-11-23 IST)
 
 Owner-authorized publication is complete: stable `0.6.9-preview`, amd64 revision

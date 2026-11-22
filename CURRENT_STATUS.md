@@ -1,5 +1,11 @@
 # Current status
 
+2026-11-23 IST — Consolidated integration/handoff: retains feature/promotion PRs
+#44–46, original release evidence #43 and latest Snap publication record #47.
+Canonical continuation: `docs/handoffs/2026-11-23-final-handoff.md`. Older entries
+are dated snapshots, not current open-PR or channel claims. Snap stable remains
+verified amd64 60 / ARM64 59 from source 53f8fdc; no repeat promotion is needed.
+
 2026-11-23 IST — Snap stable publication complete: `0.6.9-preview`, amd64 60 /
 ARM64 59, clean source 53f8fdc. Both installed strict-confinement checks passed;
 Store archives/source/executable hashes verified before and after promotion.
