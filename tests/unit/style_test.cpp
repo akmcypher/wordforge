@@ -3,6 +3,34 @@
 #include <gtest/gtest.h>
 
 using namespace wf;
+TEST(Widows, NativeAndStyleInheritanceRetainExplicitFalse) {
+    Editor e;
+    EXPECT_FALSE(parseNative(serializeNative(e.document)).paragraphs[0].widowControl);
+    e.document.styles.find("Normal")->paragraph.widowControl = true;
+    e.applyStyle("Normal");
+    EXPECT_TRUE(e.document.paragraphs[0].widowControl);
+    e.formatParagraph([](auto &p) { p.widowControl = false; });
+    const auto bytes = serializeNative(e.document);
+    ASSERT_NE(bytes.find("version=\"16\""), std::string::npos);
+    const auto restored = parseNative(bytes);
+    EXPECT_FALSE(restored.paragraphs[0].widowControl);
+    EXPECT_TRUE(resolveStyle(restored.styles, "Normal").paragraph.widowControl);
+    EXPECT_NE(restored.paragraphs[0].direct & WidowControlField, 0);
+    auto old = bytes;
+    old.replace(old.find("version=\"16\""), 12, "version=\"15\"");
+    EXPECT_THROW(parseNative(old), std::runtime_error);
+    e.undo();
+    EXPECT_TRUE(e.document.paragraphs[0].widowControl);
+}
+TEST(Widows, NativeOldVersionRejectsNewMaskEvenWithoutNewAttributes) {
+    Editor e;
+    e.document.paragraphs[0].direct = WidowControlField;
+    auto bytes = serializeNative(e.document);
+    ASSERT_NE(bytes.find("version=\"16\""), std::string::npos);
+    EXPECT_EQ(parseNative(bytes).paragraphs[0].direct, WidowControlField);
+    bytes.replace(bytes.find("version=\"16\""), 12, "version=\"15\"");
+    EXPECT_THROW(parseNative(bytes), std::runtime_error);
+}
 TEST(NativeIntegration, ClearedDirectTabsChooseCompatibleVersion) {
     for (std::size_t columns : {1u, 2u}) {
         Editor e;

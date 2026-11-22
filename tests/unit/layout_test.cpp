@@ -5,6 +5,153 @@
 #include <gtest/gtest.h>
 #include <map>
 using namespace wf;
+namespace {
+Editor widowFixture(Shaper &shaper, std::size_t leading, std::size_t words, double slots) {
+    Paragraph probe;
+    probe.runs = {{u"lineword ", {}}};
+    const auto line = shaper.shape(probe, 0, probe.text().size());
+    std::u16string text;
+    for (std::size_t n = 0; n < leading; ++n) text += u"lineword\n";
+    for (std::size_t n = 0; n < words; ++n) text += n ? u" lineword" : u"lineword";
+    Editor e;
+    e.replace(text);
+    e.selection = {{0, 0}, Position{e.document.paragraphs.size() - 1, e.document.paragraphs.back().text().size()}};
+    e.formatParagraph([](auto &p) { p.spaceBefore = p.spaceAfter = 0; p.lineSpacing = 1; });
+    e.document.page = {line.width + 42, (line.ascent + line.descent) * slots + 40, 20};
+    e.selection = {{leading, 0}, {leading, 0}};
+    return e;
+}
+}
+TEST(Widows, AvoidsSingleFirstAndLastLinesAndKeepsThreeLines) {
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    auto orphan = widowFixture(shaper, 3, 4, 4.5);
+    EXPECT_EQ(engine.compose(orphan.document).lines[3].page, 0u);
+    orphan.formatParagraph([](auto &p) { p.widowControl = true; });
+    const auto protectedFirst = engine.compose(orphan.document);
+    ASSERT_EQ(protectedFirst.lines.size(), 7u);
+    for (std::size_t i = 3; i < 7; ++i) EXPECT_EQ(protectedFirst.lines[i].page, 1u);
+    engine.clear();
+    auto widow = widowFixture(shaper, 0, 4, 3.5);
+    widow.formatParagraph([](auto &p) { p.widowControl = true; });
+    const auto protectedLast = engine.compose(widow.document);
+    ASSERT_EQ(protectedLast.lines.size(), 4u);
+    EXPECT_EQ(protectedLast.lines[0].page, 0u);
+    EXPECT_EQ(protectedLast.lines[1].page, 0u);
+    EXPECT_EQ(protectedLast.lines[2].page, 1u);
+    EXPECT_EQ(protectedLast.lines[3].page, 1u);
+    engine.clear();
+    auto three = widowFixture(shaper, 2, 3, 4.5);
+    three.formatParagraph([](auto &p) { p.widowControl = true; });
+    const auto protectedThree = engine.compose(three.document);
+    ASSERT_EQ(protectedThree.lines.size(), 5u);
+    for (std::size_t i = 2; i < 5; ++i) EXPECT_EQ(protectedThree.lines[i].page, 1u);
+}
+TEST(Widows, ColumnsContinuousSectionsAndKeepsUseTheSameReservations) {
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    auto columns = widowFixture(shaper, 0, 7, 3.5);
+    columns.document.page.width = 2 * (columns.document.page.width - 40) + 40 +
+                                  columns.document.page.columnGap;
+    columns.document.page.columns = 2;
+    columns.formatParagraph([](auto &p) { p.widowControl = true; });
+    const auto layout = engine.compose(columns.document);
+    ASSERT_EQ(layout.lines.size(), 7u);
+    EXPECT_EQ(layout.lines[0].page, 0u);
+    EXPECT_EQ(layout.lines[3].page, 0u);
+    EXPECT_GT(layout.lines[3].x, layout.lines[0].x);
+    EXPECT_EQ(layout.lines[4].page, 0u);
+    EXPECT_EQ(layout.lines[5].page, 1u);
+    EXPECT_EQ(layout.lines[6].page, 1u);
+    engine.clear();
+    auto continuous = widowFixture(shaper, 3, 4, 4.5);
+    continuous.document.paragraphs[2].sectionBreak = SectionBreak{continuous.document.page, true};
+    continuous.formatParagraph([](auto &p) { p.widowControl = true; });
+    const auto continued = engine.compose(continuous.document);
+    EXPECT_EQ(continued.lines[3].page, 1u);
+    EXPECT_EQ(continued.lines.back().page, 1u);
+    engine.clear();
+    auto kept = widowFixture(shaper, 3, 3, 4.5);
+    kept.formatParagraph([](auto &p) { p.widowControl = true; });
+    kept.selection = {{2, 0}, {2, 0}};
+    kept.formatParagraph([](auto &p) { p.keepWithNext = true; });
+    const auto grouped = engine.compose(kept.document);
+    EXPECT_EQ(grouped.lines[2].page, 1u);
+    for (std::size_t n = 3; n < 6; ++n) EXPECT_EQ(grouped.lines[n].page, 1u);
+}
+TEST(Widows, FeasibleKeepPairWinsWhenThreeLineBodyCannotFitWithHeading) {
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    auto e = widowFixture(shaper, 1, 3, 3.5);
+    e.formatParagraph([](auto &p) { p.widowControl = true; });
+    e.selection = {{0, 0}, {0, 0}};
+    e.formatParagraph([](auto &p) { p.keepWithNext = true; });
+    const auto layout = engine.compose(e.document);
+    ASSERT_EQ(layout.lines.size(), 4u);
+    EXPECT_EQ(layout.lines[0].page, layout.lines[1].page);
+    EXPECT_EQ(layout.lines[1].page, layout.lines[2].page);
+}
+TEST(Widows, FootnotesReserveSpaceBelowEarlierColumns) {
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    Editor e;
+    e.replace(u"a\nb\nc\nd\nbody words words words words words words words words words words words");
+    e.selection = {{0, 0}, {4, e.document.paragraphs[4].text().size()}};
+    e.formatParagraph([](auto &p) {
+        p.spaceBefore = p.spaceAfter = 0; p.lineSpacing = 1;
+    });
+    const double height = engine.compose(e.document).lines[0].height;
+    e.document.page = {320, height * 4.5 + 40, 20};
+    e.document.page.columns = 2;
+    e.selection = {{4, 4}, {4, 4}};
+    e.insertFootnote(u"A note.");
+    e.formatParagraph([](auto &p) { p.widowControl = true; });
+    const auto layout = engine.compose(e.document);
+    ASSERT_EQ(layout.noteSeparators.size(), 1u);
+    EXPECT_EQ(layout.lines[4].page, 1u);
+    for (const auto &line : layout.lines)
+        if (line.page == layout.noteSeparators[0].first)
+            EXPECT_LE(line.baseline - line.shaped.ascent + line.height,
+                      layout.noteSeparators[0].second);
+}
+TEST(Widows, LateFootnoteDoesNotCreateAnAvoidableFinalWidow) {
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    auto e = widowFixture(shaper, 0, 7, 4.1);
+    e.document.page.width += 3;
+    e.selection = {{0, e.document.paragraphs[0].text().size()},
+                   {0, e.document.paragraphs[0].text().size()}};
+    e.insertFootnote(u"A note.");
+    e.formatParagraph([](auto &p) { p.widowControl = true; });
+    const auto layout = engine.compose(e.document);
+    ASSERT_EQ(layout.lines.size(), 7u);
+    EXPECT_EQ(layout.lines[0].page, 0u);
+    EXPECT_EQ(layout.lines[2].page, 0u);
+    EXPECT_EQ(layout.lines[3].page, 1u);
+    EXPECT_EQ(layout.lines[4].page, 1u);
+    EXPECT_EQ(layout.lines[5].page, 2u);
+    EXPECT_EQ(layout.lines[6].page, 2u);
+}
+TEST(Widows, ImpossibleConstraintsRelaxAndEditsMatchFreshComposition) {
+    Shaper shaper(systemFontFiles());
+    LayoutEngine cached(shaper);
+    auto e = widowFixture(shaper, 0, 3, 2.5);
+    e.formatParagraph([](auto &p) { p.widowControl = true; });
+    auto layout = cached.compose(e.document);
+    EXPECT_EQ(layout.pageCount, 2u);
+    EXPECT_EQ(layout.lines.front().page, 0u);
+    e.replace(u"lineword lineword lineword lineword lineword lineword lineword");
+    e.formatParagraph([](auto &p) { p.widowControl = true; p.pageBreakBefore = true; });
+    layout = cached.compose(e.document);
+    LayoutEngine fresh(shaper);
+    const auto oracle = fresh.compose(e.document);
+    ASSERT_EQ(layout.lines.size(), oracle.lines.size());
+    EXPECT_EQ(layout.pageCount, oracle.pageCount);
+    for (std::size_t n = 0; n < layout.lines.size(); ++n) {
+        EXPECT_EQ(layout.lines[n].page, oracle.lines[n].page);
+        EXPECT_DOUBLE_EQ(layout.lines[n].baseline, oracle.lines[n].baseline);
+    }
+}
 TEST(Pagination, KeepsHeadingAndShortParagraphTogether) {
     Shaper shaper(systemFontFiles());
     LayoutEngine engine(shaper);

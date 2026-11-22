@@ -1,5 +1,20 @@
 # Current status
 
+2026-11-22 — Further feature work on `codex/wordforge-widow-orphan`, based on main
+d7afd47. Widow/orphan control now follows paragraph styles/direct formatting, WFG16,
+DOCX and a Format checkbox with selection, undo/redo and save/reopen coverage.
+Measured reservations protect first/last pairs and three-line paragraphs where
+feasible, including columns, continuous sections and full-width notes. Explicit
+breaks and feasible keep groups take priority; impossible constraints relax.
+Native/new-native defaults remain off; absent DOCX hierarchy defaults on.
+See `docs/evidence/2026-11-22-widow-orphan.md` for final checks and limitations.
+This is feature work, without a version bump or public release.
+
+The earlier release-preparation entry below is historical: v0.6.9 was published
+from d7afd47 on 2026-11-20; Snap stable is 0.6.9-preview, amd64 revision 56 and
+ARM64 revision 55. PR #43 retains separate publication evidence and remains open.
+
+
 2026-11-20 — Release 0.6.9 integration in progress at the owner's request. Combined
 toolbar/caret fixes, tab stops/TOC leaders and paragraph keeps with already-merged
 sections. WFG1–15 reader/masks integrated, including combined tabs/keeps and old

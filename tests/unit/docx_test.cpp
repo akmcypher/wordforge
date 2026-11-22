@@ -8,6 +8,53 @@
 #include <sstream>
 #include <pugixml.hpp>
 using namespace wf;
+TEST(Widows, DocxDefaultAndExplicitOverridesSurviveInheritanceChanges) {
+    auto parts = opc::read(serializeDocx(Document{}));
+    parts["word/styles.xml"] =
+        "<w:styles xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'/>";
+    auto imported = parseDocx(opc::write(parts));
+    EXPECT_TRUE(imported.document.paragraphs[0].widowControl);
+    EXPECT_TRUE(resolveStyle(imported.document.styles, "Normal").paragraph.widowControl);
+    Editor e;
+    e.reset(imported.document);
+    e.replace(u"override\ninherited");
+    e.selection = {{0, 0}, {0, 0}};
+    e.formatParagraph([](auto &p) { p.widowControl = false; });
+    auto saved = opc::read(serializeDocx(e.document));
+    pugi::xml_document body, styles;
+    ASSERT_TRUE(body.load_string(saved.at("word/document.xml").c_str()));
+    auto flag = body.select_node("//w:body/w:p[1]/w:pPr/w:widowControl").node();
+    ASSERT_TRUE(flag);
+    EXPECT_STREQ(flag.attribute("w:val").value(), "0");
+    EXPECT_EQ(body.select_nodes("//w:body/w:p[2]/w:pPr/w:widowControl").size(), 0u);
+    auto restored = parseDocx(opc::write(saved)).document;
+    EXPECT_FALSE(restored.paragraphs[0].widowControl);
+    EXPECT_TRUE(restored.paragraphs[1].widowControl);
+    // An explicit false equal to the base must still override a later true base.
+    ASSERT_TRUE(styles.load_string(saved.at("word/styles.xml").c_str()));
+    auto normal = styles.select_node("//w:style[@w:styleId='Normal']/w:pPr/w:widowControl").node();
+    ASSERT_TRUE(normal);
+    normal.attribute("w:val").set_value("0");
+    std::ostringstream xml;
+    styles.save(xml); saved["word/styles.xml"] = xml.str();
+    restored = parseDocx(opc::write(saved)).document;
+    EXPECT_FALSE(restored.paragraphs[0].widowControl);
+    EXPECT_FALSE(restored.paragraphs[1].widowControl);
+    EXPECT_NE(restored.paragraphs[0].direct & WidowControlField, 0);
+    EXPECT_EQ(restored.paragraphs[1].direct & WidowControlField, 0);
+    saved = opc::read(serializeDocx(restored));
+    ASSERT_TRUE(styles.load_string(saved.at("word/styles.xml").c_str()));
+    normal = styles.select_node("//w:style[@w:styleId='Normal']/w:pPr/w:widowControl").node();
+    ASSERT_TRUE(normal);
+    normal.attribute("w:val").set_value("1");
+    std::ostringstream changed;
+    styles.save(changed); saved["word/styles.xml"] = changed.str();
+    restored = parseDocx(opc::write(saved)).document;
+    EXPECT_FALSE(restored.paragraphs[0].widowControl);
+    EXPECT_TRUE(restored.paragraphs[1].widowControl);
+    const auto nativeDefault = parseDocx(serializeDocx(Document{}));
+    EXPECT_FALSE(nativeDefault.document.paragraphs[0].widowControl);
+}
 TEST(Pagination, DocumentDefaultsRemainInheritedWithoutNormalDefinition) {
     auto parts = opc::read(serializeDocx(Document{}));
     parts["word/styles.xml"] =

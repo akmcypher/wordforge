@@ -35,7 +35,7 @@ struct ParagraphFormat {
     // For a list paragraph the first-line indent moves the bullet or number.
     double indentFirstLine = 0, indentRight = 0;
     bool pageBreakBefore = false;
-    bool keepWithNext = false, keepLines = false;
+    bool keepWithNext = false, keepLines = false, widowControl = false;
     bool operator==(const ParagraphFormat &) const = default;
 };
 void validateParagraphFormat(const ParagraphFormat &);

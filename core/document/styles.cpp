@@ -55,6 +55,8 @@ void apply(ParagraphFormat &target, const ParagraphProperties &properties) {
         target.keepWithNext = *properties.keepWithNext;
     if (properties.keepLines)
         target.keepLines = *properties.keepLines;
+    if (properties.widowControl)
+        target.widowControl = *properties.widowControl;
 }
 
 void checkText(const std::string &value, std::size_t limit, bool allowEmpty, const char *what) {
@@ -213,6 +215,7 @@ void fillUnset(ParagraphProperties &target, const ParagraphProperties &fallback)
     fill(target.tabs, fallback.tabs);
     fill(target.keepWithNext, fallback.keepWithNext);
     fill(target.keepLines, fallback.keepLines);
+    fill(target.widowControl, fallback.widowControl);
 }
 
 std::string uniqueStyleId(const StyleSheet &sheet, const std::string &name) {
@@ -353,6 +356,8 @@ ParagraphMask differingFields(const ParagraphFormat &a, const ParagraphFormat &b
         mask |= KeepWithNextField;
     if (a.keepLines != b.keepLines)
         mask |= KeepLinesField;
+    if (a.widowControl != b.widowControl)
+        mask |= WidowControlField;
     return mask;
 }
 
@@ -399,6 +404,8 @@ void inheritFields(ParagraphFormat &target, const ParagraphFormat &source, Parag
         target.keepWithNext = source.keepWithNext;
     if (!(keep & KeepLinesField))
         target.keepLines = source.keepLines;
+    if (!(keep & WidowControlField))
+        target.widowControl = source.widowControl;
 }
 
 CharacterProperties propertiesFor(const CharacterStyle &base, const CharacterStyle &value) {
@@ -449,6 +456,8 @@ ParagraphProperties propertiesFor(const ParagraphFormat &base, const ParagraphFo
         result.keepWithNext = value.keepWithNext;
     if (base.keepLines != value.keepLines)
         result.keepLines = value.keepLines;
+    if (base.widowControl != value.widowControl)
+        result.widowControl = value.widowControl;
     return result;
 }
 

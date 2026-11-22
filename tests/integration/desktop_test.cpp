@@ -44,6 +44,30 @@
 class DesktopTest : public QObject {
     Q_OBJECT
   private slots:
+    void widowControlAppliesToSelectionUndoAndPersists() {
+        QTemporaryDir directory;
+        wf::MainWindow window;
+        auto *view = window.pageView();
+        view->insertText("First\nSecond");
+        auto *widow = window.findChild<QCheckBox *>("panelWidowControl");
+        QVERIFY(widow);
+        QVERIFY(!widow->accessibleName().isEmpty());
+        view->selectAll();
+        widow->click();
+        for (const auto &p : view->document().paragraphs) QVERIFY(p.widowControl);
+        view->undo();
+        QVERIFY(!widow->isChecked());
+        view->redo();
+        QVERIFY(widow->isChecked());
+        for (const auto &suffix : {QString("wfg"), QString("docx")}) {
+            const auto path = directory.filePath("widows." + suffix);
+            window.saveFile(path);
+            wf::MainWindow restored;
+            restored.openFile(path);
+            for (const auto &p : restored.pageView()->document().paragraphs) QVERIFY(p.widowControl);
+            QVERIFY(restored.findChild<QCheckBox *>("panelWidowControl")->isChecked());
+        }
+    }
     void paragraphKeepsApplyToSelectionUndoAndPersist() {
         QTemporaryDir directory;
         wf::MainWindow window;

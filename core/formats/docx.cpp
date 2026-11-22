@@ -361,6 +361,8 @@ void paragraphProperties(pugi::xml_node properties, Paragraph &paragraph,
             paragraph.keepWithNext = enabled(node);
         else if (is(node, "keepLines"))
             paragraph.keepLines = enabled(node);
+        else if (is(node, "widowControl"))
+            paragraph.widowControl = enabled(node);
         else if (is(node, "spacing")) {
             if (!attr(node, "before").empty())
                 paragraph.spaceBefore = twips(attr(node, "before")) / 20;
@@ -413,6 +415,8 @@ void readKeeps(pugi::xml_node ppr, ParagraphProperties &properties) {
         properties.keepWithNext = enabled(node);
     if (auto node = child(ppr, "keepLines"))
         properties.keepLines = enabled(node);
+    if (auto node = child(ppr, "widowControl"))
+        properties.widowControl = enabled(node);
 }
 std::string relationship(const opc::Parts &parts, const std::string &owner, const char *type,
                          const std::string &id = {}) {
@@ -1106,6 +1110,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
     document.paragraphs.clear();
     CharacterStyle defaultRun;
     Paragraph defaultParagraph;
+    defaultParagraph.widowControl = true;
+    document.styles.find("Normal")->paragraph.widowControl = true;
     defaultParagraph.spaceAfter = 0;
     defaultParagraph.lineSpacing = 1;
     pugi::xml_document styles;
@@ -1481,6 +1487,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             paragraph.direct |= KeepWithNextField;
         if (child(properties, "keepLines"))
             paragraph.direct |= KeepLinesField;
+        if (child(properties, "widowControl"))
+            paragraph.direct |= WidowControlField;
         if (cell) {
             paragraph.cell = cell;
             paragraph.pageBreakBefore = false; // not allowed inside a table
@@ -2643,6 +2651,8 @@ std::string serializeDocx(const Document &document) {
             property(ppr, "keepNext", paragraph.keepWithNext ? 1.0 : 0.0);
         if (paragraph.direct & KeepLinesField)
             property(ppr, "keepLines", paragraph.keepLines ? 1.0 : 0.0);
+        if (paragraph.direct & WidowControlField)
+            property(ppr, "widowControl", paragraph.widowControl ? 1.0 : 0.0);
         if (paragraph.pageBreakBefore)
             element(ppr, "pageBreakBefore");
         if (paragraph.list != ListKind::None) {
@@ -2898,7 +2908,10 @@ std::string serializeDocx(const Document &document) {
     const ResolvedStyle defaults;
     auto docDefaults = element(styleRoot, "docDefaults");
     writeCharacter(element(element(docDefaults, "rPrDefault"), "rPr"), defaults.character, nullptr);
-    writeParagraph(element(element(docDefaults, "pPrDefault"), "pPr"), defaults.paragraph, nullptr);
+    auto defaultPpr = element(element(docDefaults, "pPrDefault"), "pPr");
+    writeParagraph(defaultPpr, defaults.paragraph, nullptr);
+    // Word defaults this switch to on; native documents retain their explicit default.
+    property(defaultPpr, "widowControl", defaults.paragraph.widowControl ? 1.0 : 0.0);
     for (const auto &definition : document.styles.paragraphStyles) {
         auto style = element(styleRoot, "style");
         set(style, "type", std::string("paragraph"));
@@ -2921,6 +2934,8 @@ std::string serializeDocx(const Document &document) {
             property(ppr, "keepNext", *definition.paragraph.keepWithNext ? 1.0 : 0.0);
         if (definition.paragraph.keepLines)
             property(ppr, "keepLines", *definition.paragraph.keepLines ? 1.0 : 0.0);
+        if (definition.paragraph.widowControl)
+            property(ppr, "widowControl", *definition.paragraph.widowControl ? 1.0 : 0.0);
         writeCharacter(element(style, "rPr"), self.character, &base.character);
     }
     for (const auto &definition : document.styles.characterStyles) {

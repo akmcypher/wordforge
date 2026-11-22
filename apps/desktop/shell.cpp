@@ -279,6 +279,9 @@ FormatPanel::FormatPanel(PageView *view, Commands &commands, QWidget *parent)
     auto *keepLines = keep("panelKeepLines", "Keep lines together", &ParagraphFormat::keepLines);
     keepLines->setToolTip("Keep this paragraph on one page or column when it fits");
 
+    auto *widow = keep("panelWidowControl", "Widow/orphan control", &ParagraphFormat::widowControl);
+    widow->setToolTip("Keep at least two paragraph lines together at page or column boundaries when possible");
+
     auto *picture = section("Picture");
     auto *pictureSize = new QPushButton("Picture size…");
     pictureSize->setObjectName("panelPictureSize");
@@ -345,7 +348,7 @@ FormatPanel::FormatPanel(PageView *view, Commands &commands, QWidget *parent)
         const auto page = view->sectionPage();
         QSignalBlocker s(spacing), i(indent), fl(firstLine), ri(rightIndent), b(before),
             a(after), m(margins), o(orientation), pa(paper), c(columns),
-            kn(keepNext), kl(keepLines);
+            kn(keepNext), kl(keepLines), wc(widow);
         spacing->setCurrentIndex(spacing->findData(p.lineSpacing));
         indent->setValue(p.indentLeft);
         firstLine->setValue(p.indentFirstLine);
@@ -354,6 +357,7 @@ FormatPanel::FormatPanel(PageView *view, Commands &commands, QWidget *parent)
         after->setValue(p.spaceAfter);
         keepNext->setChecked(p.keepWithNext);
         keepLines->setChecked(p.keepLines);
+        widow->setChecked(p.widowControl);
         const QList<double> marginValues{56.7, 72, 54, 36};
         int marginIndex = -1;
         for (int n = 0; n < marginValues.size(); ++n)

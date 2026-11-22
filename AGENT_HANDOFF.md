@@ -1,6 +1,38 @@
 # Wordforge handoff — start here
 
-## Current state (2026-11-20) — 0.6.9 release preparation
+## Current work (2026-11-22) — widow/orphan control
+
+The owner requested immediate further changes. Branch `codex/wordforge-widow-orphan`
+starts at main d7afd47 and adds widow/orphan control through the existing model/style,
+WFG16, DOCX, pagination and Format panel. Plan:
+`docs/superpowers/plans/2026-11-22-widow-orphan.md`; evidence:
+`docs/evidence/2026-11-22-widow-orphan.md`.
+
+Native defaults stay false, preserving WFG1–15 rendering. WFG16 adds `widow` and
+paragraph mask bit 9 (0x3ff total); older masks remain strict. Word's omitted whole
+hierarchy defaults true; import establishes this in Normal/defaults, and export
+explicitly encodes the native default. Explicit false equal to the base stays direct.
+Measured line/footnote reservations avoid isolated first/last lines where possible;
+three-line paragraphs stay whole when feasible. Explicit breaks and feasible keep
+groups take priority; impossible constraints relax. No new model or layout worker.
+
+The release-preparation section below is historical. **v0.6.9 is published** at
+main/tag d7afd47, with all four Windows artifacts checked against public SHA256SUMS.
+Snap stable 0.6.9-preview is amd64 revision 56 / ARM64 revision 55, verified from Store
+archives before promotion. Publication evidence is also retained in open PR #43 on
+`codex/release-0.6.9-handoff`; that branch was preserved. Do not republish it.
+
+Final Windows six suites: 15.75 s; actual Ubuntu six suites: 5.83 s. Focused Word
+round trip reopened six outputs with text/structure/page counts retained (sampled
+character formatting 99.9%). Independent review's late-footnote concern was
+reproduced failing, fixed and rerun on both platforms. Evidence records the limits.
+
+This increment does not authorize a merge, release, signing purchase or Snap promotion.
+Open a focused PR into main after verification. Check CI once; if pending, report it
+and let the owner request a follow-up. Keep partial DOCX, accessibility and installed
+packaging limits explicit. Never close the user's editor to build.
+
+## Historical release preparation (2026-11-20)
 
 The owner requested "release and show analytics" after the feature increments.
 That authorizes integrating the approved work and publishing/promoting 0.6.9 after

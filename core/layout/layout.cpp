@@ -338,6 +338,12 @@ Layout LayoutEngine::compose(const Document &document) {
             needed += block.height;
         return needed > 0 && pageNotes.empty() ? needed + noteGap : needed;
     };
+    // Footnotes span every column, so protect the deepest body content already placed.
+    auto fitsWritingArea = [&](double bodyHeight, double newNotes, double before = 0) {
+        const double rule = newNotes > 0 && pageNotes.empty() ? noteGap : 0;
+        return std::max(y + before + bodyHeight, sectionBottom) + notesHeight + newNotes + rule <=
+               page.height - page.margin;
+    };
     auto addNotes = [&](std::vector<NoteBlock> &blocks) {
         notesHeight += notesNeed(blocks);
         for (auto &block : blocks)
@@ -548,13 +554,13 @@ Layout LayoutEngine::compose(const Document &document) {
                     !document.paragraphs[k + 1].pageBreakBefore;
                 const auto &lines = measure(p, columnWidth, number, noteNumber, endnoteNumber);
                 const bool whole = p.keepLines || follows;
-                const auto end = whole ? lines.back().end : lines.front().end;
+                const auto minimum = whole ? lines.size() :
+                    p.widowControl ? std::min(lines.size(), std::size_t{lines.size() == 3 ? 3u : 2u}) : 1u;
+                const auto end = lines[minimum - 1].end;
                 if (k != index)
                     bodyHeight += p.spaceBefore;
-                for (const auto &line : lines) {
-                    bodyHeight += line.height;
-                    if (!whole) break;
-                }
+                for (std::size_t n = 0; n < minimum; ++n)
+                    bodyHeight += lines[n].height;
                 for (const auto &block : notesIn(p, noteNumber, 0, end))
                     noteHeight += block.height;
                 if (k == index) {
@@ -578,10 +584,7 @@ Layout LayoutEngine::compose(const Document &document) {
             const double freshNeed = bodyHeight + noteHeight + (noteHeight > 0 ? noteGap : 0);
             auto fitsHere = [&] {
                 const double before = y > sectionTop ? paragraph.spaceBefore : 0;
-                const double rule = noteHeight > 0 && pageNotes.empty() ? noteGap : 0;
-                return std::max(y + before + bodyHeight, sectionBottom) +
-                           notesHeight + noteHeight + rule <=
-                       page.height - page.margin;
+                return fitsWritingArea(bodyHeight, noteHeight, before);
             };
             const bool startsChain = chainHasLink &&
                 (index == 0 || !document.paragraphs[index - 1].keepWithNext ||
@@ -600,13 +603,77 @@ Layout LayoutEngine::compose(const Document &document) {
         notesSoFar += countNotes(paragraph);
         const auto firstEndnote = endnoteIds.size() + 1;
         collectEndnotes(paragraph);
-        for (auto line : measure(paragraph, columnWidth, listNumber, firstNote, firstEndnote)) {
+        const auto &paragraphLines = measure(paragraph, columnWidth, listNumber, firstNote, firstEndnote);
+        std::size_t segmentStart = 0;
+        for (std::size_t n = 0; n < paragraphLines.size(); ++n) {
+            auto line = paragraphLines[n];
+            auto reservation = [&](std::size_t from, std::size_t count) {
+                double height = 0, noteHeight = 0;
+                for (std::size_t k = from; k < from + count; ++k)
+                    height += paragraphLines[k].height;
+                for (const auto &block : notesIn(paragraph, firstNote, paragraphLines[from].start,
+                                                paragraphLines[from + count - 1].end))
+                    noteHeight += block.height;
+                return std::pair{height, noteHeight};
+            };
+            // Reserve the opening pair and the closing pair. A three-line paragraph
+            // needs all three together when possible: splitting it always isolates a line.
+            std::size_t reserve = 1;
+            if (paragraph.widowControl && paragraphLines.size() > 1) {
+                if (n == segmentStart)
+                    reserve = std::min(paragraphLines.size() - n, std::size_t{2});
+                if (n + 3 == paragraphLines.size() && n != segmentStart + 1)
+                    reserve = 3;
+                if (n + 2 == paragraphLines.size() && n > segmentStart + 1)
+                    reserve = 2;
+            }
+            if (paragraph.widowControl && n + 4 == paragraphLines.size()) {
+                const auto tail = reservation(n + 1, 3);
+                if (tail.first + tail.second + (tail.second > 0 ? noteGap : 0) > availableHeight)
+                    reserve = 2; // Split an infeasible three-line tail as two pairs instead.
+            }
+            auto [bodyHeight, noteHeight] = reservation(n, reserve);
+            // Impossible constraints relax to ordinary splitting, without retry loops.
+            if (bodyHeight + noteHeight + (noteHeight > 0 ? noteGap : 0) > availableHeight) {
+                reserve = std::min(reserve, std::size_t{2});
+                std::tie(bodyHeight, noteHeight) = reservation(n, reserve);
+                if (bodyHeight + noteHeight + (noteHeight > 0 ? noteGap : 0) > availableHeight)
+                    std::tie(bodyHeight, noteHeight) = reservation(n, 1);
+            }
+            auto fits = [&] {
+                return fitsWritingArea(bodyHeight, noteHeight);
+            };
+            // An ordinary overflow starts a new segment too. Reserve its opening
+            // pair before selecting a column whose remaining note area may be short.
+            if (paragraph.widowControl && reserve == 1 && !fits() && n + 1 < paragraphLines.size()) {
+                const auto pair = reservation(n, 2);
+                if (pair.first + pair.second + (pair.second > 0 ? noteGap : 0) <= availableHeight)
+                    std::tie(bodyHeight, noteHeight) = pair;
+            }
+            // If all three lines cannot share this area with their kept heading, the
+            // feasible heading + opening pair takes priority over widow control.
+            if (n == 0 && reserve == 3 && !fits() && index &&
+                document.paragraphs[index - 1].keepWithNext &&
+                !document.paragraphs[index - 1].sectionBreak &&
+                !document.paragraphs[index - 1].cell && !paragraph.pageBreakBefore) {
+                const auto pair = reservation(n, 2);
+                if (fitsWritingArea(pair.first, pair.second))
+                    std::tie(bodyHeight, noteHeight) = pair;
+            }
+            if (!fits() && bodyHeight + noteHeight + (noteHeight > 0 ? noteGap : 0) <= availableHeight &&
+                (y > page.margin || sectionBottom > page.margin)) {
+                advance();
+                if (!fits()) newPage();
+                segmentStart = n;
+            }
             if (line.height > availableHeight)
                 throw std::runtime_error("A line is taller than the page writing area");
             auto blocks = notesIn(paragraph, firstNote, line.start, line.end);
-            if (y + line.height + notesHeight + notesNeed(blocks) > page.height - page.margin &&
-                y > sectionTop)
+            if (std::max(y + line.height, sectionBottom) + notesHeight + notesNeed(blocks) >
+                    page.height - page.margin && (y > page.margin || sectionBottom > page.margin)) {
                 advance();
+                segmentStart = n;
+            }
             addNotes(blocks);
             line.paragraph = index;
             line.page = pageIndex;

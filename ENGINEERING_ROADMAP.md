@@ -193,7 +193,9 @@ with documented policies. Mixed edits, undo branches and migration have regressi
 group placement, including columns, continuous sections and footnote reservations,
 with style/WFG15/DOCX and Format panel integration. These group dependencies must
 be included in future 2A checkpoints; convergence and background layout are still
-planned. Table-row keep chaining and widow/orphan control remain open. Evidence:
+planned. Widow/orphan control is implemented on the 2026-11-22 feature branch
+through WFG16, DOCX and the Format panel, with measured line/note reservations.
+Table-row keep chaining remains open. Evidence: `docs/evidence/2026-11-22-widow-orphan.md` and
 `docs/evidence/2026-11-20-paragraph-pagination.md`.
 
 Files: `core/layout/layout.*`, proposed `inline_layout.*`, `pagination.*`,

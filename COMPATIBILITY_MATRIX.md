@@ -3,7 +3,7 @@
 2026-11-13. Starting published baseline: 32b1461. The 0.4 DOCX/handoff commits extend it.
 These are capability statements, not production-readiness checkmarks.
 
-2026-11-19 branch addition (PR #40, unmerged): left/centre/right paragraph tab stops
+2026-11-19 addition (PR #40, merged in v0.6.9): left/centre/right paragraph tab stops
 and dots through styles, WFG14 and DOCX; TOCs use right-aligned page numbers.
 Custom automatic intervals stay in DOCX settings but display at 36 pt with a warning.
 Decimal/bar tabs, other leaders, RTL-specific geometry and a ruler are unsupported.
@@ -14,8 +14,17 @@ cascade, native WFG15, DOCX and Format panel. Explicit style/direct overrides re
 their presence, including false; inherited paragraphs remain inherited after DOCX
 export. Text grouping handles columns, continuous sections and footnote reservation.
 Table-boundary keep-next stays preserved with an import warning; it is not laid out.
-Widow/orphan and incremental/background pagination remain unsupported. This branch
-is separate from unmerged PR #40's WFG14 tab-stop work. See the pagination evidence.
+Incremental/background pagination remains unsupported. The tabs/keeps integration
+shipped in v0.6.9. See the pagination evidence.
+
+2026-11-22 feature branch: widow/orphan control follows paragraph styles, direct
+formatting, WFG16, DOCX and the Format panel. Native defaults stay off; DOCX omission
+through the entire hierarchy defaults on, and export explicitly represents the native
+default. Measured line/note reservations protect opening and closing pairs where
+feasible; explicit breaks and feasible keep groups take priority. Three-line paragraphs
+stay whole when possible. Impossible constraints relax. Rows remain unsplit; table-boundary
+keeps, incremental/background layout and full Word visual parity remain open.
+This feature has not been publicly released. See `docs/evidence/2026-11-22-widow-orphan.md`.
 
 | Area | Starting baseline | Current additions through 0.6 | Major remaining requirement |
 |---|---|---|---|
