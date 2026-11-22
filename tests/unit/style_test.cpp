@@ -3,6 +3,35 @@
 #include <gtest/gtest.h>
 
 using namespace wf;
+TEST(BaselineText, NativeAndStyleOverridePreserveNormalAndNominalSize) {
+    Editor e;
+    e.document.styles.find("Normal")->character.baseline = TextBaseline::Superscript;
+    e.applyStyle("Normal");
+    e.replace(u"x2");
+    EXPECT_EQ(e.document.paragraphs[0].runs[0].style.baseline, TextBaseline::Superscript);
+    e.selection = {{0, 1}, {0, 2}};
+    e.format([](auto &s) { s.baseline = TextBaseline::Normal; });
+    const auto bytes = serializeNative(e.document);
+    EXPECT_NE(bytes.find("version=\"17\""), std::string::npos);
+    const auto restored = parseNative(bytes);
+    EXPECT_EQ(restored.paragraphs[0].runs.back().style.baseline, TextBaseline::Normal);
+    EXPECT_DOUBLE_EQ(restored.paragraphs[0].runs.back().style.size, 12);
+    EXPECT_NE(restored.paragraphs[0].runs.back().direct & BaselineField, 0);
+    auto old = bytes;
+    old.replace(old.find("version=\"17\""), 12, "version=\"16\"");
+    EXPECT_THROW(parseNative(old), std::runtime_error);
+}
+TEST(BaselineText, OldNativeMaskAndInvalidModesAreRejected) {
+    Editor e;
+    e.document.paragraphs[0].runs[0].direct = BaselineField;
+    auto bytes = serializeNative(e.document);
+    ASSERT_NE(bytes.find("version=\"17\""), std::string::npos);
+    auto old = bytes;
+    old.replace(old.find("version=\"17\""), 12, "version=\"16\"");
+    EXPECT_THROW(parseNative(old), std::runtime_error);
+    e.document.paragraphs[0].runs[0].style.baseline = static_cast<TextBaseline>(3);
+    EXPECT_THROW(validateDocument(e.document), std::invalid_argument);
+}
 TEST(Widows, NativeAndStyleInheritanceRetainExplicitFalse) {
     Editor e;
     EXPECT_FALSE(parseNative(serializeNative(e.document)).paragraphs[0].widowControl);

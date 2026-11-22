@@ -209,6 +209,20 @@ struct ThemeFonts {
     std::string major, minor;
 };
 thread_local ThemeFonts themeFonts; // set for the duration of one parseDocx
+std::optional<TextBaseline> readBaseline(pugi::xml_node properties, std::vector<std::string> &warnings) {
+    const auto node = child(properties, "vertAlign");
+    if (!node) return std::nullopt;
+    const auto value = val(node);
+    if (value == "baseline") return TextBaseline::Normal;
+    if (value == "superscript") return TextBaseline::Superscript;
+    if (value == "subscript") return TextBaseline::Subscript;
+    warn(warnings, "An unsupported text baseline was omitted.");
+    return std::nullopt;
+}
+std::string baselineName(TextBaseline value) {
+    return value == TextBaseline::Superscript ? "superscript" :
+           value == TextBaseline::Subscript ? "subscript" : "baseline";
+}
 void runProperties(pugi::xml_node properties, CharacterStyle &style,
                    std::vector<std::string> &warnings, bool styleDefinition = false) {
     auto toggle = [styleDefinition](bool previous, pugi::xml_node node) {
@@ -238,6 +252,8 @@ void runProperties(pugi::xml_node properties, CharacterStyle &style,
             style.italic = toggle(style.italic, node);
         else if (is(node, "strike"))
             style.strike = toggle(style.strike, node);
+        else if (is(node, "vertAlign"))
+            style.baseline = readBaseline(properties, warnings).value_or(style.baseline);
         else if (is(node, "sz"))
             style.size = halfPoints(val(node)) / 2;
         else if (is(node, "u")) {
@@ -796,6 +812,8 @@ void writeCharacter(pugi::xml_node rpr, const CharacterStyle &value, const Chara
         opaque(value.color);
         writeColor(rpr, value.color, theme, true);
     }
+    if (differs(&CharacterStyle::baseline))
+        property(rpr, "vertAlign", baselineName(value.baseline));
     if (differs(&CharacterStyle::size)) {
         property(rpr, "sz", value.size * 2);
         property(rpr, "szCs", value.size * 2);
@@ -1127,6 +1145,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         runProperties(child(child(defaults, "rPrDefault"), "rPr"), defaultRun, warnings);
         paragraphProperties(child(child(defaults, "pPrDefault"), "pPr"), defaultParagraph,
                             warnings);
+        if (auto baseline = readBaseline(child(child(defaults, "rPrDefault"), "rPr"), warnings))
+            document.styles.find("Normal")->character.baseline = *baseline;
         readKeeps(child(child(defaults, "pPrDefault"), "pPr"),
                   document.styles.find("Normal")->paragraph);
         for (auto node : root.children())
@@ -1250,6 +1270,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         std::vector<std::string> ignored;
         runProperties(child(node, "rPr"), own, ignored);
         style.character = propertiesFor(CharacterStyle{}, own);
+        if (auto baseline = readBaseline(child(node, "rPr"), ignored))
+            style.character.baseline = *baseline;
         auto trial = document.styles;
         trial.characterStyles.push_back(style);
         try {
@@ -1303,6 +1325,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         style.paragraph = propertiesFor(base.paragraph, format);
         readKeeps(child(node, "pPr"), style.paragraph);
         style.character = propertiesFor(base.character, character);
+        if (auto baseline = readBaseline(child(node, "rPr"), ignored))
+            style.character.baseline = *baseline;
         auto trial = document.styles;
         trial.paragraphStyles.push_back(style);
         try {
@@ -1337,6 +1361,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         style->paragraph = propertiesFor(base.paragraph, format);
         readKeeps(child(found->second, "pPr"), style->paragraph);
         style->character = propertiesFor(base.character, character);
+        if (auto baseline = readBaseline(child(found->second, "rPr"), ignored))
+            style->character.baseline = *baseline;
         try {
             validateStyles(trial);
             document.styles = std::move(trial);
@@ -1668,7 +1694,10 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                             }
                             const auto id = document.allocateId();
                             document.footnotes.push_back({id, found->second});
-                            paragraph.runs.push_back(Run::fromNote({id, endnote}, style));
+                            auto noteStyle = style;
+                            // Automatic reference positioning belongs to shaping, not subsequent typing.
+                            noteStyle.baseline = base.baseline;
+                            paragraph.runs.push_back(Run::fromNote({id, endnote}, noteStyle));
                         } else if (is(item, "drawing")) {
                             pictures = true; // even when omitted: no empty run is left behind
                             if (auto picture = readPicture(item, style)) {
@@ -1727,6 +1756,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                     }
                     for (auto i = firstRun; i < paragraph.runs.size(); ++i)
                         if (!paragraph.runs[i].text().empty()) {
+                            if (!noteRun && readBaseline(child(run, "rPr"), warnings))
+                                paragraph.runs[i].direct |= BaselineField;
                             paragraph.runs[i].inserted = insertedMark;
                             paragraph.runs[i].deleted = deletedMark;
                         }
@@ -1750,15 +1781,9 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             std::size_t start = 0;
             for (;;) {
                 const auto end = run.text().find_first_of(u"\n\f", start);
-                split.runs.push_back(
-                    {run.text().substr(start, end == std::u16string::npos ? end : end - start),
-                     run.style});
-                split.runs.back().characterStyle = run.characterStyle;
-                split.runs.back().link = run.link;
-                if (!split.runs.back().text().empty()) {
-                    split.runs.back().inserted = run.inserted;
-                    split.runs.back().deleted = run.deleted;
-                }
+                split.runs.push_back(run.slice(start, end == std::u16string::npos ? run.text().size() : end));
+                if (split.runs.back().text().empty())
+                    split.runs.back().inserted = split.runs.back().deleted = 0;
                 if (end == std::u16string::npos)
                     break;
                 const bool pageBreak = !cell && run.text()[end] == u'\f';
@@ -2799,6 +2824,8 @@ std::string serializeDocx(const Document &document) {
                     "DOCX export cannot preserve transparent text colors; save as .wfg");
             // Wordforge's default ink is Word's automatic text colour.
             writeColor(rpr, run.style.color, activeTheme(run.style.theme, run.style.color), true);
+            if (!run.note() && (run.direct & BaselineField))
+                property(rpr, "vertAlign", baselineName(run.style.baseline));
             property(rpr, "sz", run.style.size * 2);
             property(rpr, "szCs", run.style.size * 2);
             if (!run.style.highlight) // override a highlight the paragraph style may set
@@ -2936,7 +2963,10 @@ std::string serializeDocx(const Document &document) {
             property(ppr, "keepLines", *definition.paragraph.keepLines ? 1.0 : 0.0);
         if (definition.paragraph.widowControl)
             property(ppr, "widowControl", *definition.paragraph.widowControl ? 1.0 : 0.0);
-        writeCharacter(element(style, "rPr"), self.character, &base.character);
+        auto rpr = element(style, "rPr");
+        writeCharacter(rpr, self.character, &base.character);
+        if (definition.character.baseline && !child(rpr, "vertAlign"))
+            property(rpr, "vertAlign", baselineName(*definition.character.baseline));
     }
     for (const auto &definition : document.styles.characterStyles) {
         auto style = element(styleRoot, "style");
@@ -2967,6 +2997,8 @@ std::string serializeDocx(const Document &document) {
             writeColor(rpr, *c.color, c.theme ? activeTheme(*c.theme, *c.color) : std::nullopt,
                        false);
         }
+        if (c.baseline)
+            property(rpr, "vertAlign", baselineName(*c.baseline));
         if (c.size)
             property(rpr, "sz", *c.size * 2);
         if (c.highlight && !*c.highlight)

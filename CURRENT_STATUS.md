@@ -1,5 +1,18 @@
 # Current status
 
+2026-11-22 — Superscript/subscript feature on `codex/wordforge-baseline-text`,
+based on merged PR #44 / main bdf5012. Typed character baseline follows paragraph
+and character styles, explicit direct formatting, undo, WFG17 and DOCX vertAlign.
+Format menu/panel, command palette, Ctrl+= and Ctrl+Shift+= toggle modes exclusively.
+HTML clipboard retains modes and nominal font size. Shaping derives smaller glyphs
+and vertical offsets without changing model size; measured line bounds, decorations
+and dotted leaders use the derived geometry. Automatic note positioning stays in
+shaping so imported notes do not make following typing superscript.
+Windows six suites pass (22.05 s); actual Ubuntu six suites pass (6.61 s).
+See `docs/evidence/2026-11-22-baseline-text.md` for Word checks, review and limits.
+No version bump or public release; the published downloads remain 0.6.9.
+
+
 2026-11-22 — Further feature work on `codex/wordforge-widow-orphan`, based on main
 d7afd47. Widow/orphan control now follows paragraph styles/direct formatting, WFG16,
 DOCX and a Format checkbox with selection, undo/redo and save/reopen coverage.

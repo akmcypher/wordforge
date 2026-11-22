@@ -44,6 +44,47 @@
 class DesktopTest : public QObject {
     Q_OBJECT
   private slots:
+    void baselineModesToggleExclusivelyAndPersist() {
+        QTemporaryDir directory;
+        wf::MainWindow window;
+        auto *view = window.pageView();
+        view->insertText("H2O x2");
+        view->selectAll();
+        auto *super = window.findChild<QAction *>("superscriptAction");
+        auto *sub = window.findChild<QAction *>("subscriptAction");
+        QVERIFY(super && sub);
+        super->trigger();
+        QVERIFY(super->isChecked() && !sub->isChecked());
+        sub->trigger();
+        QVERIFY(sub->isChecked() && !super->isChecked());
+        QCOMPARE(view->document().paragraphs[0].runs[0].style.baseline, wf::TextBaseline::Subscript);
+        view->undo();
+        QVERIFY(super->isChecked() && !sub->isChecked());
+        QTest::keyClick(view, Qt::Key_Equal, Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(view->typingStyle().baseline, wf::TextBaseline::Normal);
+        QTest::keyClick(view, Qt::Key_Equal, Qt::ControlModifier);
+        QCOMPARE(view->typingStyle().baseline, wf::TextBaseline::Subscript);
+        view->copy();
+        const auto html = QApplication::clipboard()->mimeData()->html();
+        QVERIFY(html.contains("vertical-align:sub"));
+        auto *htmlOnly = new QMimeData;
+        htmlOnly->setHtml(html);
+        QApplication::clipboard()->setMimeData(htmlOnly);
+        wf::MainWindow pasted;
+        pasted.pageView()->paste();
+        QCOMPARE(pasted.pageView()->document().paragraphs[0].runs[0].style.baseline,
+                 wf::TextBaseline::Subscript);
+        QCOMPARE(pasted.pageView()->document().paragraphs[0].runs[0].style.size, 12.0);
+        for (const auto &suffix : {QString("wfg"), QString("docx")}) {
+            const auto path = directory.filePath("baseline." + suffix);
+            window.saveFile(path);
+            wf::MainWindow restored;
+            restored.openFile(path);
+            QCOMPARE(restored.pageView()->document().text(), view->document().text());
+            QCOMPARE(restored.pageView()->document().paragraphs[0].runs[0].style.baseline,
+                     wf::TextBaseline::Subscript);
+        }
+    }
     void widowControlAppliesToSelectionUndoAndPersists() {
         QTemporaryDir directory;
         wf::MainWindow window;

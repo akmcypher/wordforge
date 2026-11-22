@@ -8,6 +8,56 @@
 #include <sstream>
 #include <pugixml.hpp>
 using namespace wf;
+TEST(BaselineText, DocxPreservesNominalSizeAndExplicitBaselineAgainstChangedParent) {
+    Editor e;
+    e.document.styles.find("Normal")->character.baseline = TextBaseline::Superscript;
+    e.applyStyle("Normal");
+    e.replace(u"a2");
+    e.selection = {{0, 1}, {0, 2}};
+    e.format([](auto &s) { s.baseline = TextBaseline::Normal; });
+    auto parts = opc::read(serializeDocx(e.document));
+    pugi::xml_document body, styles;
+    ASSERT_TRUE(body.load_string(parts.at("word/document.xml").c_str()));
+    auto first = body.select_node("//w:body/w:p/w:r[1]/w:rPr").node();
+    EXPECT_FALSE(first.child("w:vertAlign"));
+    auto second = body.select_node("//w:body/w:p/w:r[2]/w:rPr").node();
+    EXPECT_STREQ(second.child("w:vertAlign").attribute("w:val").value(), "baseline");
+    EXPECT_STREQ(second.child("w:sz").attribute("w:val").value(), "24");
+    auto imported = parseDocx(opc::write(parts)).document;
+    EXPECT_EQ(imported.paragraphs[0].runs[0].style.baseline, TextBaseline::Superscript);
+    EXPECT_EQ(imported.paragraphs[0].runs[1].style.baseline, TextBaseline::Normal);
+    ASSERT_TRUE(styles.load_string(parts.at("word/styles.xml").c_str()));
+    auto normal = styles.select_node("//w:style[@w:styleId='Normal']/w:rPr/w:vertAlign").node();
+    ASSERT_TRUE(normal);
+    normal.attribute("w:val").set_value("baseline");
+    std::ostringstream xml; styles.save(xml); parts["word/styles.xml"] = xml.str();
+    imported = parseDocx(opc::write(parts)).document;
+    EXPECT_NE(imported.paragraphs[0].runs[1].direct & BaselineField, 0);
+    parts = opc::read(serializeDocx(imported));
+    ASSERT_TRUE(styles.load_string(parts.at("word/styles.xml").c_str()));
+    normal = styles.select_node("//w:style[@w:styleId='Normal']/w:rPr/w:vertAlign").node();
+    ASSERT_TRUE(normal);
+    normal.attribute("w:val").set_value("subscript");
+    std::ostringstream changed; styles.save(changed); parts["word/styles.xml"] = changed.str();
+    imported = parseDocx(opc::write(parts)).document;
+    EXPECT_EQ(imported.paragraphs[0].runs[0].style.baseline, TextBaseline::Subscript);
+    EXPECT_EQ(imported.paragraphs[0].runs[1].style.baseline, TextBaseline::Normal);
+    EXPECT_DOUBLE_EQ(imported.paragraphs[0].runs[1].style.size, 12);
+}
+TEST(BaselineText, AutomaticNoteFormattingDoesNotLeakIntoFollowingTyping) {
+    for (bool endnote : {false, true}) {
+        Editor e;
+        e.replace(u"body");
+        e.insertFootnote(u"note", endnote);
+        Editor restored;
+        restored.reset(parseDocx(serializeDocx(e.document)).document);
+        const Position end{0, restored.document.paragraphs[0].text().size()};
+        restored.selection = {end, end};
+        restored.typingStyle = restored.document.styleAt(end);
+        restored.replace(u" appended");
+        EXPECT_EQ(restored.document.paragraphs[0].runs.back().style.baseline, TextBaseline::Normal);
+    }
+}
 TEST(Widows, DocxDefaultAndExplicitOverridesSurviveInheritanceChanges) {
     auto parts = opc::read(serializeDocx(Document{}));
     parts["word/styles.xml"] =

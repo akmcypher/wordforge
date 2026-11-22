@@ -904,6 +904,15 @@ void PageView::keyPressEvent(QKeyEvent *event) {
         format([value](auto &s) { s.underline = value; });
         return;
     }
+    if (event->modifiers().testFlag(Qt::ControlModifier) &&
+        !event->modifiers().testFlag(Qt::AltModifier) &&
+        (event->key() == Qt::Key_Equal || event->key() == Qt::Key_Plus)) {
+        const auto target = event->modifiers().testFlag(Qt::ShiftModifier) ?
+            TextBaseline::Superscript : TextBaseline::Subscript;
+        const auto value = editor_.typingStyle.baseline == target ? TextBaseline::Normal : target;
+        format([value](auto &s) { s.baseline = value; });
+        return;
+    }
     const bool extend = event->modifiers().testFlag(Qt::ShiftModifier);
     auto position = editor_.selection.focus;
     const auto text = editor_.document.paragraphs[position.paragraph].text();

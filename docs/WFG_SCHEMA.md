@@ -1,5 +1,15 @@
 # Native WFG schema and migration
 
+**WFG17 (superscript/subscript)** adds character attribute `baseline`: integer 0
+(normal), 1 (superscript), 2 (subscript). It applies to text/image/note runs and both
+style kinds. Omitted run values are normal; absent style values inherit. Character
+mask bit 8 records an explicit override, including normal equal to the base; the
+combined character mask is 0x1ff. WFG1–16 keep normal defaults and 0xff character
+masks and reject the new attribute/bit. WFG17 is selected for a non-normal value,
+a direct baseline bit, or any optional style baseline (including normal). Font `size`
+remains nominal, not the smaller drawing size. Earlier documents retain their
+previous schema selection. WFG17 includes all WFG16 paragraph properties/masks.
+
 **WFG16 (widow/orphan control)** is written when a paragraph enables
 `widowControl`, sets direct bit 9 (including explicit false), or a paragraph style
 contains that optional override. Paragraph/style attribute `widow` is boolean;
@@ -19,7 +29,7 @@ previous version-selection rules and their old defaults.
 
 WFG15 includes WFG14 tab stops and uses the combined paragraph mask 0x1ff.
 WFG14 permits bits 0–6 (0x7f); earlier style formats permit bits 0–5 (0x3f).
-The integrated reader accepts WFG1–16. Mixed tabs/pagination documents use WFG15;
+The integrated reader accepts WFG1–17. Mixed tabs/pagination documents use WFG15;
 tabs-only documents retain WFG14. Regression tests cover combined properties,
 explicit clears, older readers and version-specific mask rejection.
 

@@ -17,6 +17,7 @@ struct GlyphRun {
     bool tab = false;
     TabAlignment tabAlignment = TabAlignment::Left;
     double x = 0, width = 0, ascent = 0, descent = 0;
+    double baselineOffset = 0; // derived drawing offset, not a document font size change
     std::vector<Glyph> glyphs;
     std::optional<InlineImage> image;
 };

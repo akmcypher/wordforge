@@ -12,6 +12,7 @@
 
 namespace wf {
 struct CharacterStyle {
+    TextBaseline baseline = TextBaseline::Normal;
     std::string family = "Arial";
     double size = 12;
     bool bold = false, italic = false, underline = false;

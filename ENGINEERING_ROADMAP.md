@@ -219,6 +219,14 @@ end-to-end edit distributions and memory tests, not only composition microtiming
 
 **Status: working multilingual foundation; advanced controls planned.**
 
+2026-11-22 slice: normal/superscript/subscript participates in the character cascade,
+WFG17, DOCX, shaping, renderer and Format commands. Nominal font size is preserved;
+measured drawing geometry is derived once. HTML clipboard and automatic note
+references are covered. Arbitrary baseline offsets, character spacing, language,
+OpenType and variable-font configuration remain planned. Evidence:
+`docs/evidence/2026-11-22-baseline-text.md`.
+
+
 Files: `core/typography/shaper.*`, proposed `font_catalog.*`, `font_cache.*`, tests.
 Bound fallback/glyph caches; add language, script, OpenType feature and variable
 font configuration, superscript/subscript/baseline and spacing semantics. Preserve

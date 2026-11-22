@@ -69,6 +69,7 @@ std::string pageKey(const Layout &layout, std::size_t page) {
             keyValue(key, x);
             keyValue(key, run.width);
             keyValue(key, run.style.size);
+            keyValue(key, run.baselineOffset);
             keyValue(key, run.style.color);
             keyValue(key, run.style.underline);
             keyValue(key, run.style.strike);
@@ -236,13 +237,13 @@ std::size_t PageRenderer::synchronize(const Layout &layout) {
                     paint);
                 if (run.style.underline) {
                     paint.setStrokeWidth(std::max(0.6f, static_cast<float>(run.style.size / 16)));
-                    canvas->drawLine(static_cast<float>(x), static_cast<float>(line.baseline + 2),
+                    canvas->drawLine(static_cast<float>(x), static_cast<float>(line.baseline + run.baselineOffset + 2),
                                      static_cast<float>(x + run.width),
-                                     static_cast<float>(line.baseline + 2), paint);
+                                     static_cast<float>(line.baseline + run.baselineOffset + 2), paint);
                 }
                 if (run.style.strike) {
                     paint.setStrokeWidth(std::max(0.6f, static_cast<float>(run.style.size / 16)));
-                    const auto y = static_cast<float>(line.baseline - run.style.size * 0.32);
+                    const auto y = static_cast<float>(line.baseline + run.baselineOffset - run.style.size * 0.32);
                     canvas->drawLine(x, y, x + run.width, y, paint);
                 }
             });

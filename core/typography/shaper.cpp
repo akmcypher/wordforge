@@ -232,10 +232,11 @@ ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::siz
         }
         if (rtl)
             std::reverse(spans.begin(), spans.end());
-        for (const auto &span : spans) {
+        for (auto span : spans) {
             if (span.note) {
                 // A superscript number, shaped as its own small label.
                 auto style = span.style;
+                style.baseline = TextBaseline::Normal;
                 style.size = std::max(1.0, span.style.size * 0.62);
                 style.underline = style.strike = false;
                 Paragraph label;
@@ -276,6 +277,12 @@ ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::siz
                 result.runs.push_back(std::move(shaped));
                 continue;
             }
+            // Keep the model's nominal size intact; only the measured/drawn run shrinks.
+            const double offset = span.style.baseline == TextBaseline::Superscript ? -span.style.size * 0.38 :
+                                  span.style.baseline == TextBaseline::Subscript ? span.style.size * 0.2 : 0;
+            if (span.style.baseline != TextBaseline::Normal)
+                span.style.size = std::max(1.0, span.style.size * 0.65);
+            span.style.baseline = TextBaseline::Normal; // already resolved into size/offset
             auto *face = span.face->face;
             double metricScale = 1;
             if (!FT_IS_SCALABLE(face) && face->num_fixed_sizes > 0) {
@@ -308,12 +315,15 @@ ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::siz
             shaped.fontPath = span.face->path;
             shaped.faceIndex = span.face->index;
             shaped.style = span.style;
+            shaped.baselineOffset = offset;
             shaped.start = span.begin;
             shaped.end = span.end;
             shaped.rtl = rtl;
             shaped.x = result.width;
             shaped.ascent = face->size->metrics.ascender / 64.0 * metricScale;
             shaped.descent = -face->size->metrics.descender / 64.0 * metricScale;
+            shaped.ascent = std::max(0.0, shaped.ascent - offset);
+            shaped.descent = std::max(0.0, shaped.descent + offset);
             if (span.tab)
                 shaped.width = 36 - std::fmod(result.width, 36);
             for (unsigned i = 0; !span.tab && i < glyphCount; ++i) {
@@ -321,7 +331,7 @@ ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::siz
                 shaped.glyphs.push_back(
                     {static_cast<std::uint16_t>(info[i].codepoint), info[i].cluster,
                      shaped.width + p.x_offset / 64.0 * metricScale,
-                     -p.y_offset / 64.0 * metricScale, p.x_advance / 64.0 * metricScale});
+                     -p.y_offset / 64.0 * metricScale + offset, p.x_advance / 64.0 * metricScale});
                 shaped.width += p.x_advance / 64.0 * metricScale;
             }
             result.width += shaped.width;
@@ -375,6 +385,7 @@ ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::siz
                     for (double at = dot.width; at + dot.width < run.width; at += dot.width)
                         for (auto glyph : dot.runs[0].glyphs) {
                             glyph.x += at;
+                            glyph.y += run.baselineOffset;
                             glyph.cluster = run.start;
                             run.glyphs.push_back(glyph);
                         }

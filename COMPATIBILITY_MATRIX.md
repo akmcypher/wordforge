@@ -26,6 +26,14 @@ stay whole when possible. Impossible constraints relax. Rows remain unsplit; tab
 keeps, incremental/background layout and full Word visual parity remain open.
 This feature has not been publicly released. See `docs/evidence/2026-11-22-widow-orphan.md`.
 
+2026-11-22 typography feature: normal/superscript/subscript through paragraph and
+character styles, direct formatting, WFG17 and DOCX vertAlign; Format menu/panel,
+shortcuts, undo and HTML clipboard. Stored font size stays nominal; display uses
+65% scaling with a -0.38 em/+0.20 em baseline offset. This is an approximation,
+not Word visual certification. Arbitrary numeric baseline shifts, language/feature
+controls and variable-font configuration remain open. WFG17 needs the newer reader.
+See `docs/evidence/2026-11-22-baseline-text.md`. Not publicly released.
+
 | Area | Starting baseline | Current additions through 0.6 | Major remaining requirement |
 |---|---|---|---|
 | Native stack | C++20, Qt6, Skia, HarfBuzz, FreeType, ICU | libzip for DOCX | Preserve architecture while extending semantics |

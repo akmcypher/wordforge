@@ -1,6 +1,35 @@
 # Wordforge handoff — start here
 
-## Current work (2026-11-22) — widow/orphan control
+## Current work (2026-11-22) — superscript/subscript
+
+The owner asked for continued implementation after PR #44 was pushed to main at
+bdf5012. Branch `codex/wordforge-baseline-text` adds one typed character baseline
+through the existing style/direct cascade, WFG17, DOCX vertAlign, shaping, renderer,
+HTML clipboard and Format controls. Plan `docs/superpowers/plans/2026-11-22-baseline-text.md`;
+evidence `docs/evidence/2026-11-22-baseline-text.md`.
+
+Nominal font size is unchanged in the model and OOXML. Derived drawing uses 65%
+size and -0.38 em/+0.20 em offset, a documented approximation. Explicit normal
+equal to its inherited base is preserved. WFG17 adds character bit 8 (0x1ff total);
+WFG1–16 keep normal defaults and 0xff masks. All prior paragraph versions still read.
+Automatic footnote/endnote superscript is applied once; it must not leak to typing.
+Dotted leaders share the effective size/offset. Ctrl+= toggles subscript and
+Ctrl+Shift+= toggles superscript; Format controls and command palette expose both.
+
+Windows six suites pass (22.05 s); actual Ubuntu six suites pass (6.61 s).
+Independent review found three issues (DOCX split masks, double-scaled tab leaders,
+note typing leakage), each reproduced failing and fixed before the final checks.
+No second review pass. Native snapshot controls fit. Evidence records Word checks
+and limits. Public release remains v0.6.9; no version bump or promotion in this work.
+
+Continue the engineering roadmap autonomously; routine choices do not need an
+approval interview. Remaining large work includes incremental/background pagination,
+numbering definitions, table styles/row splitting, theme fonts, typography controls,
+DOCX fidelity and accessibility. A PR is an engineering checkpoint, not product completion.
+Do not claim these remaining phases are done or treat test counts as production readiness.
+Never close a running user editor. Preserve PR #43 and existing worktrees.
+
+## Previous increment (merged PR #44)
 
 The owner requested immediate further changes. Branch `codex/wordforge-widow-orphan`
 starts at main d7afd47 and adds widow/orphan control through the existing model/style,

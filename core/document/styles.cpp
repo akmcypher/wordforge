@@ -30,6 +30,8 @@ void apply(CharacterStyle &target, const CharacterProperties &properties) {
     }
     if (properties.highlight)
         target.highlight = *properties.highlight;
+    if (properties.baseline)
+        target.baseline = *properties.baseline;
 }
 
 void apply(ParagraphFormat &target, const ParagraphProperties &properties) {
@@ -197,6 +199,7 @@ void fillUnset(CharacterProperties &target, const CharacterProperties &fallback)
         target.theme = fallback.theme;
     }
     fill(target.highlight, fallback.highlight);
+    fill(target.baseline, fallback.baseline);
 }
 
 void fillUnset(ParagraphProperties &target, const ParagraphProperties &fallback) {
@@ -332,6 +335,8 @@ CharacterMask differingFields(const CharacterStyle &a, const CharacterStyle &b) 
         mask |= ColorField;
     if (a.highlight != b.highlight)
         mask |= HighlightField;
+    if (a.baseline != b.baseline)
+        mask |= BaselineField;
     return mask;
 }
 
@@ -380,6 +385,8 @@ void inheritFields(CharacterStyle &target, const CharacterStyle &source, Charact
     }
     if (!(keep & HighlightField))
         target.highlight = source.highlight;
+    if (!(keep & BaselineField))
+        target.baseline = source.baseline;
 }
 
 void inheritFields(ParagraphFormat &target, const ParagraphFormat &source, ParagraphMask keep) {
@@ -429,6 +436,8 @@ CharacterProperties propertiesFor(const CharacterStyle &base, const CharacterSty
     }
     if (base.highlight != value.highlight)
         result.highlight = value.highlight;
+    if (base.baseline != value.baseline)
+        result.baseline = value.baseline;
     return result;
 }
 

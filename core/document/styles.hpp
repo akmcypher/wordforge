@@ -31,7 +31,9 @@ std::string themeColorText(const ThemeColor &);
 ThemeColor parseThemeColorText(const std::string &, std::uint32_t color); // throws if invalid
 
 // Properties a style sets; unset ones come from the style it is based on, then defaults.
+enum class TextBaseline { Normal, Superscript, Subscript };
 struct CharacterProperties {
+    std::optional<TextBaseline> baseline;
     std::optional<std::string> family;
     std::optional<double> size;
     std::optional<bool> bold, italic, underline, strike;
@@ -112,7 +114,8 @@ enum CharacterField : std::uint16_t {
     StrikeField = 1 << 5,
     ColorField = 1 << 6,
     HighlightField = 1 << 7,
-    AllCharacterFields = 0xff,
+    BaselineField = 1 << 8,
+    AllCharacterFields = 0x1ff,
 };
 enum ParagraphField : std::uint16_t {
     AlignmentField = 1 << 0,

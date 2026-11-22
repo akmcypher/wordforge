@@ -20,6 +20,8 @@ QString runCss(const CharacterStyle &s) {
         css += "font-weight:bold;";
     if (s.italic)
         css += "font-style:italic;";
+    if (s.baseline != TextBaseline::Normal)
+        css += s.baseline == TextBaseline::Superscript ? "vertical-align:super;" : "vertical-align:sub;";
     if (s.underline || s.strike)
         css += QString("text-decoration:%1%2;")
                    .arg(s.underline ? "underline " : "")
@@ -147,6 +149,8 @@ std::vector<Paragraph> fragmentFromHtml(const QString &html, const CharacterStyl
             style.italic = f.fontItalic();
             style.underline = f.fontUnderline();
             style.strike = f.fontStrikeOut();
+            style.baseline = f.verticalAlignment() == QTextCharFormat::AlignSuperScript ? TextBaseline::Superscript :
+                             f.verticalAlignment() == QTextCharFormat::AlignSubScript ? TextBaseline::Subscript : TextBaseline::Normal;
             if (f.foreground().style() != Qt::NoBrush) {
                 const auto color = f.foreground().color();
                 if (color.alpha() > 0 && !tooLight(color))

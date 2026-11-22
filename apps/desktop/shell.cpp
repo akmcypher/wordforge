@@ -210,6 +210,7 @@ FormatPanel::FormatPanel(PageView *view, Commands &commands, QWidget *parent)
     auto actionButton = [&](const QString &id) {
         auto *button = new QToolButton;
         button->setDefaultAction(commands.get(id));
+        button->setAccessibleName(commands.get(id)->text());
         button->setFont(commands.get(id)->font());
         button->setFocusPolicy(Qt::NoFocus);
         button->setObjectName(QStringLiteral("panel") + id.at(0).toUpper() + id.mid(1));
@@ -218,7 +219,7 @@ FormatPanel::FormatPanel(PageView *view, Commands &commands, QWidget *parent)
 
     auto *text = section("Text");
     auto *textRow = new QHBoxLayout;
-    for (const auto &id : {"strike", "clearFormatting"})
+    for (const auto &id : {"strike", "superscript", "subscript", "clearFormatting"})
         textRow->addWidget(actionButton(id));
     textRow->addStretch();
     text->addRow(textRow);
@@ -486,6 +487,7 @@ CommentsPanel::CommentsPanel(PageView *view, Commands &commands, QWidget *parent
     for (const auto *id : {"comment", "editComment", "deleteComment"}) {
         auto *button = new QToolButton;
         button->setDefaultAction(commands.get(id));
+        button->setAccessibleName(commands.get(id)->text());
         button->setToolButtonStyle(Qt::ToolButtonTextOnly);
         button->setFocusPolicy(Qt::NoFocus);
         row->addWidget(button);

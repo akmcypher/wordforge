@@ -22,6 +22,50 @@ Editor widowFixture(Shaper &shaper, std::size_t leading, std::size_t words, doub
     return e;
 }
 }
+TEST(BaselineText, ShapingMovesAndScalesTextWithoutChangingModelSize) {
+    Shaper shaper(systemFontFiles());
+    Paragraph p;
+    p.runs = {{u"x2", {}}};
+    const auto ordinary = shaper.shape(p, 0, 2);
+    p.runs[0].style.baseline = TextBaseline::Superscript;
+    const auto raised = shaper.shape(p, 0, 2);
+    EXPECT_LT(raised.width, ordinary.width);
+    EXPECT_LT(raised.runs[0].glyphs[0].y, ordinary.runs[0].glyphs[0].y);
+    p.runs[0].style.baseline = TextBaseline::Subscript;
+    const auto lowered = shaper.shape(p, 0, 2);
+    EXPECT_GT(lowered.runs[0].glyphs[0].y, ordinary.runs[0].glyphs[0].y);
+    EXPECT_GT(lowered.descent, ordinary.descent);
+    EXPECT_DOUBLE_EQ(p.runs[0].style.size, 12);
+}
+TEST(BaselineText, AutomaticFootnoteDoesNotDoubleScaleWithCharacterMode) {
+    Shaper shaper(systemFontFiles());
+    Editor e;
+    e.insertFootnote(u"note");
+    auto &p = e.document.paragraphs[0];
+    const auto ordinary = shaper.shape(p, 0, 1);
+    p.runs[0].style.baseline = TextBaseline::Superscript;
+    const auto raised = shaper.shape(p, 0, 1);
+    EXPECT_DOUBLE_EQ(ordinary.width, raised.width);
+    ASSERT_EQ(ordinary.runs.size(), raised.runs.size());
+    EXPECT_DOUBLE_EQ(ordinary.runs[0].glyphs[0].y, raised.runs[0].glyphs[0].y);
+}
+TEST(BaselineText, DottedLeadersUseTheSameEffectiveSizeAndBaseline) {
+    Shaper shaper(systemFontFiles());
+    Paragraph p;
+    p.runs = {{u"x\t2", {}}};
+    p.runs[0].style.baseline = TextBaseline::Superscript;
+    p.tabs = {{150, TabAlignment::Right, TabLeader::Dots}};
+    const auto shaped = shaper.shape(p, 0, 3);
+    ASSERT_EQ(shaped.runs.size(), 3u);
+    const auto &tab = shaped.runs[1];
+    ASSERT_FALSE(tab.glyphs.empty());
+    Paragraph dot;
+    dot.runs = {{u".", {}}};
+    dot.runs[0].style.size *= 0.65;
+    const auto expected = shaper.shape(dot, 0, 1);
+    EXPECT_NEAR(tab.glyphs[0].advance, expected.runs[0].glyphs[0].advance, 0.001);
+    EXPECT_NEAR(tab.glyphs[0].y, expected.runs[0].glyphs[0].y + tab.baselineOffset, 0.001);
+}
 TEST(Widows, AvoidsSingleFirstAndLastLinesAndKeepsThreeLines) {
     Shaper shaper(systemFontFiles());
     LayoutEngine engine(shaper);

@@ -440,6 +440,14 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
     auto *underline =
         create("underline", "Underline", "Format", toggle(&CharacterStyle::underline), "Ctrl+U");
     auto *strike = create("strike", "Strikethrough", "Format", toggle(&CharacterStyle::strike));
+    auto baseline = [view](TextBaseline target) {
+        return [view, target] {
+            const auto value = view->typingStyle().baseline == target ? TextBaseline::Normal : target;
+            view->format([value](auto &s) { s.baseline = value; });
+        };
+    };
+    create("superscript", "Superscript", "Format", baseline(TextBaseline::Superscript), "Ctrl+Shift+=");
+    create("subscript", "Subscript", "Format", baseline(TextBaseline::Subscript), "Ctrl+=");
     create("highlight", "Highlight", "Format", [view] {
         const auto value = view->typingStyle().highlight ? 0u : 0xffffff00u;
         view->format([value](auto &s) { s.highlight = value; });
@@ -462,6 +470,8 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
         action->setFont(font);
     }
     get("highlight")->setIconText("ab");
+    get("superscript")->setIconText(QString::fromUtf8("x²"));
+    get("subscript")->setIconText(QString::fromUtf8("x₂"));
     get("fontColor")->setIconText("A");
     get("clearFormatting")->setIconText("A×");
 
@@ -697,7 +707,7 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
         view->setZoom((view->viewport()->width() - 64) / (view->sectionPage().width * 96 / 72));
     });
 
-    for (const auto &id : {"bold", "italic", "underline", "strike", "highlight", "bullets",
+    for (const auto &id : {"bold", "italic", "underline", "strike", "superscript", "subscript", "highlight", "bullets",
                            "numbering", "alignLeft", "alignCenter", "alignRight",
                            "alignJustify", "styleNormal",
                            "styleTitle", "styleHeading1", "styleHeading2", "lineSpacing1",
@@ -726,6 +736,8 @@ void Commands::sync() {
     get("italic")->setChecked(s.italic);
     get("underline")->setChecked(s.underline);
     get("strike")->setChecked(s.strike);
+    get("superscript")->setChecked(s.baseline == TextBaseline::Superscript);
+    get("subscript")->setChecked(s.baseline == TextBaseline::Subscript);
     get("highlight")->setChecked(s.highlight != 0);
     get("bullets")->setChecked(selectedList(view_, ListKind::Bullet));
     get("numbering")->setChecked(selectedList(view_, ListKind::Decimal));
