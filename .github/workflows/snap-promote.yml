@@ -1,0 +1,72 @@
+name: Promote verified Snap revisions
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Full source commit embedded in both tested edge archives
+        required: true
+        type: string
+      amd64_revision:
+        description: Exact amd64 edge revision to promote
+        required: true
+        type: string
+      arm64_revision:
+        description: Exact arm64 edge revision to promote
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: snap-stable-promotion
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SOURCE_COMMIT: ${{ inputs.source_commit }}
+      AMD64_REVISION: ${{ inputs.amd64_revision }}
+      ARM64_REVISION: ${{ inputs.arm64_revision }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify immutable Store archives and main ancestry
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y squashfs-tools
+          python3 tools/verify-snap-store.py --source "$SOURCE_COMMIT" --amd64 "$AMD64_REVISION" --arm64 "$ARM64_REVISION"
+          git merge-base --is-ancestor "$SOURCE_COMMIT" HEAD
+      - name: Promote exact verified revisions to stable
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        run: |
+          test -n "$SNAPCRAFT_STORE_CREDENTIALS" || { echo 'Snap Store credentials are missing'; exit 1; }
+          sudo snap install snapcraft --classic
+          snapcraft release wordforge "$AMD64_REVISION" stable
+          snapcraft release wordforge "$ARM64_REVISION" stable
+          snapcraft status wordforge
+      - name: Verify public stable pointers and archive identities
+        run: |
+          for attempt in {1..6}; do
+            status=0
+            python3 tools/verify-snap-store.py --channel stable --source "$SOURCE_COMMIT" --amd64 "$AMD64_REVISION" --arm64 "$ARM64_REVISION" || status=$?
+            if [ "$status" -eq 0 ]; then exit 0; fi
+            # Retry only channel-pointer propagation, never identity/checksum errors.
+            if [ "$status" -ne 3 ]; then exit "$status"; fi
+            if [ "$attempt" -lt 6 ]; then sleep 10; fi
+          done
+          echo 'Stable pointers did not propagate within the verification window'
+          exit 1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: snap-promotion-verification
+          path: out/snap-store-verification/verified.json
+          if-no-files-found: ignore
