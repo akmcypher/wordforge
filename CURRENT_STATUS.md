@@ -8,11 +8,11 @@ per-feature support table.
 
 | Channel | Version | Source | Notes |
 |---|---|---|---|
-| GitHub release (Windows x64/ARM64) | 0.6.10 | 7eedc2b | Released 2026-11-23, checksums verified |
-| Snap stable (amd64 64 / arm64 63) | 0.6.10-preview | 7eedc2b | Promotion run 45070162245 |
+| GitHub release (Windows x64/ARM64) | 0.6.11 | df9bb14 | Released 2026-11-23, checksums verified |
+| Snap stable (amd64 76 / arm64 75) | 0.6.11-preview | df9bb14 | Promotion run 45199653472 |
 
-Both channels read WFG1–17. Previous release: 0.6.9 (d7afd47). Release 0.6.11
-(performance only) is prepared but not tagged; notes in `docs/releases/v0.6.11.md`.
+Both channels read WFG1–17. Previous release: 0.6.10 (7eedc2b). Release notes:
+`docs/releases/v0.6.11.md`.
 
 ## In 0.6.10 (since 0.6.9)
 
@@ -27,7 +27,7 @@ Both channels read WFG1–17. Previous release: 0.6.9 (d7afd47). Release 0.6.11
   - Evidence: `docs/evidence/2026-11-22-baseline-text.md`.
 - **Manual verified Snap promotion workflow** (PR #46). Records: PR #47, `docs/SNAP.md`.
 
-## In 0.6.11 (prepared on `release/0.6.11`, not yet tagged or published)
+## In 0.6.11 (since 0.6.10; performance only)
 
 - **Incremental pagination (Phase 2A, first slice; PRs #50, #51):** editing re-paginates from the
   checkpoint before the change and reuses the rest once pagination converges.

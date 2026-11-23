@@ -6,21 +6,27 @@ Condensed on 2026-11-23. The full earlier notes are kept verbatim in
 
 ## Current state
 
-- `main` holds everything through PR #48 (release 0.6.10): sections/columns, tab stops and TOC dot
-  leaders, keep-with-next/keep-lines, widow/orphan control and superscript/subscript.
+- `main` holds everything through PR #55 (release 0.6.11):
+  - features: sections/columns, tab stops and TOC dot leaders, keep-with-next and
+    keep-lines, widow/orphan control, superscript/subscript
+  - the long-document performance work of PRs #50–#54: incremental pagination, page
+    stamps, copy-on-write paragraphs, incremental word count, O(1) page positions
+
   Native format WFG17; the reader supports WFG1–17.
-- Last published release: **v0.6.10** (tag at 7eedc2b, 2026-11-23). Windows installers
-  and ZIPs are checksum-verified; Snap stable is `0.6.10-preview`, amd64 rev 64 / arm64
-  rev 63, promoted by verified run 45070162245. Both channels read WFG1–17.
-- `main` 76e32e6 adds the performance work of PRs #50–#54 (incremental pagination, page
-  stamps, copy-on-write paragraphs, incremental word count, O(1) page positions).
-  Release 0.6.11 for it is prepared on `release/0.6.11` (version bump and
-  `docs/releases/v0.6.11.md`) but not tagged or published.
+- Last published release: **v0.6.11** (tag at df9bb14, 2026-11-23).
+  - Windows installers and ZIPs are checksum-verified.
+  - Snap stable is `0.6.11-preview`, amd64 rev 76 / arm64 rev 75, promoted by verified
+    run 45199653472.
+  - Both channels read WFG1–17.
+- The Snap promotion's Store download can fail with TLS errors while the Store is
+  throttling (HTTP 429). Rerun the failed job once the Store's info endpoint answers 200
+  again; nothing is promoted until both archives verify.
 - PR #43 (0.6.9 publication evidence) is open on `codex/release-0.6.9-handoff`.
   Preserve it, and don't delete other branches or worktrees without asking.
-- Latest verification: a fresh Windows build of main 56ab612 passes all six CTest suites
-  (2026-11-23). The superscript/subscript code (66ce15f) also passed all six on real
-  Ubuntu ARM64. No new Word automation result exists for WFG16/17 features; the last
+- Latest verification (2026-11-23):
+  - Main df9bb14 (0.6.11) passes all six CTest suites locally on Windows ARM64 and in CI,
+    including both Windows installer builds and both strict-confinement Snap builds.
+  - The same code before the version bump (76e32e6) passed all six on Ubuntu ARM64 (WSL). No new Word automation result exists for WFG16/17 features; the last
   attempt stalled.
 
 ## Next work (in order)
