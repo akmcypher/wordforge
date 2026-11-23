@@ -27,8 +27,8 @@ struct Layout {
     // The rule above each page's footnotes: (page, y).
     std::vector<std::pair<std::size_t, double>> noteSeparators;
     std::size_t pageCount = 1, measuredParagraphs = 0;
-    // Paragraphs paginated by this composition; an incremental one skips the unchanged
-    // paragraphs before and after an edit.
+    // Steps (paragraphs or table row groups) paginated by this composition; an incremental
+    // one skips the unchanged ones before and after an edit.
     std::size_t composedParagraphs = 0;
     // Identifies this result to the engine that made it, for incremental composition.
     std::uint64_t generation = 0;

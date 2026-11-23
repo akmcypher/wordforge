@@ -165,7 +165,8 @@ bool PageView::change(const std::function<void(Editor &)> &command) {
             present(false);
             return true;
         }
-        auto nextLayout = engine_.compose(candidate.document);
+        // Recomposes only around the change; the failure path below recomposes fully.
+        auto nextLayout = engine_.compose(candidate.document, std::move(layout_));
         renderer_.synchronize(nextLayout);
         invalidateScene();
         editor_ = std::move(candidate);

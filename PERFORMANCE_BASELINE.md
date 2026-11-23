@@ -1,5 +1,19 @@
 # Performance evidence register
 
+## Incremental pagination (2026-11-23, Phase 2A)
+
+`wordforge_benchmark`, Windows ARM64 Release, one run; the edit is typing in the middle
+paragraph. The figures are layout composition only.
+
+| Pages | Full edit layout ms | Incremental edit layout ms | Steps recomposed |
+|---:|---:|---:|---:|
+| 100 | 5.41 | 0.46 | 2 |
+| 500 | 40.24 | 2.28 | 2 |
+| 1000 | 75.33 | 3.36 | 2 |
+
+These don't cover the editor's document copy or renderer synchronization, which still
+re-keys every page. Evidence: `docs/evidence/2026-11-23-incremental-pagination.md`.
+
 ## Anchor-heavy model workload (0.5)
 
 `wordforge_transaction_benchmark --anchors`: one 100,000-character paragraph,

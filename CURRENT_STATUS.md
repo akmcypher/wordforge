@@ -26,6 +26,15 @@ Both channels read WFG1–17. Previous release: 0.6.9 (d7afd47).
   - Evidence: `docs/evidence/2026-11-22-baseline-text.md`.
 - **Manual verified Snap promotion workflow** (PR #46). Records: PR #47, `docs/SNAP.md`.
 
+## Since 0.6.10 (branch `feat/incremental-pagination`)
+
+- **Incremental pagination (Phase 2A, first slice):** editing re-paginates from the
+  checkpoint before the change and reuses the rest once pagination converges.
+  - It matches a full-layout oracle across edits, keeps, widow/orphan control, notes,
+    tables, sections and random edits.
+  - At 1000 pages, layout after an edit takes 3.4 ms instead of 75 ms.
+  - Evidence: `docs/evidence/2026-11-23-incremental-pagination.md`.
+
 ## Verification
 
 - Main 56ab612, fresh Windows ARM64 Release build: all six CTest suites pass (2026-11-23).
@@ -37,7 +46,7 @@ Both channels read WFG1–17. Previous release: 0.6.9 (d7afd47).
 
 ## Not done
 
-- Incremental/background pagination (M2).
+- Background pagination, renderer and model copy costs per edit (rest of M2).
 - Numbering definitions, table styles/row splitting, theme fonts, typography controls.
 - Fuller DOCX fidelity (formatting revisions, unknown body content is omitted with
   a warning, notes and comments are plain text).

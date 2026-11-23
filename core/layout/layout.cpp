@@ -1,7 +1,10 @@
 #include "core/layout/layout.hpp"
+#include <atomic>
+#include <bit>
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <memory>
@@ -86,18 +89,158 @@ void stops(Line &line, const std::vector<std::size_t> &paragraphBoundaries) {
         line.caretStops.emplace_back(line.start, 0);
 }
 } // namespace
+namespace {
+// Order-sensitive 64-bit hash of pagination inputs; equal keys mean equal inputs.
+struct Key {
+    std::uint64_t value = 0xcbf29ce484222325ull;
+    Key &add(std::uint64_t x) {
+        value ^= x + 0x9e3779b97f4a7c15ull + (value << 6) + (value >> 2);
+        return *this;
+    }
+    Key &add(double x) {
+        return add(std::bit_cast<std::uint64_t>(x));
+    }
+    Key &add(bool x) {
+        return add(static_cast<std::uint64_t>(x));
+    }
+    Key &add(const std::u16string &x) {
+        return add(static_cast<std::uint64_t>(std::hash<std::u16string>{}(x)));
+    }
+    Key &add(const std::string &x) {
+        return add(static_cast<std::uint64_t>(std::hash<std::string>{}(x)));
+    }
+    Key &add(const CharacterStyle &s) {
+        return add(static_cast<std::uint64_t>(s.baseline)).add(s.family).add(s.size).add(s.bold)
+            .add(s.italic).add(s.underline).add(s.strike)
+            .add(static_cast<std::uint64_t>(s.color)).add(static_cast<std::uint64_t>(s.highlight));
+    }
+    Key &geometry(const PageStyle &page) {
+        return add(page.width).add(page.height).add(page.margin)
+            .add(static_cast<std::uint64_t>(page.columns)).add(page.columnGap);
+    }
+};
+std::uint64_t tableKey(const Table &table) {
+    Key key;
+    key.add(table.id).add(static_cast<std::uint64_t>(table.rows))
+        .add(static_cast<std::uint64_t>(table.columns)).add(table.border.width)
+        .add(static_cast<std::uint64_t>(table.border.color));
+    for (auto width : table.widths)
+        key.add(width);
+    for (const auto &merge : table.merges)
+        key.add(static_cast<std::uint64_t>(merge.row)).add(static_cast<std::uint64_t>(merge.column))
+            .add(static_cast<std::uint64_t>(merge.rows))
+            .add(static_cast<std::uint64_t>(merge.columns));
+    for (const auto &shade : table.shading)
+        key.add(static_cast<std::uint64_t>(shade.row)).add(static_cast<std::uint64_t>(shade.column))
+            .add(static_cast<std::uint64_t>(shade.color));
+    return key.value;
+}
+// Header and footer lines are marked so incremental composition can tell them apart from
+// footnote and endnote lines in Layout::furniture.
+constexpr std::size_t bandLine = noBox;
+std::atomic<std::uint64_t> generations{0};
+} // namespace
 Layout LayoutEngine::compose(const Document &document) {
+    return paginate(document, nullptr);
+}
+Layout LayoutEngine::compose(const Document &document, Layout &&previous) {
+    return paginate(document, &previous);
+}
+Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
     validatePage(document.page);
+    const auto count = document.paragraphs.size();
     // Each paragraph's section settings, from the section break that ends its section.
-    std::vector<PageStyle> sections(document.paragraphs.size());
+    std::vector<PageStyle> sectionPages{document.page};
+    std::vector<std::size_t> sectionOf(count);
+    for (auto i = count; i-- > 0;) {
+        if (document.paragraphs[i].sectionBreak)
+            sectionPages.push_back(sectionPage(document, i));
+        sectionOf[i] = sectionPages.size() - 1;
+    }
+    auto sectionAt = [&](std::size_t i) -> const PageStyle & {
+        return sectionPages[sectionOf[i]];
+    };
+    auto noteStyle = resolveStyle(document.styles, "Normal").character;
+    noteStyle.size = 10;
+    noteStyle.bold = noteStyle.italic = noteStyle.underline = noteStyle.strike = false;
+    noteStyle.highlight = 0;
+    // Pagination keys: everything a paragraph's placement reads besides the state where it
+    // starts and its neighbours (text and character formatting through its revision).
+    // Page styles carry the header and footer, so changing them recomposes everything.
+    Key global;
+    global.add(noteStyle).add(document.page.differentFirstPage);
+    for (const auto *band : {&document.page.header, &document.page.footer})
+        global.add(band->left).add(band->center).add(band->right);
+    const auto globalKey = global.value;
+    std::vector<std::uint64_t> keys(count), ids(count);
     {
-        auto current = document.page;
-        for (auto i = document.paragraphs.size(); i-- > 0;) {
-            if (document.paragraphs[i].sectionBreak)
-                current = sectionPage(document, i);
-            sections[i] = current;
+        std::vector<std::uint64_t> sectionKeys;
+        for (const auto &section : sectionPages)
+            sectionKeys.push_back(Key{}.geometry(section).value);
+        std::unordered_map<std::uint64_t, std::uint64_t> notes, tables;
+        for (const auto &note : document.footnotes)
+            notes.emplace(note.id, Key{}.add(note.text).value);
+        for (const auto &table : document.tables)
+            tables.emplace(table.id, tableKey(table));
+        for (std::size_t i = 0; i < count; ++i) {
+            const auto &p = document.paragraphs[i];
+            Key key;
+            key.add(p.id).add(p.revision).add(sectionKeys[sectionOf[i]])
+                .add(static_cast<std::uint64_t>(p.list)).add(static_cast<std::uint64_t>(p.alignment))
+                .add(p.indentLeft).add(p.indentRight).add(p.indentFirstLine).add(p.spaceBefore)
+                .add(p.spaceAfter).add(p.lineSpacing).add(p.pageBreakBefore).add(p.keepWithNext)
+                .add(p.keepLines).add(p.widowControl);
+            for (const auto &tab : p.tabs)
+                key.add(tab.position).add(static_cast<std::uint64_t>(tab.alignment))
+                    .add(static_cast<std::uint64_t>(tab.leader));
+            key.add(p.cell.has_value()).add(p.sectionBreak.has_value());
+            if (p.sectionBreak)
+                key.add(p.sectionBreak->continuous);
+            if (p.cell) {
+                const auto found = tables.find(p.cell->tableId);
+                key.add(p.cell->tableId).add(static_cast<std::uint64_t>(p.cell->row))
+                    .add(static_cast<std::uint64_t>(p.cell->column))
+                    .add(found == tables.end() ? std::uint64_t{0} : found->second);
+            }
+            for (const auto &run : p.runs)
+                if (const auto *note = run.note()) {
+                    const auto found = notes.find(note->id);
+                    key.add(note->id).add(note->endnote)
+                        .add(found == notes.end() ? std::uint64_t{0} : found->second);
+                }
+            keys[i] = key.value;
+            ids[i] = p.id;
         }
     }
+    // Incremental composition: resume at the checkpoint before the first changed paragraph
+    // (and before any keep-with-next chain running into it); after the changed range, stop
+    // when the state matches the previous composition's at the same paragraph.
+    const bool incremental = previous && generation_ && previous->generation == generation_ &&
+                             globalKey == globalKey_ && checkpoints_.size() == keys_.size() + 1;
+    const auto oldCount = keys_.size();
+    std::size_t resume = 0, firstChanged = 0, suffixStart = count, oldSuffixStart = oldCount;
+    if (incremental) {
+        while (firstChanged < count && firstChanged < oldCount &&
+               keys[firstChanged] == keys_[firstChanged])
+            ++firstChanged;
+        std::size_t same = 0;
+        while (same < count - firstChanged && same < oldCount - firstChanged &&
+               keys[count - 1 - same] == keys_[oldCount - 1 - same])
+            ++same;
+        suffixStart = count - same;
+        oldSuffixStart = oldCount - same;
+        resume = std::min(firstChanged, oldCount);
+        auto stepBack = [&] {
+            while (resume > 0 && !checkpoints_[resume].valid)
+                --resume;
+        };
+        stepBack();
+        while (resume > 0 && document.paragraphs[resume - 1].keepWithNext) {
+            --resume;
+            stepBack();
+        }
+    }
+    generation_ = 0; // until this composition succeeds
     // The current section's page: text width, column width and height of the writing area.
     PageStyle page;
     double width = 0, columnWidth = 0, availableHeight = 0;
@@ -112,21 +255,71 @@ Layout LayoutEngine::compose(const Document &document) {
             availableHeight < 36)
             throw std::runtime_error("Page margins leave insufficient writing space");
     };
-    useSection(sections.empty() ? document.page : sections.front());
+    useSection(count ? sectionAt(resume ? resume - 1 : 0) : document.page);
     Layout result;
-    result.page = page;
-    result.pageStyles = {page};
+    result.page = count ? sectionAt(0) : document.page;
     result.images = document.images;
-    double y = page.margin;
-    std::size_t pageIndex = 0;
+    State state;
+    std::vector<std::uint64_t> endnoteIds;
+    std::vector<Checkpoint> checkpoints(count + 1), oldCheckpoints;
+    // The previous composition's output after the resume point, for reuse on convergence.
+    struct Tail {
+        std::vector<Line> lines, notes;
+        std::vector<CellRectangle> cells;
+        std::vector<std::pair<std::size_t, double>> separators;
+        std::vector<PageStyle> pageStyles;
+    } tail;
+    std::vector<Line> oldBands;
+    std::vector<std::uint64_t> oldEndnotes;
+    Checkpoint base;
+    if (incremental) {
+        oldCheckpoints = std::move(checkpoints_);
+        oldEndnotes = std::move(endnoteIds_);
+        base = oldCheckpoints[resume];
+        state = base.state;
+        auto split = [](auto &from, auto &to, std::size_t at) {
+            to.assign(std::make_move_iterator(from.begin() + static_cast<std::ptrdiff_t>(at)),
+                      std::make_move_iterator(from.end()));
+            from.resize(at);
+        };
+        result.lines = std::move(previous->lines);
+        split(result.lines, tail.lines, base.lines);
+        result.cells = std::move(previous->cells);
+        split(result.cells, tail.cells, base.cells);
+        for (auto &line : previous->furniture)
+            (line.paragraph == bandLine ? oldBands : result.furniture).push_back(std::move(line));
+        split(result.furniture, tail.notes, base.furniture);
+        result.noteSeparators = std::move(previous->noteSeparators);
+        split(result.noteSeparators, tail.separators, base.separators);
+        result.pageStyles = std::move(previous->pageStyles);
+        split(result.pageStyles, tail.pageStyles, state.pageIndex);
+        result.pageStyles.push_back(page);
+        endnoteIds.assign(oldEndnotes.begin(),
+                          oldEndnotes.begin() + static_cast<std::ptrdiff_t>(state.endnotes));
+        std::move(oldCheckpoints.begin(),
+                  oldCheckpoints.begin() + static_cast<std::ptrdiff_t>(resume),
+                  checkpoints.begin());
+        // Paragraphs removed by the edit leave the measurement cache.
+        std::unordered_set<std::uint64_t> kept(ids.begin() + static_cast<std::ptrdiff_t>(firstChanged),
+                                               ids.begin() + static_cast<std::ptrdiff_t>(suffixStart));
+        for (auto i = firstChanged; i < oldSuffixStart; ++i)
+            if (!kept.contains(ids_[i]))
+                cache_.erase(ids_[i]);
+    } else {
+        result.pageStyles = {page};
+        state.y = state.sectionTop = state.sectionBottom = page.margin;
+    }
+    auto &y = state.y;
+    auto &pageIndex = state.pageIndex;
     // Columns: text fills `column` from `sectionTop` down, then the next column, then the
     // next page. `sectionBottom` is the lowest text of the section on this page.
-    std::size_t column = 0;
-    double sectionTop = page.margin, sectionBottom = page.margin;
+    auto &column = state.column;
+    auto &sectionTop = state.sectionTop;
+    auto &sectionBottom = state.sectionBottom;
     auto columnLeft = [&] {
         return page.margin + static_cast<double>(column) * (columnWidth + page.columnGap);
     };
-    std::size_t listNumber = 0;
+    auto &listNumber = state.listNumber;
     std::unordered_set<std::uint64_t> liveIds;
     validateTables(document);
     auto measure = [&](const Paragraph &paragraph, double width, std::size_t listNumber,
@@ -279,14 +472,6 @@ Layout LayoutEngine::compose(const Document &document) {
     // Footnotes: numbered in reference order, laid out at the bottom of the page holding
     // their reference, below a short rule. Pagination keeps room for them.
     constexpr double noteGap = 10;
-    struct NoteBlock {
-        std::vector<Line> lines;
-        double height = 0;
-    };
-    auto noteStyle = resolveStyle(document.styles, "Normal").character;
-    noteStyle.size = 10;
-    noteStyle.bold = noteStyle.italic = noteStyle.underline = noteStyle.strike = false;
-    noteStyle.highlight = 0;
     auto noteBlock = [&](std::uint64_t id, std::size_t number, bool endnote = false) {
         const auto *note = document.footnote(id);
         Paragraph text(id);
@@ -295,6 +480,9 @@ Layout LayoutEngine::compose(const Document &document) {
         text.lineSpacing = 1;
         text.runs = {Run::fromNote({id, endnote}, noteStyle), Run(u" " + note->text, noteStyle)};
         NoteBlock block;
+        block.id = id;
+        block.text = text.revision;
+        block.number = number;
         for (const auto &line :
              measure(text, width, 0, endnote ? 1 : number, endnote ? number : 1)) {
             block.height += line.height;
@@ -323,15 +511,14 @@ Layout LayoutEngine::compose(const Document &document) {
                           [&](const Run &r) { return r.note() && r.note()->endnote == endnotes; }));
     };
     // Endnotes: numbered in reference order, listed after the last paragraph.
-    std::vector<std::uint64_t> endnoteIds;
     auto collectEndnotes = [&](const Paragraph &p) {
         for (const auto &run : p.runs)
             if (const auto *note = run.note(); note && note->endnote)
                 endnoteIds.push_back(note->id);
     };
-    std::vector<NoteBlock> pageNotes;
-    double notesHeight = 0;
-    std::size_t notesSoFar = 0;
+    auto &pageNotes = state.pageNotes;
+    auto &notesHeight = state.notesHeight;
+    auto &notesSoFar = state.notesSoFar;
     auto notesNeed = [&](const std::vector<NoteBlock> &blocks) {
         double needed = 0;
         for (const auto &block : blocks)
@@ -382,10 +569,114 @@ Layout LayoutEngine::compose(const Document &document) {
         } else
             newPage();
     };
-    for (std::size_t index = 0; index < document.paragraphs.size(); ++index) {
+    auto record = [&](Checkpoint &checkpoint) {
+        checkpoint.valid = true;
+        checkpoint.state = state;
+        checkpoint.state.endnotes = endnoteIds.size();
+        checkpoint.lines = result.lines.size();
+        checkpoint.cells = result.cells.size();
+        checkpoint.furniture = result.furniture.size();
+        checkpoint.separators = result.noteSeparators.size();
+    };
+    auto sameState = [](const State &a, const State &b) {
+        if (a.y != b.y || a.column != b.column || a.sectionTop != b.sectionTop ||
+            a.sectionBottom != b.sectionBottom || a.listNumber != b.listNumber ||
+            a.notesSoFar != b.notesSoFar || a.endnotes != b.endnotes ||
+            a.notesHeight != b.notesHeight || a.pageNotes.size() != b.pageNotes.size())
+            return false;
+        for (std::size_t i = 0; i < a.pageNotes.size(); ++i) {
+            const auto &x = a.pageNotes[i], &z = b.pageNotes[i];
+            if (x.id != z.id || x.text != z.text || x.number != z.number || x.height != z.height)
+                return false;
+        }
+        return true;
+    };
+    const auto delta = static_cast<std::ptrdiff_t>(count) - static_cast<std::ptrdiff_t>(oldCount);
+    // Splices the previous composition's output from old paragraph `j` to its end.
+    auto converge = [&](std::size_t index) {
+        const auto j = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(index) - delta);
+        if (!incremental || index <= resume || index < suffixStart + 1 || j > oldCount ||
+            j < oldSuffixStart + 1 || !oldCheckpoints[j].valid)
+            return false;
+        auto current = state;
+        current.endnotes = endnoteIds.size();
+        const auto &from = oldCheckpoints[j];
+        if (!sameState(current, from.state))
+            return false;
+        const auto &end = oldCheckpoints[oldCount];
+        const auto pageDelta = static_cast<std::ptrdiff_t>(pageIndex) -
+                               static_cast<std::ptrdiff_t>(from.state.pageIndex);
+        const auto lineShift = static_cast<std::ptrdiff_t>(result.lines.size()) -
+                               static_cast<std::ptrdiff_t>(from.lines);
+        const auto cellShift = static_cast<std::ptrdiff_t>(result.cells.size()) -
+                               static_cast<std::ptrdiff_t>(from.cells);
+        const auto noteShift = static_cast<std::ptrdiff_t>(result.furniture.size()) -
+                               static_cast<std::ptrdiff_t>(from.furniture);
+        const auto ruleShift = static_cast<std::ptrdiff_t>(result.noteSeparators.size()) -
+                               static_cast<std::ptrdiff_t>(from.separators);
+        auto shift = [](std::size_t &value, std::ptrdiff_t by) {
+            value = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(value) + by);
+        };
+        for (auto k = from.lines - base.lines; k < end.lines - base.lines; ++k) {
+            auto &line = tail.lines[k];
+            shift(line.paragraph, delta);
+            shift(line.page, pageDelta);
+            if (line.box != noBox)
+                shift(line.box, cellShift);
+            result.lines.push_back(std::move(line));
+        }
+        for (auto k = from.cells - base.cells; k < end.cells - base.cells; ++k) {
+            auto &cell = tail.cells[k];
+            shift(cell.page, pageDelta);
+            shift(cell.firstParagraph, delta);
+            shift(cell.lastParagraph, delta);
+            result.cells.push_back(cell);
+        }
+        for (auto k = from.furniture - base.furniture; k < end.furniture - base.furniture; ++k) {
+            auto &line = tail.notes[k];
+            shift(line.page, pageDelta);
+            result.furniture.push_back(std::move(line));
+        }
+        for (auto k = from.separators - base.separators; k < end.separators - base.separators; ++k) {
+            auto separator = tail.separators[k];
+            shift(separator.first, pageDelta);
+            result.noteSeparators.push_back(separator);
+        }
+        // The current page's settings as the rest of the old composition left them.
+        result.pageStyles.pop_back();
+        for (auto k = from.state.pageIndex - base.state.pageIndex;
+             k <= end.state.pageIndex - base.state.pageIndex; ++k)
+            result.pageStyles.push_back(std::move(tail.pageStyles[k]));
+        endnoteIds.insert(endnoteIds.end(),
+                          oldEndnotes.begin() + static_cast<std::ptrdiff_t>(from.state.endnotes),
+                          oldEndnotes.begin() + static_cast<std::ptrdiff_t>(end.state.endnotes));
+        for (auto k = j; k <= oldCount; ++k) {
+            auto checkpoint = std::move(oldCheckpoints[k]);
+            if (checkpoint.valid) {
+                shift(checkpoint.state.pageIndex, pageDelta);
+                shift(checkpoint.lines, lineShift);
+                shift(checkpoint.cells, cellShift);
+                shift(checkpoint.furniture, noteShift);
+                shift(checkpoint.separators, ruleShift);
+            }
+            checkpoints[static_cast<std::size_t>(static_cast<std::ptrdiff_t>(k) + delta)] =
+                std::move(checkpoint);
+        }
+        state = checkpoints[count].state;
+        useSection(sectionAt(count - 1));
+        return true;
+    };
+    bool converged = false;
+    for (std::size_t index = resume; index < count; ++index) {
+        if (converge(index)) {
+            converged = true;
+            break;
+        }
+        record(checkpoints[index]);
+        ++result.composedParagraphs;
         const auto &paragraph = document.paragraphs[index];
         if (index && document.paragraphs[index - 1].sectionBreak) {
-            const auto &next = sections[index];
+            const auto &next = sectionAt(index);
             const bool sameSheet = next.width == page.width && next.height == page.height &&
                                    next.margin == page.margin;
             if (document.paragraphs[index - 1].sectionBreak->continuous && sameSheet) {
@@ -686,6 +977,8 @@ Layout LayoutEngine::compose(const Document &document) {
         }
         y += paragraph.spaceAfter;
     }
+    if (!converged)
+        record(checkpoints[count]);
     // Endnotes follow the text below a short rule, continuing onto new pages as needed
     // (footnotes keep their room at the bottom of each page).
     if (!endnoteIds.empty()) {
@@ -709,16 +1002,27 @@ Layout LayoutEngine::compose(const Document &document) {
             }
     }
     flushNotes();
-    std::erase_if(cache_, [&](const auto &entry) { return !liveIds.contains(entry.first); });
+    if (!incremental)
+        std::erase_if(cache_, [&](const auto &entry) { return !liveIds.contains(entry.first); });
     result.pageCount = pageIndex + 1;
     result.pageStyles.resize(result.pageCount, page);
     // Headers and footers sit centred in the top and bottom margins (when there is room).
-    if (!document.page.header.empty() || !document.page.footer.empty()) {
-        auto style = resolveStyle(document.styles, "Normal").character;
-        style.size = 10;
-        style.bold = style.italic = style.underline = style.strike = false;
-        style.highlight = 0;
-        style.color = 0xff5f6673;
+    auto bandStyle = resolveStyle(document.styles, "Normal").character;
+    bandStyle.size = 10;
+    bandStyle.bold = bandStyle.italic = bandStyle.underline = bandStyle.strike = false;
+    bandStyle.highlight = 0;
+    bandStyle.color = 0xff5f6673;
+    Key bandKey;
+    bandKey.add(bandStyle).add(document.page.differentFirstPage)
+        .add(static_cast<std::uint64_t>(result.pageCount));
+    for (const auto *band : {&document.page.header, &document.page.footer})
+        bandKey.add(band->left).add(band->center).add(band->right);
+    for (const auto &style : result.pageStyles)
+        bandKey.geometry(style);
+    std::vector<Line> bands;
+    if (incremental && bandKey.value == bandKey_)
+        bands = std::move(oldBands);
+    else if (!document.page.header.empty() || !document.page.footer.empty()) {
         for (std::size_t number = 0; number < result.pageCount; ++number) {
             const auto &page = result.pageStyles[number];
             const double width = page.width - 2 * page.margin;
@@ -732,8 +1036,9 @@ Layout LayoutEngine::compose(const Document &document) {
                         continue;
                     Paragraph label;
                     label.runs = {
-                        {bandText(*texts[position], number + 1, result.pageCount), style}};
+                        {bandText(*texts[position], number + 1, result.pageCount), bandStyle}};
                     Line line;
+                    line.paragraph = bandLine;
                     line.page = number;
                     line.end = label.runs.front().text().size();
                     line.shaped = shaper_.shape(label, 0, line.end);
@@ -744,13 +1049,29 @@ Layout LayoutEngine::compose(const Document &document) {
                                                             : 0);
                     const double middle = top ? page.margin / 2 : page.height - page.margin / 2;
                     line.baseline = middle - line.height / 2 + line.shaped.ascent;
-                    result.furniture.push_back(std::move(line));
+                    bands.push_back(std::move(line));
                 }
             }
         }
     }
-    std::stable_sort(result.furniture.begin(), result.furniture.end(),
-                     [](const Line &a, const Line &b) { return a.page < b.page; });
+    // Notes and bands are each in page order; on a page the notes come first.
+    if (!bands.empty()) {
+        std::vector<Line> furniture;
+        furniture.reserve(result.furniture.size() + bands.size());
+        std::merge(std::make_move_iterator(result.furniture.begin()),
+                   std::make_move_iterator(result.furniture.end()),
+                   std::make_move_iterator(bands.begin()), std::make_move_iterator(bands.end()),
+                   std::back_inserter(furniture),
+                   [](const Line &a, const Line &b) { return a.page < b.page; });
+        result.furniture = std::move(furniture);
+    }
+    keys_ = std::move(keys);
+    ids_ = std::move(ids);
+    endnoteIds_ = std::move(endnoteIds);
+    checkpoints_ = std::move(checkpoints);
+    globalKey_ = globalKey;
+    bandKey_ = bandKey.value;
+    generation_ = result.generation = ++generations;
     return result;
 }
 Position Layout::hitTest(double x, double y, std::size_t pageIndex) const {

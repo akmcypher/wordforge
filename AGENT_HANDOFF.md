@@ -21,11 +21,14 @@ Condensed on 2026-11-23. The full earlier notes are kept verbatim in
 
 ## Next work (in order)
 
-1. **Phase 2A incremental pagination** (M2 performance, not started). Look at
-   `ChangeSet`, `LayoutEngine` and `PageView` first. Compare against a full-layout
-   oracle for early, middle and end edits. Dependency signatures must cover styles,
-   sections, keeps, widow/orphan, lists, tables and notes. Reusing the measurement cache
-   is not the same as incremental page composition.
+1. **Rest of M2 performance.** The first slice of 2A, incremental pagination, is done.
+   See `docs/superpowers/plans/2026-11-23-incremental-pagination.md`. Next:
+   - make `PageRenderer::synchronize` re-key only pages whose content changed
+   - avoid the document copy per edit (Phase 1 copy-on-write)
+   - 2C background, visible-page-first layout
+
+   Keep `tests/unit/incremental_layout_test.cpp` green. Any new pagination input must go
+   into the paragraph or global key in `layout.cpp`.
 2. Phase 1C/3/4 from `ENGINEERING_ROADMAP.md`:
    - numbering definitions
    - table styles and row splitting

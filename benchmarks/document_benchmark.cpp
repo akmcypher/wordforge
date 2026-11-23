@@ -46,7 +46,8 @@ int main(int argc, char **argv) {
         std::vector<int> sizes = {1, 100, 500, 1000};
         if (argc > 1)
             sizes = {std::stoi(argv[1])};
-        std::cout << "requested_pages,actual_pages,paragraphs,layout_ms,edit_layout_ms,remeasured,"
+        std::cout << "requested_pages,actual_pages,paragraphs,layout_ms,edit_layout_ms,incremental_edit_ms,"
+                     "recomposed,remeasured,"
                      "record_ms,repaint_ms,save_ms,peak_process_mib\n"
                   << std::fixed << std::setprecision(2) << std::flush;
         for (auto size : sizes) {
@@ -78,6 +79,12 @@ int main(int argc, char **argv) {
             begin = Clock::now();
             layout = engine.compose(editor.document);
             auto edit = milliseconds(begin);
+            // The same kind of edit again, recomposed incrementally as the editor does.
+            editor.replace(u"again ");
+            begin = Clock::now();
+            layout = engine.compose(editor.document, std::move(layout));
+            auto incremental = milliseconds(begin);
+            const auto composed = layout.composedParagraphs;
             auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(900, 1200));
             if (!surface)
                 throw std::runtime_error("Cannot allocate benchmark surface");
@@ -90,7 +97,8 @@ int main(int argc, char **argv) {
             if (bytes.empty())
                 throw std::runtime_error("Empty persistence result");
             std::cout << size << ',' << layout.pageCount << ',' << editor.document.paragraphs.size()
-                      << ',' << initial << ',' << edit << ',' << layout.measuredParagraphs << ','
+                      << ',' << initial << ',' << edit << ',' << incremental << ',' << composed << ','
+                      << layout.measuredParagraphs << ','
                       << record << ',' << repaint << ',' << save << ',' << peakMemoryMiB() << '\n'
                       << std::flush;
         }
