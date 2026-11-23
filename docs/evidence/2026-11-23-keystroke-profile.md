@@ -36,7 +36,13 @@ Spell checking was on in these runs (its underlining is what took the 17.6 ms). 
 about 1.3 ms, and the edit itself about 3.6–4.5 ms. All six CTest suites pass on Windows
 ARM64 and Ubuntu ARM64 (WSL).
 
-The 0.6.10 code took about 116 ms for the same keystroke, so the four changes since that
-release (incremental pagination, page stamps, copy-on-write paragraphs and incremental
-word count), together with this one, make it about 20 times faster. These are single runs
-on synthetic text, not a P95 objective result.
+Measured afterwards with the same benchmark copied onto tag v0.6.10, the 0.6.10 code
+takes a median of 181–185 ms per keystroke (P95 225–235 ms). Five changes since that
+release bring it to about 5.6 ms, about 33 times faster:
+- incremental pagination and page stamps
+- copy-on-write paragraphs and the incremental word count
+- this fix
+
+An earlier note gave 116 ms for 0.6.10. That figure was main at 7939d73, which already
+had incremental pagination and page stamps. These are single runs on synthetic text, not
+a P95 objective result.

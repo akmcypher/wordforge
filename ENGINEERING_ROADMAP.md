@@ -198,7 +198,7 @@ only changed pages: sync after that edit drops from about 58 ms to 0.27 ms. Copy
 paragraphs then removed the model copy: a 34,000-paragraph model edit takes about 1 ms
 instead of 9–13 ms, and undo is O(change). The status bar's word count is now incremental
 too, and page positions are prefix sums: a 1000-page keystroke with its paint takes
-about 5.6 ms, against about 116 ms in 0.6.10. Still open:
+about 5.6 ms, against a median of 181–185 ms in 0.6.10. Still open:
 O(paragraphs) key/move work and 2C background layout. Evidence:
 `docs/evidence/2026-11-23-incremental-pagination.md`.
 

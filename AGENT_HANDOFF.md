@@ -12,6 +12,10 @@ Condensed on 2026-11-23. The full earlier notes are kept verbatim in
 - Last published release: **v0.6.10** (tag at 7eedc2b, 2026-11-23). Windows installers
   and ZIPs are checksum-verified; Snap stable is `0.6.10-preview`, amd64 rev 64 / arm64
   rev 63, promoted by verified run 45070162245. Both channels read WFG1–17.
+- `main` 76e32e6 adds the performance work of PRs #50–#54 (incremental pagination, page
+  stamps, copy-on-write paragraphs, incremental word count, O(1) page positions).
+  Release 0.6.11 for it is prepared on `release/0.6.11` (version bump and
+  `docs/releases/v0.6.11.md`) but not tagged or published.
 - PR #43 (0.6.9 publication evidence) is open on `codex/release-0.6.9-handoff`.
   Preserve it, and don't delete other branches or worktrees without asking.
 - Latest verification: a fresh Windows build of main 56ab612 passes all six CTest suites
