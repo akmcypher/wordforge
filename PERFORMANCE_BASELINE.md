@@ -29,6 +29,8 @@ Windows ARM64 Release, single runs; before is main 7939d73 on the same machine.
 
 About 70 ms of that keystroke was the status bar's whole-document word count. With the
 incremental `DocumentCounter` (same day), the median keystroke is 24–27 ms (P95 25–31 ms).
+With page positions as prefix sums (same day), it is 5.4–5.8 ms (P95 6.7 ms);
+`docs/evidence/2026-11-23-keystroke-profile.md`.
 Evidence: `docs/evidence/2026-11-23-shared-paragraphs.md`.
 
 ## Anchor-heavy model workload (0.5)

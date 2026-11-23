@@ -197,6 +197,9 @@ class PageView : public QAbstractScrollArea {
     double pageTop(std::size_t) const;
     std::size_t pageAtY(double viewportY) const; // the page under (or nearest) a height
     double pageOffset(std::size_t page) const;   // sum of the heights of earlier pages, in pt
+    // pageOffset for each page of layout_ (plus the end), rebuilt when the layout changes.
+    mutable std::vector<double> pageOffsets_;
+    mutable std::uint64_t pageOffsetsGeneration_ = 0;
     double widestPage() const;
 };
 } // namespace wf

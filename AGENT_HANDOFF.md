@@ -23,8 +23,9 @@ Condensed on 2026-11-23. The full earlier notes are kept verbatim in
 
 1. **Rest of M2 performance.** The first slice of 2A, incremental pagination, is done.
    See `docs/superpowers/plans/2026-11-23-incremental-pagination.md`. Next:
-   - profile the remaining ~25 ms keystroke at 1000 pages (viewport paint and the
-     other `contentChanged` listeners); `wordforge_desktop_benchmark --long` measures it
+   - a 1000-page keystroke takes about 5.6 ms (`wordforge_desktop_benchmark --long`).
+     What remains grows with paragraphs: layout keys and moves (about 3 ms), the per-edit
+     list-of-pointers copy, and the full scans in `validateDocument`
    - 2C background, visible-page-first layout
 
    Write paragraphs only through `ParagraphList::edit`/`editEach`, never before

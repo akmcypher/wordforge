@@ -48,6 +48,11 @@ Both channels read WFG1–17. Previous release: 0.6.9 (d7afd47).
     and the Word Count dialog.
   - A keystroke in a 1000-page document, including the viewport paint, takes about 25 ms
     instead of 95 ms.
+- **Page positions in O(1) (branch `perf/keystroke-profile`):**
+  - Spell-check underlining had been summing every earlier page's height for each line
+    (17.6 ms of a 1000-page keystroke).
+  - The keystroke now takes about 5.6 ms. The same keystroke took about 116 ms in 0.6.10.
+  - Evidence: `docs/evidence/2026-11-23-keystroke-profile.md`.
 
 ## Verification
 

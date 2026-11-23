@@ -65,11 +65,20 @@ double PageView::widestPage() const {
     return widest;
 }
 double PageView::pageOffset(std::size_t page) const {
-    // Usually every page has the first page's height; add the differences only.
-    double offset = static_cast<double>(page) * layout_.page.height;
-    for (std::size_t i = 0; i < page && i < layout_.pageStyles.size(); ++i)
-        offset += layout_.pageStyles[i].height - layout_.page.height;
-    return offset;
+    // Prefix sums of the page heights, so finding a page's position is O(1); painting asks
+    // for it once per laid-out line.
+    if (!layout_.generation || pageOffsetsGeneration_ != layout_.generation ||
+        pageOffsets_.size() != layout_.pageCount + 1) {
+        pageOffsets_.assign(1, 0.0);
+        pageOffsets_.reserve(layout_.pageCount + 1);
+        for (std::size_t i = 0; i < layout_.pageCount; ++i)
+            pageOffsets_.push_back(pageOffsets_.back() + layout_.pageStyle(i).height);
+        pageOffsetsGeneration_ = layout_.generation;
+    }
+    if (page < pageOffsets_.size())
+        return pageOffsets_[page];
+    return pageOffsets_.back() +
+           static_cast<double>(page - layout_.pageCount) * layout_.page.height;
 }
 double PageView::pageLeft(std::size_t page) const {
     const double widest = widestPage();
@@ -81,11 +90,16 @@ double PageView::pageTop(std::size_t index) const {
            verticalScrollBar()->value();
 }
 std::size_t PageView::pageAtY(double viewportY) const {
-    std::size_t page = 0;
-    while (page + 1 < layout_.pageCount &&
-           pageTop(page + 1) - 12 <= viewportY)
-        ++page;
-    return page;
+    // The last page whose top (less the gap above it) is at or above viewportY.
+    std::size_t low = 0, high = layout_.pageCount ? layout_.pageCount - 1 : 0;
+    while (low < high) {
+        const auto middle = low + (high - low + 1) / 2;
+        if (pageTop(middle) - 12 <= viewportY)
+            low = middle;
+        else
+            high = middle - 1;
+    }
+    return low;
 }
 void PageView::updateScrollbars() {
     verticalScrollBar()->setPageStep(viewport()->height());
@@ -745,7 +759,10 @@ void PageView::paintSpelling(QPainter &painter) {
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setPen(pen);
     const auto height = viewport()->height();
+    const auto firstPage = pageAtY(-4), lastPage = pageAtY(height + 4);
     for (const auto &line : layout_.lines) {
+        if (line.page < firstPage || line.page > lastPage)
+            continue;
         const auto y = pageTop(line.page) + (line.baseline + 2) * scale();
         if (y < -4 || y > height + 4)
             continue;
