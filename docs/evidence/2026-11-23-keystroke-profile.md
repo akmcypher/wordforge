@@ -46,3 +46,18 @@ release bring it to about 5.6 ms, about 33 times faster:
 An earlier note gave 116 ms for 0.6.10. That figure was main at 7939d73, which already
 had incremental pagination and page stamps. These are single runs on synthetic text, not
 a P95 objective result.
+
+## Follow-up: pagination keys and checkpoints (2026-11-24)
+
+Timed inside `LayoutEngine::paginate` on the same benchmark, the incremental layout of one
+keystroke spent about 1.9 ms hashing every paragraph's pagination key, about 0.3 ms finding
+section settings, and about 0.4 ms copying the per-paragraph checkpoints into a new vector.
+- Each paragraph's own key part is kept per paragraph and recomputed only where the
+  paragraphs aren't shared with the previous composition's (copy-on-write pointers). The
+  final key adds the section, table and note parts. Keys now take about 0.1 ms.
+- The checkpoints vector is reused in place: only the changed range is resized, and the
+  reused tail is shifted only when an edit moved lines or pages.
+
+Median keystroke 3.1–3.7 ms in two runs (P95 4.0–5.4 ms); a third, noisier run gave
+5.3 ms. Before: 5.4–5.8 ms. `IncrementalLayout.RandomEditsMatchFullLayout` fails if
+checkpoints inside a new table row group aren't invalidated, so that case is covered.

@@ -96,5 +96,13 @@ class LayoutEngine {
     std::uint64_t generation_ = 0, globalKey_ = 0, bandKey_ = 0;
     std::vector<std::uint64_t> keys_, ids_, endnoteIds_;
     std::vector<Checkpoint> checkpoints_;
+    // Each paragraph's own pagination inputs, kept for the paragraphs of the latest
+    // composition (shared paragraphs are unchanged, so their entries carry over).
+    struct Local {
+        std::uint64_t key = 0, id = 0, tableId = 0;
+        bool sectionBreak = false, cell = false, notes = false;
+    };
+    ParagraphList paragraphs_;
+    std::vector<Local> locals_;
 };
 } // namespace wf

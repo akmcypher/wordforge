@@ -152,8 +152,57 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
     // Each paragraph's section settings, from the section break that ends its section.
     std::vector<PageStyle> sectionPages{document.page};
     std::vector<std::size_t> sectionOf(count);
+    // Each paragraph's own inputs, recomputed only where the paragraphs aren't shared with
+    // the previous composition's.
+    {
+        const auto &now = document.paragraphs;
+        std::size_t prefix = 0, suffix = 0;
+        while (prefix < paragraphs_.size() && prefix < count && now.shares(prefix, paragraphs_, prefix))
+            ++prefix;
+        while (suffix < paragraphs_.size() - prefix && suffix < count - prefix &&
+               now.shares(count - 1 - suffix, paragraphs_, paragraphs_.size() - 1 - suffix))
+            ++suffix;
+        std::vector<Local> changed;
+        changed.reserve(count - suffix - prefix);
+        for (auto i = prefix; i < count - suffix; ++i) {
+            const auto &p = now[i];
+            Local local;
+            Key key;
+            key.add(p.id).add(p.revision)
+                .add(static_cast<std::uint64_t>(p.list)).add(static_cast<std::uint64_t>(p.alignment))
+                .add(p.indentLeft).add(p.indentRight).add(p.indentFirstLine).add(p.spaceBefore)
+                .add(p.spaceAfter).add(p.lineSpacing).add(p.pageBreakBefore).add(p.keepWithNext)
+                .add(p.keepLines).add(p.widowControl);
+            for (const auto &tab : p.tabs)
+                key.add(tab.position).add(static_cast<std::uint64_t>(tab.alignment))
+                    .add(static_cast<std::uint64_t>(tab.leader));
+            key.add(p.cell.has_value()).add(p.sectionBreak.has_value());
+            if (p.sectionBreak)
+                key.add(p.sectionBreak->continuous);
+            if (p.cell) {
+                key.add(p.cell->tableId).add(static_cast<std::uint64_t>(p.cell->row))
+                    .add(static_cast<std::uint64_t>(p.cell->column));
+                local.tableId = p.cell->tableId;
+            }
+            for (const auto &run : p.runs)
+                if (const auto *note = run.note()) {
+                    key.add(note->id).add(note->endnote);
+                    local.notes = true;
+                }
+            local.key = key.value;
+            local.id = p.id;
+            local.sectionBreak = p.sectionBreak.has_value();
+            local.cell = p.cell.has_value();
+            changed.push_back(local);
+        }
+        const auto at = locals_.begin() + static_cast<std::ptrdiff_t>(prefix);
+        locals_.erase(at, locals_.end() - static_cast<std::ptrdiff_t>(suffix));
+        locals_.insert(locals_.begin() + static_cast<std::ptrdiff_t>(prefix), changed.begin(),
+                       changed.end());
+        paragraphs_ = now;
+    }
     for (auto i = count; i-- > 0;) {
-        if (document.paragraphs[i].sectionBreak)
+        if (locals_[i].sectionBreak)
             sectionPages.push_back(sectionPage(document, i));
         sectionOf[i] = sectionPages.size() - 1;
     }
@@ -186,33 +235,21 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
         for (const auto &table : document.tables)
             tables.emplace(table.id, tableKey(table));
         for (std::size_t i = 0; i < count; ++i) {
-            const auto &p = document.paragraphs[i];
+            const auto &local = locals_[i];
             Key key;
-            key.add(p.id).add(p.revision).add(sectionKeys[sectionOf[i]])
-                .add(static_cast<std::uint64_t>(p.list)).add(static_cast<std::uint64_t>(p.alignment))
-                .add(p.indentLeft).add(p.indentRight).add(p.indentFirstLine).add(p.spaceBefore)
-                .add(p.spaceAfter).add(p.lineSpacing).add(p.pageBreakBefore).add(p.keepWithNext)
-                .add(p.keepLines).add(p.widowControl);
-            for (const auto &tab : p.tabs)
-                key.add(tab.position).add(static_cast<std::uint64_t>(tab.alignment))
-                    .add(static_cast<std::uint64_t>(tab.leader));
-            key.add(p.cell.has_value()).add(p.sectionBreak.has_value());
-            if (p.sectionBreak)
-                key.add(p.sectionBreak->continuous);
-            if (p.cell) {
-                const auto found = tables.find(p.cell->tableId);
-                key.add(p.cell->tableId).add(static_cast<std::uint64_t>(p.cell->row))
-                    .add(static_cast<std::uint64_t>(p.cell->column))
-                    .add(found == tables.end() ? std::uint64_t{0} : found->second);
+            key.add(local.key).add(sectionKeys[sectionOf[i]]);
+            if (local.cell) {
+                const auto found = tables.find(local.tableId);
+                key.add(found == tables.end() ? std::uint64_t{0} : found->second);
             }
-            for (const auto &run : p.runs)
-                if (const auto *note = run.note()) {
-                    const auto found = notes.find(note->id);
-                    key.add(note->id).add(note->endnote)
-                        .add(found == notes.end() ? std::uint64_t{0} : found->second);
-                }
+            if (local.notes)
+                for (const auto &run : document.paragraphs[i].runs)
+                    if (const auto *note = run.note()) {
+                        const auto found = notes.find(note->id);
+                        key.add(found == notes.end() ? std::uint64_t{0} : found->second);
+                    }
             keys[i] = key.value;
-            ids[i] = p.id;
+            ids[i] = local.id;
         }
     }
     // Incremental composition: resume at the checkpoint before the first changed paragraph
@@ -264,7 +301,7 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
     result.images = document.images;
     State state;
     std::vector<std::uint64_t> endnoteIds;
-    std::vector<Checkpoint> checkpoints(count + 1), oldCheckpoints;
+    std::vector<Checkpoint> checkpoints;
     // The previous composition's output after the resume point, for reuse on convergence.
     struct Tail {
         std::vector<Line> lines, notes;
@@ -280,9 +317,17 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
     std::ptrdiff_t tailShift = 0;
     Checkpoint base;
     if (incremental) {
-        oldCheckpoints = std::move(checkpoints_);
+        // The previous checkpoints stay where they are: those before the change keep their
+        // index and those after it move to their paragraphs' new index (their values are
+        // shifted on convergence). The changed range is recorded afresh.
+        checkpoints = std::move(checkpoints_);
+        base = checkpoints[resume];
+        const auto at = checkpoints.begin() + static_cast<std::ptrdiff_t>(firstChanged);
+        if (suffixStart > oldSuffixStart)
+            checkpoints.insert(at, suffixStart - oldSuffixStart, Checkpoint{});
+        else
+            checkpoints.erase(at, at + static_cast<std::ptrdiff_t>(oldSuffixStart - suffixStart));
         oldEndnotes = std::move(endnoteIds_);
-        base = oldCheckpoints[resume];
         state = base.state;
         keptPrefix = state.pageIndex;
         auto split = [](auto &from, auto &to, std::size_t at) {
@@ -305,9 +350,6 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
         result.pageStyles.push_back(page);
         endnoteIds.assign(oldEndnotes.begin(),
                           oldEndnotes.begin() + static_cast<std::ptrdiff_t>(state.endnotes));
-        std::move(oldCheckpoints.begin(),
-                  oldCheckpoints.begin() + static_cast<std::ptrdiff_t>(resume),
-                  checkpoints.begin());
         // Paragraphs removed by the edit leave the measurement cache.
         std::unordered_set<std::uint64_t> kept(ids.begin() + static_cast<std::ptrdiff_t>(firstChanged),
                                                ids.begin() + static_cast<std::ptrdiff_t>(suffixStart));
@@ -315,6 +357,7 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
             if (!kept.contains(ids_[i]))
                 cache_.erase(ids_[i]);
     } else {
+        checkpoints.assign(count + 1, Checkpoint{});
         result.pageStyles = {page};
         state.y = state.sectionTop = state.sectionBottom = page.margin;
     }
@@ -605,14 +648,14 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
     auto converge = [&](std::size_t index) {
         const auto j = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(index) - delta);
         if (!incremental || index <= resume || index < suffixStart + 1 || j > oldCount ||
-            j < oldSuffixStart + 1 || !oldCheckpoints[j].valid)
+            j < oldSuffixStart + 1 || !checkpoints[index].valid)
             return false;
         auto current = state;
         current.endnotes = endnoteIds.size();
-        const auto &from = oldCheckpoints[j];
-        if (!sameState(current, from.state))
+        if (!sameState(current, checkpoints[index].state))
             return false;
-        const auto &end = oldCheckpoints[oldCount];
+        const auto from = checkpoints[index];
+        const auto end = checkpoints[count];
         tailFirst = from.state.pageIndex;
         tailEnd = end.state.pageIndex;
         tailShift = static_cast<std::ptrdiff_t>(pageIndex) -
@@ -663,18 +706,17 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
         endnoteIds.insert(endnoteIds.end(),
                           oldEndnotes.begin() + static_cast<std::ptrdiff_t>(from.state.endnotes),
                           oldEndnotes.begin() + static_cast<std::ptrdiff_t>(end.state.endnotes));
-        for (auto k = j; k <= oldCount; ++k) {
-            auto checkpoint = std::move(oldCheckpoints[k]);
-            if (checkpoint.valid) {
-                shift(checkpoint.state.pageIndex, pageDelta);
-                shift(checkpoint.lines, lineShift);
-                shift(checkpoint.cells, cellShift);
-                shift(checkpoint.furniture, noteShift);
-                shift(checkpoint.separators, ruleShift);
+        if (pageDelta || lineShift || cellShift || noteShift || ruleShift)
+            for (auto k = index; k <= count; ++k) {
+                auto &checkpoint = checkpoints[k];
+                if (checkpoint.valid) {
+                    shift(checkpoint.state.pageIndex, pageDelta);
+                    shift(checkpoint.lines, lineShift);
+                    shift(checkpoint.cells, cellShift);
+                    shift(checkpoint.furniture, noteShift);
+                    shift(checkpoint.separators, ruleShift);
+                }
             }
-            checkpoints[static_cast<std::size_t>(static_cast<std::ptrdiff_t>(k) + delta)] =
-                std::move(checkpoint);
-        }
         state = checkpoints[count].state;
         useSection(sectionAt(count - 1));
         return true;
@@ -834,6 +876,9 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
             if (groupEnd == table.rows)
                 y += 8;
             sectionBottom = std::max(sectionBottom, y);
+            // No checkpoints inside the row group (the reused vector may hold old ones).
+            for (auto k = index + 1; k < end; ++k)
+                checkpoints[k].valid = false;
             index = end - 1;
             listNumber = 0;
             continue;
