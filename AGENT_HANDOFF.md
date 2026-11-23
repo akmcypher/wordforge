@@ -6,27 +6,28 @@ Condensed on 2026-11-23. The full earlier notes are kept verbatim in
 
 ## Current state
 
-- `main` holds everything through PR #55 (release 0.6.11):
+- `main` holds everything through PR #58 (release 0.6.12):
   - features: sections/columns, tab stops and TOC dot leaders, keep-with-next and
     keep-lines, widow/orphan control, superscript/subscript
   - the long-document performance work of PRs #50–#54: incremental pagination, page
-    stamps, copy-on-write paragraphs, incremental word count, O(1) page positions
+    stamps, copy-on-write paragraphs, incremental word count, O(1) page positions,
+    and PR #57's per-paragraph pagination keys and in-place checkpoints
 
   Native format WFG17; the reader supports WFG1–17.
-- Last published release: **v0.6.11** (tag at df9bb14, 2026-11-23).
+- Last published release: **v0.6.12** (tag at a13c8d2, 2026-11-24).
   - Windows installers and ZIPs are checksum-verified.
-  - Snap stable is `0.6.11-preview`, amd64 rev 76 / arm64 rev 75, promoted by verified
-    run 45199653472.
+  - Snap stable is `0.6.12-preview`, amd64 rev 78 / arm64 rev 77, promoted by verified
+    run 45263092624.
   - Both channels read WFG1–17.
 - The Snap promotion's Store download can fail with TLS errors while the Store is
   throttling (HTTP 429). Rerun the failed job once the Store's info endpoint answers 200
   again; nothing is promoted until both archives verify.
 - PR #43 (0.6.9 publication evidence) is open on `codex/release-0.6.9-handoff`.
   Preserve it, and don't delete other branches or worktrees without asking.
-- Latest verification (2026-11-23):
-  - Main df9bb14 (0.6.11) passes all six CTest suites locally on Windows ARM64 and in CI,
-    including both Windows installer builds and both strict-confinement Snap builds.
-  - The same code before the version bump (76e32e6) passed all six on Ubuntu ARM64 (WSL). No new Word automation result exists for WFG16/17 features; the last
+- Latest verification (2026-11-24):
+  - Main a13c8d2 (0.6.12) passed CI on PR #58, including both Windows installer builds and
+    both strict-confinement Snap builds, and all six CTest suites locally on Windows ARM64.
+  - Ubuntu ran in CI only for 0.6.12 (local WSL was unresponsive at the time). No new Word automation result exists for WFG16/17 features; the last
   attempt stalled.
 
 ## Next work (in order)
