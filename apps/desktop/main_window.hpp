@@ -27,8 +27,7 @@ class MainWindow : public QMainWindow {
     QString path_;
     bool dirty_ = false;
     bool panelBeforeFocus_ = true;
-    std::uint64_t statisticsRevision_ = static_cast<std::uint64_t>(-1);
-    std::size_t words_ = 0;
+    DocumentCounter counter_;
     RecoveryFile recovery_{RecoveryFile::newPath()};
     void checkpointRecovery();
     void clearRecovery();

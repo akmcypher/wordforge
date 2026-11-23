@@ -129,3 +129,50 @@ TEST(SharedParagraphs, UndoRestoresContentEvenWhenEditsReachSharedParagraphs) {
     }
     EXPECT_EQ(editor.document.paragraphs, original);
 }
+TEST(SharedParagraphs, DocumentCounterMatchesAFullCountAcrossEdits) {
+    auto editor = longEditor();
+    DocumentCounter counter;
+    EXPECT_EQ(counter.count(editor.document), countText(editor.document.text()));
+    std::uint32_t seed = 7;
+    auto next = [&](std::size_t bound) {
+        seed = seed * 1103515245u + 12345u;
+        return static_cast<std::size_t>((seed >> 8) % bound);
+    };
+    for (int step = 0; step < 200; ++step) {
+        const auto paragraph = next(editor.document.paragraphs.size());
+        const auto length = editor.document.paragraphs[paragraph].text().size();
+        editor.selection = {{paragraph, next(length + 1)}, {paragraph, next(length + 1)}};
+        if (editor.selection.anchor > editor.selection.focus)
+            std::swap(editor.selection.anchor, editor.selection.focus);
+        switch (next(7)) {
+        case 0:
+            editor.replace(u"two words");
+            break;
+        case 1:
+            editor.replace(u"\nnew paragraph\n");
+            break;
+        case 2:
+            editor.eraseBackward();
+            break;
+        case 3:
+            editor.insertParagraphBreak();
+            break;
+        case 4:
+            editor.undo();
+            break;
+        case 5:
+            editor.redo();
+            break;
+        default:
+            if (paragraph + 3 < editor.document.paragraphs.size()) {
+                editor.selection = {{paragraph, 0}, {paragraph + 3, 0}};
+                editor.replace(u"");
+            }
+        }
+        ASSERT_EQ(counter.count(editor.document), countText(editor.document.text()))
+            << "step " << step;
+    }
+    Editor other;
+    other.replace(u"An unrelated document\nwith two paragraphs");
+    EXPECT_EQ(counter.count(other.document), countText(other.document.text()));
+}

@@ -23,9 +23,8 @@ Condensed on 2026-11-23. The full earlier notes are kept verbatim in
 
 1. **Rest of M2 performance.** The first slice of 2A, incremental pagination, is done.
    See `docs/superpowers/plans/2026-11-23-incremental-pagination.md`. Next:
-   - count words incrementally: the status bar recounts the whole document on each edit
-     (70 ms at 1000 pages, the largest per-keystroke cost left; see
-     `docs/evidence/2026-11-23-shared-paragraphs.md`)
+   - profile the remaining ~25 ms keystroke at 1000 pages (viewport paint and the
+     other `contentChanged` listeners); `wordforge_desktop_benchmark --long` measures it
    - 2C background, visible-page-first layout
 
    Write paragraphs only through `ParagraphList::edit`/`editEach`, never before

@@ -27,7 +27,8 @@ Windows ARM64 Release, single runs; before is main 7939d73 on the same machine.
 | 34,000 paragraphs: peak MiB | 126 | 36 |
 | 32,000 paragraphs, `PageView` keystroke + paint, median ms | 115.5 | 94–95 |
 
-About 70 ms of the keystroke is the status bar's whole-document word count.
+About 70 ms of that keystroke was the status bar's whole-document word count. With the
+incremental `DocumentCounter` (same day), the median keystroke is 24–27 ms (P95 25–31 ms).
 Evidence: `docs/evidence/2026-11-23-shared-paragraphs.md`.
 
 ## Anchor-heavy model workload (0.5)

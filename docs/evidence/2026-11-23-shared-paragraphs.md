@@ -75,4 +75,18 @@ The remaining time per keystroke is outside the editor:
   whole document on every edit; that count alone measures 70 ms at this size.
 - The rest is the viewport paint.
 
+### Follow-up: incremental word count
+
+`DocumentCounter` (`core/document/statistics.cpp`) keeps one count per paragraph. Each
+call recounts only the paragraphs between the shared prefix and the shared suffix of the
+previous call's document. The status bar and the Word Count dialog use it.
+
+This is exact: a paragraph break always ends an ICU word and is not counted as a
+character, so counts add up paragraph by paragraph. A test checks it against
+`countText(document.text())` after each of 200 random edits, undos and redos.
+- The first count of the 32,000-paragraph document takes 56 ms, against 60 ms for
+  counting the whole text at once. Both reuse ICU break iterators.
+- `wordforge_desktop_benchmark --long`: the median keystroke is 24–27 ms (P95 25–31 ms),
+  instead of 94–95 ms.
+
 This is not a P95 objective result: single runs on one machine, synthetic text.

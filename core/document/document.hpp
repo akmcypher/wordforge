@@ -528,6 +528,18 @@ struct TextCount {
     bool operator==(const TextCount &) const = default;
 };
 TextCount countText(const std::u16string &);
+// countText(document.text()), kept up to date across edits: each call recounts only the
+// paragraphs no longer shared with the document of the previous call. Counts add up
+// paragraph by paragraph because a paragraph break always ends a word and is not counted.
+class DocumentCounter {
+  public:
+    const TextCount &count(const Document &);
+
+  private:
+    ParagraphList previous_;
+    std::vector<TextCount> counts_; // one per paragraph of previous_
+    TextCount total_;
+};
 std::string utf8(const std::u16string &);
 std::u16string utf16(const std::string &);
 std::size_t previousGrapheme(const std::u16string &, std::size_t);

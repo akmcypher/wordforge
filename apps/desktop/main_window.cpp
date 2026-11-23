@@ -256,17 +256,14 @@ void MainWindow::updateStatus() {
                                               : "Saved locally");
     setWindowTitle((path_.isEmpty() ? QString("Untitled") : QFileInfo(path_).fileName()) +
                    (dirty_ ? " *" : "") + " — Wordforge");
-    if (statisticsRevision_ != view_->document().revision) {
-        words_ = countText(view_->document().text()).words;
-        statisticsRevision_ = view_->document().revision;
-    }
+    const auto total = counter_.count(view_->document()).words;
     const auto caret = view_->layout().caret(view_->selection().focus);
     const auto selection = view_->selection();
     const auto words = selection.anchor == selection.focus
-                           ? QString("%1 words").arg(words_)
+                           ? QString("%1 words").arg(total)
                            : QString("%1 of %2 words")
                                  .arg(countText(view_->selectedText().toStdU16String()).words)
-                                 .arg(words_);
+                                 .arg(total);
     statistics_->setText(QString("Page %1 of %2    ·    %3")
                              .arg(caret.page + 1)
                              .arg(view_->layout().pageCount)
@@ -275,8 +272,8 @@ void MainWindow::updateStatus() {
 void MainWindow::showWordCount() {
     const auto selection = view_->selection();
     const bool selected = selection.anchor != selection.focus;
-    const auto count = countText(selected ? view_->selectedText().toStdU16String()
-                                          : view_->document().text());
+    const auto count = selected ? countText(view_->selectedText().toStdU16String())
+                                : counter_.count(view_->document());
     QDialog dialog(this);
     dialog.setObjectName("wordCountDialog");
     dialog.setWindowTitle(selected ? "Word count — selection" : "Word count");

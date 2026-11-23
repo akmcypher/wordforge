@@ -41,9 +41,13 @@ Both channels read WFG1–17. Previous release: 0.6.9 (d7afd47).
     changes.
   - At 34,000 paragraphs, a model edit takes about 1 ms instead of 9–13 ms. Undo and redo
     take under 0.01 ms instead of about 20 ms, and peak memory is 36 MiB instead of 126 MiB.
-  - Typing in a 1000-page document now spends about 3.7 ms in the editor. About 70 ms
-    still goes to the status bar recounting every word on each edit.
+  - Typing in a 1000-page document now spends about 3.7 ms in the editor.
   - Evidence: `docs/evidence/2026-11-23-shared-paragraphs.md`.
+- **Incremental word count (branch `feat/incremental-word-count`):**
+  - `DocumentCounter` recounts only the paragraphs an edit changed, for the status bar
+    and the Word Count dialog.
+  - A keystroke in a 1000-page document, including the viewport paint, takes about 25 ms
+    instead of 95 ms.
 
 ## Verification
 
