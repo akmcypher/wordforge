@@ -14,6 +14,13 @@ per-feature support table.
 Both channels read WFG1â€“17. Previous release: 0.6.10 (7eedc2b). Release notes:
 `docs/releases/v0.6.11.md`.
 
+## In 0.6.12 (prepared on `release/0.6.12`, not yet tagged or published)
+
+- **Per-paragraph pagination keys and in-place checkpoints (PR #57):** a keystroke's
+  layout no longer hashes every paragraph or copies every checkpoint. A 1000-page
+  keystroke takes a median of 3.1–3.7 ms instead of about 5.6 ms.
+  - Evidence: `docs/evidence/2026-11-23-keystroke-profile.md` (follow-up section).
+
 ## In 0.6.10 (since 0.6.9)
 
 - **Widow/orphan control** (PR #44):
