@@ -1,6 +1,7 @@
 // Incremental composition must give exactly what a fresh full composition gives.
 #include "core/layout/layout.hpp"
 #include <gtest/gtest.h>
+#include <map>
 #include <random>
 using namespace wf;
 namespace {
@@ -48,6 +49,27 @@ void expectSame(const Layout &a, const Layout &b) {
     }
     EXPECT_EQ(a.noteSeparators, b.noteSeparators);
 }
+// What is drawn on `page`, independent of paragraph and page indices.
+std::vector<double> pageContent(const Layout &layout, std::size_t page) {
+    std::vector<double> content;
+    const auto &style = layout.pageStyle(page);
+    content.insert(content.end(), {style.width, style.height, style.margin});
+    for (const auto *lines : {&layout.lines, &layout.furniture})
+        for (const auto &line : *lines)
+            if (line.page == page)
+                content.insert(content.end(),
+                               {line.x, line.baseline, line.height, line.shaped.width,
+                                static_cast<double>(line.start), static_cast<double>(line.end),
+                                static_cast<double>(line.shaped.runs.size()), line.markerX});
+    for (const auto &cell : layout.cells)
+        if (cell.page == page)
+            content.insert(content.end(), {cell.x, cell.y, cell.width, cell.height,
+                                           static_cast<double>(cell.fill)});
+    for (const auto &[at, y] : layout.noteSeparators)
+        if (at == page)
+            content.push_back(y);
+    return content;
+}
 // An editing session that recomposes incrementally after each change and checks the
 // result against a fresh engine (the full-layout oracle).
 struct Session {
@@ -57,11 +79,25 @@ struct Session {
     explicit Session(Editor e) : editor(std::move(e)) {
         layout = engine.compose(editor.document);
     }
+    std::size_t reusedPages = 0;
     std::size_t edit(const std::function<void(Editor &)> &change) {
         change(editor);
+        const auto before = layout;
         layout = engine.compose(editor.document, std::move(layout));
         LayoutEngine oracle(sharedShaper());
         expectSame(layout, oracle.compose(editor.document));
+        // A page keeping its stamp must look exactly as the page that had it.
+        EXPECT_EQ(layout.pageStamps.size(), layout.pageCount);
+        std::map<std::uint64_t, std::size_t> stamps;
+        for (std::size_t page = 0; page < before.pageStamps.size(); ++page)
+            stamps.emplace(before.pageStamps[page], page);
+        reusedPages = 0;
+        for (std::size_t page = 0; page < layout.pageCount; ++page)
+            if (const auto found = stamps.find(layout.pageStamps[page]); found != stamps.end()) {
+                ++reusedPages;
+                EXPECT_EQ(pageContent(layout, page), pageContent(before, found->second))
+                    << "page " << page << " reused from " << found->second;
+            }
         return layout.composedParagraphs;
     }
 };
@@ -121,6 +157,8 @@ TEST(IncrementalLayout, MiddleEditRecomposesOnlyNearbyParagraphs) {
     });
     EXPECT_LT(steps, 10u);
     EXPECT_GT(steps, 0u);
+    // New stamps only for the edited page and, at most, the page where pagination converged.
+    EXPECT_GE(s.reusedPages + 2, s.layout.pageCount);
     // A line more in one paragraph shifts the paragraphs after it until a page boundary
     // absorbs the difference (how far depends on the fonts), then converges.
     const auto grown = s.edit([&](Editor &e) {

@@ -168,3 +168,46 @@ TEST(Rendering, TableBordersProducePixelsAndInvalidateAfterStructuralEdit) {
     e.tableColumn(true);
     EXPECT_EQ(renderer.synchronize(engine.compose(e.document)), 1);
 }
+TEST(Rendering, IncrementalEditsRerecordOnlyChangedPagesAndMatchAFreshRenderer) {
+    std::u16string text;
+    for (int n = 0; n < 300; ++n)
+        text += (n ? u"\n" : u"") + std::u16string(u"Paragraph text that fills a line or so of the page.");
+    Editor editor;
+    editor.replace(text);
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    PageRenderer renderer;
+    auto layout = engine.compose(editor.document);
+    renderer.synchronize(layout);
+    ASSERT_GT(layout.pageCount, 5u);
+    auto pixels = [](const PageRenderer &source, const Layout &from, std::size_t page) {
+        const auto &style = from.pageStyle(page);
+        auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(
+            static_cast<int>(style.width), static_cast<int>(style.height)));
+        source.drawPage(*surface->getCanvas(), page);
+        SkPixmap map;
+        surface->peekPixels(&map);
+        const auto *bytes = static_cast<const char *>(map.addr());
+        return std::string(bytes, map.computeByteSize());
+    };
+    auto check = [&](std::size_t expectedMaximum) {
+        layout = engine.compose(editor.document, std::move(layout));
+        EXPECT_LE(renderer.synchronize(layout), expectedMaximum);
+        LayoutEngine freshEngine(shaper);
+        const auto fresh = freshEngine.compose(editor.document);
+        PageRenderer freshRenderer;
+        freshRenderer.synchronize(fresh);
+        for (std::size_t page = 0; page < layout.pageCount; ++page)
+            EXPECT_EQ(pixels(renderer, layout, page), pixels(freshRenderer, fresh, page))
+                << "page " << page;
+    };
+    editor.selection = {{150, 0}, {150, 0}};
+    editor.replace(u"x");
+    check(1);
+    // A new paragraph near the start moves every later page by a line; pages reflow.
+    editor.selection = {{3, 5}, {3, 5}};
+    editor.insertParagraphBreak();
+    check(layout.pageCount);
+    editor.undo();
+    check(layout.pageCount);
+}

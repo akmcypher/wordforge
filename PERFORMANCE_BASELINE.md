@@ -11,8 +11,9 @@ paragraph. The figures are layout composition only.
 | 500 | 40.24 | 2.28 | 2 |
 | 1000 | 75.33 | 3.36 | 2 |
 
-These don't cover the editor's document copy or renderer synchronization, which still
-re-keys every page. Evidence: `docs/evidence/2026-11-23-incremental-pagination.md`.
+These don't cover the editor's document copy. Since page stamps were added (2026-11-23),
+renderer sync after the same edit takes 0.27 ms instead of 56–60 ms, re-recording 1 page
+(`docs/evidence/2026-11-23-page-stamps.md`). Evidence: `docs/evidence/2026-11-23-incremental-pagination.md`.
 
 ## Anchor-heavy model workload (0.5)
 

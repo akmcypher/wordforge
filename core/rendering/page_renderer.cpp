@@ -1,4 +1,5 @@
 #include "core/rendering/page_renderer.hpp"
+#include <unordered_map>
 #include <algorithm>
 #include <include/codec/SkPngDecoder.h>
 #include <include/core/SkBitmap.h>
@@ -97,6 +98,7 @@ struct PageRenderer::Impl {
     struct Page {
         std::string key;
         sk_sp<SkPicture> picture;
+        std::uint64_t stamp = 0;
     };
     std::vector<Page> pages;
     sk_sp<SkFontMgr> fonts;
@@ -159,12 +161,28 @@ std::size_t PageRenderer::synchronize(const Layout &layout) {
         return found == layout.images.end() || found->second != entry.second.resource;
     });
     std::size_t rebuilt = 0;
-    impl_->pages.resize(layout.pageCount);
+    // Pages whose layout stamp is unchanged are reused without comparing their content,
+    // even where an edit moved them to another index; other pages compare content keys.
+    auto previous = std::move(impl_->pages);
+    std::unordered_map<std::uint64_t, std::size_t> stamped;
+    for (std::size_t i = 0; i < previous.size(); ++i)
+        if (previous[i].stamp && previous[i].picture)
+            stamped.emplace(previous[i].stamp, i);
+    impl_->pages.assign(layout.pageCount, {});
     for (std::size_t page = 0; page < layout.pageCount; ++page) {
-        auto key = pageKey(layout, page);
+        const auto stamp = page < layout.pageStamps.size() ? layout.pageStamps[page] : 0;
         auto &cached = impl_->pages[page];
-        if (cached.picture && cached.key == key)
+        if (const auto found = stamped.find(stamp); stamp && found != stamped.end()) {
+            cached = std::move(previous[found->second]);
+            stamped.erase(found);
+            if (cached.picture)
+                continue;
+        }
+        auto key = pageKey(layout, page);
+        if (page < previous.size() && previous[page].picture && previous[page].key == key) {
+            cached = {std::move(key), std::move(previous[page].picture), stamp};
             continue;
+        }
         SkPictureRecorder recorder;
         auto *canvas = recorder.beginRecording(static_cast<float>(layout.pageStyle(page).width),
                                                static_cast<float>(layout.pageStyle(page).height));
@@ -248,7 +266,7 @@ std::size_t PageRenderer::synchronize(const Layout &layout) {
                 }
             });
         }
-        cached = {std::move(key), recorder.finishRecordingAsPicture()};
+        cached = {std::move(key), recorder.finishRecordingAsPicture(), stamp};
         ++rebuilt;
     }
     return rebuilt;

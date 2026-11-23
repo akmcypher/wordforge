@@ -32,6 +32,10 @@ struct Layout {
     std::size_t composedParagraphs = 0;
     // Identifies this result to the engine that made it, for incremental composition.
     std::uint64_t generation = 0;
+    // One per page. A page keeps its stamp while an incremental composition reuses it
+    // unchanged (even at a new index); recomposed pages get new stamps. Equal stamps mean
+    // equal content, so renderers can skip comparing those pages.
+    std::vector<std::uint64_t> pageStamps;
     PageStyle page; // the first page's
     // Each page's size, margins and columns (sections can differ); pageCount entries.
     std::vector<PageStyle> pageStyles;

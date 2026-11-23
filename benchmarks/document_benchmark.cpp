@@ -47,7 +47,7 @@ int main(int argc, char **argv) {
         if (argc > 1)
             sizes = {std::stoi(argv[1])};
         std::cout << "requested_pages,actual_pages,paragraphs,layout_ms,edit_layout_ms,incremental_edit_ms,"
-                     "recomposed,remeasured,"
+                     "recomposed,keyed_sync_ms,sync_edit_ms,rerecorded,remeasured,"
                      "record_ms,repaint_ms,save_ms,peak_process_mib\n"
                   << std::fixed << std::setprecision(2) << std::flush;
         for (auto size : sizes) {
@@ -79,12 +79,19 @@ int main(int argc, char **argv) {
             begin = Clock::now();
             layout = engine.compose(editor.document);
             auto edit = milliseconds(begin);
+            // Content keys compared on every page (no stamps in common with the last sync).
+            begin = Clock::now();
+            renderer.synchronize(layout);
+            auto keyedSync = milliseconds(begin);
             // The same kind of edit again, recomposed incrementally as the editor does.
             editor.replace(u"again ");
             begin = Clock::now();
             layout = engine.compose(editor.document, std::move(layout));
             auto incremental = milliseconds(begin);
             const auto composed = layout.composedParagraphs;
+            begin = Clock::now();
+            const auto rerecorded = renderer.synchronize(layout);
+            auto sync = milliseconds(begin);
             auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(900, 1200));
             if (!surface)
                 throw std::runtime_error("Cannot allocate benchmark surface");
@@ -97,7 +104,8 @@ int main(int argc, char **argv) {
             if (bytes.empty())
                 throw std::runtime_error("Empty persistence result");
             std::cout << size << ',' << layout.pageCount << ',' << editor.document.paragraphs.size()
-                      << ',' << initial << ',' << edit << ',' << incremental << ',' << composed << ','
+                      << ',' << initial << ',' << edit << ',' << incremental << ',' << composed << ',' << keyedSync << ',' << sync << ','
+                      << rerecorded << ','
                       << layout.measuredParagraphs << ','
                       << record << ',' << repaint << ',' << save << ',' << peakMemoryMiB() << '\n'
                       << std::flush;

@@ -138,7 +138,7 @@ std::uint64_t tableKey(const Table &table) {
 // Header and footer lines are marked so incremental composition can tell them apart from
 // footnote and endnote lines in Layout::furniture.
 constexpr std::size_t bandLine = noBox;
-std::atomic<std::uint64_t> generations{0};
+std::atomic<std::uint64_t> generations{0}, stamps{0};
 } // namespace
 Layout LayoutEngine::compose(const Document &document) {
     return paginate(document, nullptr);
@@ -171,6 +171,9 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
     global.add(noteStyle).add(document.page.differentFirstPage);
     for (const auto *band : {&document.page.header, &document.page.footer})
         global.add(band->left).add(band->center).add(band->right);
+    // Pictures are drawn from their resources, so page stamps depend on them too.
+    for (const auto &[id, resource] : document.images)
+        global.add(id).add(static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(resource.get())));
     const auto globalKey = global.value;
     std::vector<std::uint64_t> keys(count), ids(count);
     {
@@ -270,18 +273,24 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
         std::vector<PageStyle> pageStyles;
     } tail;
     std::vector<Line> oldBands;
-    std::vector<std::uint64_t> oldEndnotes;
+    std::vector<std::uint64_t> oldEndnotes, oldStamps;
+    // Old pages reused unchanged: [0, keptPrefix) at the same index, and old pages
+    // (tailFirst, tailEnd) moved by tailShift.
+    std::size_t keptPrefix = 0, tailFirst = 0, tailEnd = 0;
+    std::ptrdiff_t tailShift = 0;
     Checkpoint base;
     if (incremental) {
         oldCheckpoints = std::move(checkpoints_);
         oldEndnotes = std::move(endnoteIds_);
         base = oldCheckpoints[resume];
         state = base.state;
+        keptPrefix = state.pageIndex;
         auto split = [](auto &from, auto &to, std::size_t at) {
             to.assign(std::make_move_iterator(from.begin() + static_cast<std::ptrdiff_t>(at)),
                       std::make_move_iterator(from.end()));
             from.resize(at);
         };
+        oldStamps = std::move(previous->pageStamps);
         result.lines = std::move(previous->lines);
         split(result.lines, tail.lines, base.lines);
         result.cells = std::move(previous->cells);
@@ -604,6 +613,10 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
         if (!sameState(current, from.state))
             return false;
         const auto &end = oldCheckpoints[oldCount];
+        tailFirst = from.state.pageIndex;
+        tailEnd = end.state.pageIndex;
+        tailShift = static_cast<std::ptrdiff_t>(pageIndex) -
+                    static_cast<std::ptrdiff_t>(from.state.pageIndex);
         const auto pageDelta = static_cast<std::ptrdiff_t>(pageIndex) -
                                static_cast<std::ptrdiff_t>(from.state.pageIndex);
         const auto lineShift = static_cast<std::ptrdiff_t>(result.lines.size()) -
@@ -1020,7 +1033,8 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
     for (const auto &style : result.pageStyles)
         bandKey.geometry(style);
     std::vector<Line> bands;
-    if (incremental && bandKey.value == bandKey_)
+    const bool bandsKept = incremental && bandKey.value == bandKey_;
+    if (bandsKept)
         bands = std::move(oldBands);
     else if (!document.page.header.empty() || !document.page.footer.empty()) {
         for (std::size_t number = 0; number < result.pageCount; ++number) {
@@ -1064,6 +1078,28 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
                    std::back_inserter(furniture),
                    [](const Line &a, const Line &b) { return a.page < b.page; });
         result.furniture = std::move(furniture);
+    }
+    // New stamps for every page this composition drew; reused pages keep theirs. New
+    // header or footer text (page numbers after a page count change) touches every page.
+    result.pageStamps.resize(result.pageCount);
+    const bool everyPage = !incremental || (!bandsKept && !bands.empty());
+    // Without endnotes the last page holds only reused text and footnotes, which the
+    // converged state reproduces exactly; endnotes are recomposed, so their pages are new.
+    if (converged && endnoteIds.empty() && oldEndnotes.empty())
+        ++tailEnd;
+    for (std::size_t page = 0; page < result.pageCount; ++page) {
+        std::optional<std::size_t> old;
+        if (!everyPage) {
+            if (page < keptPrefix)
+                old = page;
+            else if (converged) {
+                const auto from = static_cast<std::ptrdiff_t>(page) - tailShift;
+                if (from > static_cast<std::ptrdiff_t>(tailFirst) &&
+                    from < static_cast<std::ptrdiff_t>(tailEnd))
+                    old = static_cast<std::size_t>(from);
+            }
+        }
+        result.pageStamps[page] = old && *old < oldStamps.size() ? oldStamps[*old] : ++stamps;
     }
     keys_ = std::move(keys);
     ids_ = std::move(ids);

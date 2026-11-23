@@ -23,7 +23,6 @@ Condensed on 2026-11-23. The full earlier notes are kept verbatim in
 
 1. **Rest of M2 performance.** The first slice of 2A, incremental pagination, is done.
    See `docs/superpowers/plans/2026-11-23-incremental-pagination.md`. Next:
-   - make `PageRenderer::synchronize` re-key only pages whose content changed
    - avoid the document copy per edit (Phase 1 copy-on-write)
    - 2C background, visible-page-first layout
 

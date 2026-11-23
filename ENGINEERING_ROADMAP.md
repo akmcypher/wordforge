@@ -193,8 +193,9 @@ with documented policies. Mixed edits, undo branches and migration have regressi
 the first changed paragraph and stops at convergence, splicing the reused tail. It matches
 a full-layout oracle across edits, keeps, widow/orphan control, notes, tables, sections
 and 150 random edits. `PageView::change` uses it. At 1000 pages, layout after a
-middle edit drops from 75 ms to 3.4 ms. Still open: O(paragraphs) key/move work,
-renderer re-keying, the model copy, and 2C background layout. Evidence:
+middle edit drops from 75 ms to 3.4 ms. Page stamps then let the renderer re-record
+only changed pages: sync after that edit drops from about 58 ms to 0.27 ms. Still open:
+O(paragraphs) key/move work, the model copy, and 2C background layout. Evidence:
 `docs/evidence/2026-11-23-incremental-pagination.md`.
 
 2026-11-20 branch slice of 2B: keep-with-next and keep-lines now participate in text

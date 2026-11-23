@@ -33,6 +33,8 @@ Both channels read WFG1–17. Previous release: 0.6.9 (d7afd47).
   - It matches a full-layout oracle across edits, keeps, widow/orphan control, notes,
     tables, sections and random edits.
   - At 1000 pages, layout after an edit takes 3.4 ms instead of 75 ms.
+  - Page stamps let the renderer redraw only changed pages: sync after an edit takes
+    0.27 ms instead of about 58 ms (`docs/evidence/2026-11-23-page-stamps.md`).
   - Evidence: `docs/evidence/2026-11-23-incremental-pagination.md`.
 
 ## Verification
