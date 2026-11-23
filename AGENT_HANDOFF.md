@@ -23,10 +23,14 @@ Condensed on 2026-11-23. The full earlier notes are kept verbatim in
 
 1. **Rest of M2 performance.** The first slice of 2A, incremental pagination, is done.
    See `docs/superpowers/plans/2026-11-23-incremental-pagination.md`. Next:
-   - avoid the document copy per edit (Phase 1 copy-on-write)
+   - count words incrementally: the status bar recounts the whole document on each edit
+     (70 ms at 1000 pages, the largest per-keystroke cost left; see
+     `docs/evidence/2026-11-23-shared-paragraphs.md`)
    - 2C background, visible-page-first layout
 
-   Keep `tests/unit/incremental_layout_test.cpp` green. Any new pagination input must go
+   Write paragraphs only through `ParagraphList::edit`/`editEach`, never before
+   `checkpoint()`. Keep `tests/unit/incremental_layout_test.cpp` and
+   `tests/unit/shared_paragraphs_test.cpp` green. Any new pagination input must go
    into the paragraph or global key in `layout.cpp`.
 2. Phase 1C/3/4 from `ENGINEERING_ROADMAP.md`:
    - numbering definitions

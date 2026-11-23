@@ -11,11 +11,11 @@ TEST(NativeFormat, RoundTripsTableCellsImagesAndExactIdentifiersInV5) {
     const auto tableId = 9007199254740993ull;
     document.tables = {{tableId, 1, 2}};
     document.paragraphs = {Paragraph{1}, Paragraph{2}, Paragraph{3}, Paragraph{4}};
-    document.paragraphs[0].cell = document.paragraphs[1].cell = TableCell{tableId, 0, 0};
-    document.paragraphs[2].cell = TableCell{tableId, 0, 1};
-    document.paragraphs[0].runs = {{u"first नमस्ते", {}}};
-    document.paragraphs[1].runs = {{u"second paragraph", {}}};
-    document.paragraphs[2].runs = {{u"right", {}}};
+    document.paragraphs.edit(0).cell = document.paragraphs.edit(1).cell = TableCell{tableId, 0, 0};
+    document.paragraphs.edit(2).cell = TableCell{tableId, 0, 1};
+    document.paragraphs.edit(0).runs = {{u"first नमस्ते", {}}};
+    document.paragraphs.edit(1).runs = {{u"second paragraph", {}}};
+    document.paragraphs.edit(2).runs = {{u"right", {}}};
     document.nextId = tableId + 1;
     auto bytes = serializeNative(document);
     ASSERT_TRUE(bytes.starts_with("PK"));
@@ -30,7 +30,7 @@ TEST(NativeFormat, RoundTripsTableCellsImagesAndExactIdentifiersInV5) {
     ASSERT_TRUE(file.good());
     const std::string png((std::istreambuf_iterator<char>(file)), {});
     document.images.emplace(5, std::make_shared<const ImageResource>(ImageResource{4, 2, png}));
-    document.paragraphs[1].runs.push_back(Run::fromImage({5, 72, 36, "cell picture"}));
+    document.paragraphs.edit(1).runs.push_back(Run::fromImage({5, 72, 36, "cell picture"}));
     document.bookmarks.push_back({6, "cell", {2, 0, Affinity::After}});
     restored = parseNative(serializeNative(document));
     EXPECT_EQ(restored.paragraphs, document.paragraphs);
@@ -144,8 +144,8 @@ TEST(NativeFormat, MigratesV1AndPersistsExactSparseV2Identifiers) {
     EXPECT_EQ(legacy.paragraphs[1].list, ListKind::Decimal);
     EXPECT_EQ(legacy.paragraphs[0].id, 1);
     EXPECT_EQ(legacy.paragraphs[1].id, 2);
-    legacy.paragraphs[0].id = 9007199254740993ull;
-    legacy.paragraphs[1].id = 9007199254741001ull;
+    legacy.paragraphs.edit(0).id = 9007199254740993ull;
+    legacy.paragraphs.edit(1).id = 9007199254741001ull;
     legacy.nextId = 9007199254741010ull;
     const auto bytes = serializeNative(legacy);
     EXPECT_NE(bytes.find("version=\"2\""), std::string::npos);
@@ -214,7 +214,7 @@ TEST(NativeFormat, RoundTripsTypedImagesWithStylesAndBookmarks) {
     document.images.emplace(2, std::make_shared<const ImageResource>(ImageResource{4, 2, png}));
     CharacterStyle style;
     style.bold = true;
-    document.paragraphs[0].runs = {
+    document.paragraphs.edit(0).runs = {
         {u"before", {}}, Run::fromImage({2, 72, 36, "red & blue"}, style), {u"after", {}}};
     document.bookmarks.push_back({3, "picture", {1, 6, Affinity::Before}});
     document.nextId = 4;
@@ -291,12 +291,12 @@ TEST(NativeFormat, OmitsUnreferencedImageResourcesFromSavedDocuments) {
     auto resource = std::make_shared<const ImageResource>(ImageResource{4, 2, png});
     document.images = {{2, resource}, {3, resource}};
     document.nextId = 4;
-    document.paragraphs[0].runs = {Run::fromImage({2, 72, 36, "live"})};
+    document.paragraphs.edit(0).runs = {Run::fromImage({2, 72, 36, "live"})};
     const auto parts = opc::read(serializeNative(document));
     EXPECT_TRUE(parts.contains("images/2.png"));
     EXPECT_FALSE(parts.contains("images/3.png"));
     EXPECT_EQ(parseNative(opc::write(parts)).images.size(), 1);
-    document.paragraphs[0].runs = {{u"deleted picture", {}}};
+    document.paragraphs.edit(0).runs = {{u"deleted picture", {}}};
     const auto saved = serializeNative(document);
     EXPECT_FALSE(saved.starts_with("PK"));
     const auto restored = parseNative(saved);
@@ -566,7 +566,7 @@ TEST(NativeFormat, ThemeColoursRoundTripInV12) {
         return bytes.starts_with("PK") ? opc::read(bytes).at("document.xml") : bytes;
     };
     EXPECT_EQ(xml(serializeNative(e.document)).find("version=\"12\""), std::string::npos);
-    auto &run = e.document.paragraphs[0].runs.front();
+    auto &run = e.document.paragraphs.edit(0).runs.front();
     run.style.color = 0xff0f4761;
     run.style.theme = {themeColorIndex("accent1"), 0xbf, -1, 0xff0f4761};
     run.direct |= ColorField;

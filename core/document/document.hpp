@@ -2,6 +2,9 @@
 #include "core/document/styles.hpp"
 #include <cstdint>
 #include <functional>
+#include <iterator>
+#include <stdexcept>
+#include <type_traits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -185,6 +188,203 @@ struct Paragraph : ParagraphFormat {
     std::vector<std::size_t> boundaries() const;
     bool operator==(const Paragraph &) const = default;
 };
+// The paragraphs of a document, copy-on-write: copying a list shares the paragraphs (and
+// the list itself) until one of the copies changes. Reading (operator[], iteration) never
+// copies; edit(i) gives a paragraph that may be changed, cloning it first if it is shared.
+// A reference from edit(i) is valid until the list is next copied, resized or edited
+// again at another index; never keep one across a copy of the list.
+class ParagraphList {
+    using Node = std::shared_ptr<Paragraph>;
+    using Nodes = std::vector<Node>;
+
+  public:
+    class const_iterator {
+      public:
+        using iterator_category = std::random_access_iterator_tag;
+        using value_type = Paragraph;
+        using difference_type = std::ptrdiff_t;
+        using reference = const Paragraph &;
+        using pointer = const Paragraph *;
+        const_iterator() = default;
+        const_iterator(const ParagraphList *list, std::size_t index) : list_(list), index_(index) {}
+        reference operator*() const {
+            return (*list_)[index_];
+        }
+        pointer operator->() const {
+            return &**this;
+        }
+        reference operator[](difference_type n) const {
+            return *(*this + n);
+        }
+        std::size_t index() const {
+            return index_;
+        }
+        const_iterator &operator++() {
+            ++index_;
+            return *this;
+        }
+        const_iterator operator++(int) {
+            auto old = *this;
+            ++index_;
+            return old;
+        }
+        const_iterator &operator--() {
+            --index_;
+            return *this;
+        }
+        const_iterator operator--(int) {
+            auto old = *this;
+            --index_;
+            return old;
+        }
+        const_iterator &operator+=(difference_type n) {
+            index_ = static_cast<std::size_t>(static_cast<difference_type>(index_) + n);
+            return *this;
+        }
+        const_iterator &operator-=(difference_type n) {
+            return *this += -n;
+        }
+        friend const_iterator operator+(const_iterator i, difference_type n) {
+            return i += n;
+        }
+        friend const_iterator operator+(difference_type n, const_iterator i) {
+            return i += n;
+        }
+        friend const_iterator operator-(const_iterator i, difference_type n) {
+            return i -= n;
+        }
+        friend difference_type operator-(const const_iterator &a, const const_iterator &b) {
+            return static_cast<difference_type>(a.index_) - static_cast<difference_type>(b.index_);
+        }
+        friend bool operator==(const const_iterator &a, const const_iterator &b) {
+            return a.index_ == b.index_;
+        }
+        friend auto operator<=>(const const_iterator &a, const const_iterator &b) {
+            return a.index_ <=> b.index_;
+        }
+
+      private:
+        const ParagraphList *list_ = nullptr;
+        std::size_t index_ = 0;
+    };
+    using iterator = const_iterator;
+    using value_type = Paragraph;
+    using size_type = std::size_t;
+
+    ParagraphList() : nodes_(std::make_shared<Nodes>()) {}
+    ParagraphList(std::initializer_list<Paragraph> paragraphs)
+        : ParagraphList(paragraphs.begin(), paragraphs.end()) {}
+    ParagraphList(std::vector<Paragraph> paragraphs)
+        : ParagraphList(std::make_move_iterator(paragraphs.begin()),
+                        std::make_move_iterator(paragraphs.end())) {}
+    template <std::input_iterator It> ParagraphList(It first, It last) : ParagraphList() {
+        for (; first != last; ++first)
+            nodes_->push_back(std::make_shared<Paragraph>(*first));
+    }
+
+    std::size_t size() const {
+        return nodes_->size();
+    }
+    bool empty() const {
+        return nodes_->empty();
+    }
+    const Paragraph &operator[](std::size_t i) const {
+        return *(*nodes_)[i];
+    }
+    const Paragraph &at(std::size_t i) const {
+        return *nodes_->at(i);
+    }
+    const Paragraph &front() const {
+        return (*this)[0];
+    }
+    const Paragraph &back() const {
+        return (*this)[size() - 1];
+    }
+    const_iterator begin() const {
+        return {this, 0};
+    }
+    const_iterator end() const {
+        return {this, size()};
+    }
+    // Paragraph `i`, to be changed.
+    Paragraph &edit(std::size_t i) {
+        auto &node = own()->at(i);
+        if (node.use_count() > 1)
+            node = std::make_shared<Paragraph>(std::as_const(*node));
+        return *node;
+    }
+    // Calls `change` on every paragraph; only those it changes stop being shared.
+    template <class Change> void editEach(Change change) {
+        for (std::size_t i = 0; i < size(); ++i) {
+            auto copy = (*this)[i];
+            change(copy);
+            if (copy != (*this)[i])
+                edit(i) = std::move(copy);
+        }
+    }
+
+    void reserve(std::size_t n) {
+        own()->reserve(n);
+    }
+    void clear() {
+        own()->clear();
+    }
+    void push_back(Paragraph p) {
+        own()->push_back(std::make_shared<Paragraph>(std::move(p)));
+    }
+    template <class... Args> Paragraph &emplace_back(Args &&...args) {
+        return *own()->emplace_back(std::make_shared<Paragraph>(std::forward<Args>(args)...));
+    }
+    void pop_back() {
+        own()->pop_back();
+    }
+    const_iterator insert(const_iterator at, Paragraph p) {
+        own()->insert(position(at), std::make_shared<Paragraph>(std::move(p)));
+        return at;
+    }
+    template <std::input_iterator It> const_iterator insert(const_iterator at, It first, It last) {
+        Nodes added;
+        for (; first != last; ++first)
+            added.push_back(std::make_shared<Paragraph>(*first));
+        own()->insert(position(at), std::make_move_iterator(added.begin()),
+                      std::make_move_iterator(added.end()));
+        return at;
+    }
+    const_iterator erase(const_iterator at) {
+        return erase(at, at + 1);
+    }
+    const_iterator erase(const_iterator first, const_iterator last) {
+        own()->erase(position(first), position(last));
+        return first;
+    }
+
+    // Whether paragraph `i` here and paragraph `j` of `other` are one shared object, so
+    // they are equal without comparing them.
+    bool shares(std::size_t i, const ParagraphList &other, std::size_t j) const {
+        return (*nodes_)[i] == (*other.nodes_)[j];
+    }
+    bool operator==(const ParagraphList &other) const {
+        if (nodes_ == other.nodes_)
+            return true;
+        if (size() != other.size())
+            return false;
+        for (std::size_t i = 0; i < size(); ++i)
+            if (!shares(i, other, i) && (*this)[i] != other[i])
+                return false;
+        return true;
+    }
+
+  private:
+    std::shared_ptr<Nodes> nodes_;
+    Nodes *own() {
+        if (nodes_.use_count() > 1)
+            nodes_ = std::make_shared<Nodes>(*nodes_);
+        return nodes_.get();
+    }
+    Nodes::iterator position(const_iterator at) {
+        return own()->begin() + static_cast<std::ptrdiff_t>(at.index());
+    }
+};
 struct Position {
     std::size_t paragraph = 0, offset = 0;
     auto operator<=>(const Position &) const = default;
@@ -270,7 +470,7 @@ struct Document;
 // document.page).
 PageStyle sectionPage(const Document &, std::size_t index);
 struct Document {
-    std::vector<Paragraph> paragraphs{{1}};
+    ParagraphList paragraphs{Paragraph{1}};
     std::shared_ptr<const PreservedPackage> preserved; // set by DOCX import
     std::vector<Bookmark> bookmarks;
     ImageResources images;
@@ -298,7 +498,9 @@ struct Document {
     const Footnote *footnote(std::uint64_t id) const;
     const Revision *findRevision(std::uint64_t id) const;
 };
-void validateDocument(const Document &);
+// Throws unless `document` is consistent. `validated`, when given, is a document that
+// already passed; paragraphs `document` still shares with it skip their own checks.
+void validateDocument(const Document &, const Document *validated = nullptr);
 // Effective formatting of a paragraph style after following its based-on chain.
 struct ResolvedStyle {
     ParagraphFormat paragraph;

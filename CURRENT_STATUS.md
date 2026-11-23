@@ -36,6 +36,14 @@ Both channels read WFG1–17. Previous release: 0.6.9 (d7afd47).
   - Page stamps let the renderer redraw only changed pages: sync after an edit takes
     0.27 ms instead of about 58 ms (`docs/evidence/2026-11-23-page-stamps.md`).
   - Evidence: `docs/evidence/2026-11-23-incremental-pagination.md`.
+- **Copy-on-write paragraphs (branch `feat/cow-document`):**
+  - Copying a document or undo state shares its paragraphs; an edit clones only what it
+    changes.
+  - At 34,000 paragraphs, a model edit takes about 1 ms instead of 9–13 ms. Undo and redo
+    take under 0.01 ms instead of about 20 ms, and peak memory is 36 MiB instead of 126 MiB.
+  - Typing in a 1000-page document now spends about 3.7 ms in the editor. About 70 ms
+    still goes to the status bar recounting every word on each edit.
+  - Evidence: `docs/evidence/2026-11-23-shared-paragraphs.md`.
 
 ## Verification
 

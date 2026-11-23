@@ -881,9 +881,9 @@ class DesktopTest : public QObject {
         view.insertText("keep me");
         wf::Document invalid;
         invalid.page = {72, 72, 18};
-        invalid.paragraphs[0].runs = {{u"oversize", {}}};
-        invalid.paragraphs[0].runs[0].style.size = 200;
-        invalid.paragraphs[0].runs[0].direct = wf::SizeField; // valid model, impossible layout
+        invalid.paragraphs.edit(0).runs = {{u"oversize", {}}};
+        invalid.paragraphs.edit(0).runs[0].style.size = 200;
+        invalid.paragraphs.edit(0).runs[0].direct = wf::SizeField; // valid model, impossible layout
         QVERIFY_THROWS_EXCEPTION(std::runtime_error, view.setDocument(invalid));
         QCOMPARE(view.document().text(), std::u16string(u"keep me"));
         view.undo();

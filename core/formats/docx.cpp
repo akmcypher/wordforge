@@ -1817,7 +1817,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             readGeometry(section, end.page);
             end.page.header = end.page.footer = {};
             end.page.differentFirstPage = false;
-            document.paragraphs.back().sectionBreak = end;
+            document.paragraphs.edit(document.paragraphs.size() - 1).sectionBreak = end;
             breakParagraphs.push_back(document.paragraphs.size() - 1);
             sectionStarts.push_back(val(child(section, "type")));
         }
@@ -2214,12 +2214,12 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
     // A section break is continuous when the section after it starts that way (Word records
     // how each section starts in that section's own w:type).
     for (std::size_t k = 0; k < breakParagraphs.size(); ++k)
-        document.paragraphs[breakParagraphs[k]].sectionBreak->continuous =
+        document.paragraphs.edit(breakParagraphs[k]).sectionBreak->continuous =
             k + 1 < sectionStarts.size() && sectionStarts[k + 1] == "continuous";
     // The last section has no break; a break on the last paragraph would end an empty one.
     if (!document.paragraphs.empty() && document.paragraphs.back().sectionBreak &&
         breakParagraphs.size() + 1 > sectionStarts.size())
-        document.paragraphs.back().sectionBreak.reset();
+        document.paragraphs.edit(document.paragraphs.size() - 1).sectionBreak.reset();
     // A table must be followed by a body paragraph.
     if (!document.paragraphs.empty() && document.paragraphs.back().cell)
         document.paragraphs.push_back(emptyParagraph(std::nullopt));
@@ -2233,7 +2233,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         for (const auto &table : document.tables)
             columns[table.id] = table.columns;
         bool shrunk = false;
-        for (auto &paragraph : document.paragraphs) {
+        document.paragraphs.editEach([&](Paragraph &paragraph) {
             const double available =
                 paragraph.cell
                     ? content / static_cast<double>(columns.at(paragraph.cell->tableId)) - 8
@@ -2249,7 +2249,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                 paragraph.indentRight *= scale;
                 shrunk = true;
             }
-        }
+        });
         if (shrunk)
             warn(warnings, "Indents too wide for their page or table column were narrowed.");
     }
@@ -2259,7 +2259,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         std::map<std::uint64_t, std::size_t> tableColumns;
         for (const auto &table : document.tables)
             tableColumns[table.id] = table.columns;
-        for (auto &paragraph : document.paragraphs) {
+        document.paragraphs.editEach([&](Paragraph &paragraph) {
             double available =
                 paragraph.cell ? content / tableColumns.at(paragraph.cell->tableId) - 8 : content;
             available -= paragraph.indentLeft + std::max(0.0, paragraph.indentFirstLine) +
@@ -2283,7 +2283,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                     run = Run::fromImage(std::move(fitted), run.style);
                     run.characterStyle = std::move(characterStyle);
                 }
-        }
+        });
     }
     // Enter after an imported style continues with its DOCX "next" style when that was kept.
     for (const auto &[id, node] : createdStyles) {
@@ -2580,7 +2580,9 @@ std::string serializeDocx(const Document &document) {
     pugi::xml_node tableNode, rowNode, cellNode;
     std::vector<double> edges;
     std::map<std::pair<std::size_t, std::size_t>, pugi::xml_node> anchors;
-    for (const auto &paragraph : document.paragraphs) {
+    for (std::size_t paragraphIndex = 0; paragraphIndex < document.paragraphs.size();
+         ++paragraphIndex) {
+        const auto &paragraph = document.paragraphs[paragraphIndex];
         auto parent = body;
         if (paragraph.cell) {
             const auto &cell = *paragraph.cell;
@@ -2706,8 +2708,6 @@ std::string serializeDocx(const Document &document) {
             previousContinuous = end->continuous;
         }
         // Runs split where comment ranges start or end, with the markers between them.
-        const auto paragraphIndex =
-            static_cast<std::size_t>(&paragraph - document.paragraphs.data());
         const auto paragraphMarkers = markers.find(paragraphIndex);
         std::vector<std::pair<std::size_t, Run>> pieces;
         {

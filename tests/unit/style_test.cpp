@@ -23,13 +23,13 @@ TEST(BaselineText, NativeAndStyleOverridePreserveNormalAndNominalSize) {
 }
 TEST(BaselineText, OldNativeMaskAndInvalidModesAreRejected) {
     Editor e;
-    e.document.paragraphs[0].runs[0].direct = BaselineField;
+    e.document.paragraphs.edit(0).runs[0].direct = BaselineField;
     auto bytes = serializeNative(e.document);
     ASSERT_NE(bytes.find("version=\"17\""), std::string::npos);
     auto old = bytes;
     old.replace(old.find("version=\"17\""), 12, "version=\"16\"");
     EXPECT_THROW(parseNative(old), std::runtime_error);
-    e.document.paragraphs[0].runs[0].style.baseline = static_cast<TextBaseline>(3);
+    e.document.paragraphs.edit(0).runs[0].style.baseline = static_cast<TextBaseline>(3);
     EXPECT_THROW(validateDocument(e.document), std::invalid_argument);
 }
 TEST(Widows, NativeAndStyleInheritanceRetainExplicitFalse) {
@@ -53,7 +53,7 @@ TEST(Widows, NativeAndStyleInheritanceRetainExplicitFalse) {
 }
 TEST(Widows, NativeOldVersionRejectsNewMaskEvenWithoutNewAttributes) {
     Editor e;
-    e.document.paragraphs[0].direct = WidowControlField;
+    e.document.paragraphs.edit(0).direct = WidowControlField;
     auto bytes = serializeNative(e.document);
     ASSERT_NE(bytes.find("version=\"16\""), std::string::npos);
     EXPECT_EQ(parseNative(bytes).paragraphs[0].direct, WidowControlField);

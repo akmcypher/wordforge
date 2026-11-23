@@ -63,7 +63,7 @@ TEST(Tables, BoundariesRejectCrossCellMergesAndDeletionRepairsBookmarks) {
     EXPECT_TRUE(e.undo());
     EXPECT_EQ(e.document.tables[0].rows, 2);
     auto broken = e.document;
-    broken.paragraphs[0].cell->column = 1;
+    broken.paragraphs.edit(0).cell->column = 1;
     EXPECT_THROW(validateDocument(broken), std::invalid_argument);
 }
 TEST(Tables, TabFromLastCellAddsRowAndRetiredIdsStayRetired) {

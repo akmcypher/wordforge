@@ -473,7 +473,7 @@ ParagraphProperties propertiesFor(const ParagraphFormat &base, const ParagraphFo
 void adoptStyles(Document &document) {
     validateStyles(document.styles);
     std::unordered_map<std::string, ResolvedStyle> resolved;
-    for (auto &paragraph : document.paragraphs) {
+    document.paragraphs.editEach([&](Paragraph &paragraph) {
         if (!document.styles.find(paragraph.style))
             paragraph.style = "Normal";
         auto found = resolved.find(paragraph.style);
@@ -490,7 +490,7 @@ void adoptStyles(Document &document) {
                 run.style,
                 inheritedCharacter(document.styles, found->second.character, run.characterStyle));
         }
-    }
+    });
 }
 
 Paragraph styledParagraph(const Document &document, std::uint64_t id, const std::string &style) {

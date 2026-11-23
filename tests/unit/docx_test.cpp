@@ -238,22 +238,22 @@ TEST(Docx, ExportsRealRectangularTablesWithMultipleParagraphsAndImages) {
     document.tables = {{10, 2, 2}};
     document.paragraphs = {Paragraph{1}, Paragraph{2}, Paragraph{3}, Paragraph{4},
                            Paragraph{5}, Paragraph{6}, Paragraph{7}};
-    document.paragraphs[0].runs = {{u"before", {}}};
+    document.paragraphs.edit(0).runs = {{u"before", {}}};
     for (std::size_t index = 1; index <= 5; ++index) {
         const auto cell = index < 3 ? 0 : index - 2;
-        document.paragraphs[index].cell = TableCell{10, cell / 2, cell % 2};
-        document.paragraphs[index].runs = {{u"cell", {}}};
+        document.paragraphs.edit(index).cell = TableCell{10, cell / 2, cell % 2};
+        document.paragraphs.edit(index).runs = {{u"cell", {}}};
     }
-    document.paragraphs[1].runs[0].style.bold = true;
-    document.paragraphs[2].runs = {{u"second paragraph", {}}};
-    document.paragraphs[6].runs = {{u"after", {}}};
+    document.paragraphs.edit(1).runs[0].style.bold = true;
+    document.paragraphs.edit(2).runs = {{u"second paragraph", {}}};
+    document.paragraphs.edit(6).runs = {{u"after", {}}};
     const auto path =
         std::filesystem::path(__FILE__).parent_path().parent_path() / "fixtures/red-blue.png";
     std::ifstream file(path, std::ios::binary);
     ASSERT_TRUE(file.good());
     const std::string png((std::istreambuf_iterator<char>(file)), {});
     document.images.emplace(11, std::make_shared<const ImageResource>(ImageResource{4, 2, png}));
-    document.paragraphs[2].runs.push_back(Run::fromImage({11, 72, 36, "cell picture"}));
+    document.paragraphs.edit(2).runs.push_back(Run::fromImage({11, 72, 36, "cell picture"}));
     document.nextId = 12;
     adoptStyles(document); // hand-built formatting is direct formatting
     const auto parts = opc::read(serializeDocx(document));
@@ -333,7 +333,7 @@ TEST(Docx, RoundTripsUnicodeFormattingListsAndPageGeometry) {
         p.spaceAfter = 10;
         p.lineSpacing = 1.5;
     });
-    editor.document.paragraphs[1].pageBreakBefore = true;
+    editor.document.paragraphs.edit(1).pageBreakBefore = true;
     editor.document.page = {612, 792, 36};
     const auto bytes = serializeDocx(editor.document);
     EXPECT_EQ(bytes.substr(0, 2), "PK");
@@ -494,7 +494,7 @@ TEST(Docx, ExportsInlinePictureMediaRelationshipsAndGeometry) {
     Document document;
     document.images.emplace(2, std::make_shared<const ImageResource>(ImageResource{4, 2, png}));
     document.nextId = 3;
-    document.paragraphs[0].runs = {{u"before", {}},
+    document.paragraphs.edit(0).runs = {{u"before", {}},
                                    Run::fromImage({2, 72, 36, "red & blue"}),
                                    Run::fromImage({2, 36, 18, "second"}),
                                    {u"after", {}}};
@@ -537,12 +537,12 @@ TEST(Docx, OmitsUnreferencedImageMediaAndRelationships) {
     auto resource = std::make_shared<const ImageResource>(ImageResource{4, 2, png});
     document.images = {{2, resource}, {3, resource}};
     document.nextId = 4;
-    document.paragraphs[0].runs = {Run::fromImage({2, 72, 36, "live"})};
+    document.paragraphs.edit(0).runs = {Run::fromImage({2, 72, 36, "live"})};
     auto parts = opc::read(serializeDocx(document));
     EXPECT_TRUE(parts.contains("word/media/image2.png"));
     EXPECT_FALSE(parts.contains("word/media/image3.png"));
     EXPECT_EQ(parts.at("word/_rels/document.xml.rels").find("image3"), std::string::npos);
-    document.paragraphs[0].runs = {{u"deleted picture", {}}};
+    document.paragraphs.edit(0).runs = {{u"deleted picture", {}}};
     parts = opc::read(serializeDocx(document));
     for (const auto &[name, data] : parts)
         EXPECT_FALSE(name.starts_with("word/media/"));
@@ -1571,8 +1571,8 @@ TEST(Docx, WordHeadingStylesAndThemeColoursSurviveARoundTrip) {
 
     // A colour changed in Wordforge drops the theme reference.
     auto changed = document;
-    changed.paragraphs[1].runs.front().style.color = 0xff00aa00;
-    changed.paragraphs[1].runs.front().direct |= ColorField;
+    changed.paragraphs.edit(1).runs.front().style.color = 0xff00aa00;
+    changed.paragraphs.edit(1).runs.front().direct |= ColorField;
     const auto plain = opc::read(serializeDocx(changed)).at("word/document.xml");
     EXPECT_EQ(plain.find("accent2"), std::string::npos);
     EXPECT_NE(plain.find("00AA00"), std::string::npos);

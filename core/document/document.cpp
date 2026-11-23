@@ -70,7 +70,7 @@ void validatePreserved(const PreservedPackage &package) {
             relationship.target.ends_with(".rels"))
             throw std::invalid_argument("Invalid preserved document relationship");
 }
-void validateDocument(const Document &document) {
+void validateDocument(const Document &document, const Document *validated) {
     validatePage(document.page);
     if (document.preserved)
         validatePreserved(*document.preserved);
@@ -110,8 +110,39 @@ void validateDocument(const Document &document) {
             throw std::invalid_argument("Invalid revision date");
     }
     std::unordered_set<std::uint64_t> noteReferences;
-    for (const auto &paragraph : document.paragraphs) {
-        if (!paragraph.id || paragraph.id >= document.nextId || !ids.insert(paragraph.id).second)
+    // Paragraphs shared with an already validated document (with the same styles) passed
+    // the checks that depend on them alone; references to other parts are still checked.
+    const auto &paragraphs = document.paragraphs;
+    std::size_t prefix = 0, suffix = 0;
+    if (validated && validated->styles == document.styles) {
+        const auto &old = validated->paragraphs;
+        while (prefix < old.size() && prefix < paragraphs.size() &&
+               paragraphs.shares(prefix, old, prefix))
+            ++prefix;
+        while (suffix < old.size() - prefix && suffix < paragraphs.size() - prefix &&
+               paragraphs.shares(paragraphs.size() - 1 - suffix, old, old.size() - 1 - suffix))
+            ++suffix;
+    }
+    for (std::size_t index = 0; index < paragraphs.size(); ++index) {
+        const auto &paragraph = paragraphs[index];
+        if (!paragraph.id || paragraph.id >= document.nextId)
+            throw std::invalid_argument("Invalid or duplicate document node identifier");
+        if (index < prefix || index >= paragraphs.size() - suffix) {
+            // Shared paragraphs had distinct ids; they are checked against the rest below.
+            for (const auto &run : paragraph.runs) {
+                if (const auto *image = run.image(); image && !document.images.contains(image->resourceId))
+                    throw std::invalid_argument("Missing image resource");
+                for (const auto mark : {run.inserted, run.deleted})
+                    if (mark && !document.findRevision(mark))
+                        throw std::invalid_argument("Tracked change without a revision");
+                if (const auto *note = run.note())
+                    if (!document.footnote(note->id) || !noteReferences.insert(note->id).second)
+                        throw std::invalid_argument(
+                            "Footnote reference without a unique footnote");
+            }
+            continue;
+        }
+        if (!ids.insert(paragraph.id).second)
             throw std::invalid_argument("Invalid or duplicate document node identifier");
         validateParagraphFormat(paragraph);
         if (paragraph.runs.empty())
@@ -212,6 +243,12 @@ void validateDocument(const Document &document) {
             !names.insert(bookmark.name).second)
             throw std::invalid_argument("Invalid, duplicate or dangling bookmark");
     }
+    for (std::size_t index = 0; index < paragraphs.size(); ++index) {
+        if (index == prefix)
+            index = paragraphs.size() - suffix;
+        if (index < paragraphs.size() && ids.contains(paragraphs[index].id))
+            throw std::invalid_argument("Invalid or duplicate document node identifier");
+    }
 }
 void validateParagraphFormat(const ParagraphFormat &value) {
     double previous = -1;
@@ -286,9 +323,10 @@ void Editor::setPage(PageStyle page) {
     geometry.differentFirstPage = false;
     bool own = false;
     for (auto i = selection.focus.paragraph; i < document.paragraphs.size(); ++i)
-        if (auto &end = document.paragraphs[i].sectionBreak) {
-            end->page = geometry;
-            document.paragraphs[i].revision = serial_ + 1;
+        if (document.paragraphs[i].sectionBreak) {
+            auto &ending = document.paragraphs.edit(i);
+            ending.sectionBreak->page = geometry;
+            ending.revision = serial_ + 1;
             own = true;
             break;
         }
@@ -311,8 +349,8 @@ void Editor::insertSectionBreak(bool continuous) {
         page.differentFirstPage = false;
         e.replace(u"\n"); // the break ends the first part; the next section starts after it
         const auto ending = at.paragraph;
-        e.document.paragraphs[ending].sectionBreak = SectionBreak{page, continuous};
-        e.document.paragraphs[ending].revision = e.serial_ + 1;
+        e.document.paragraphs.edit(ending).sectionBreak = SectionBreak{page, continuous};
+        e.document.paragraphs.edit(ending).revision = e.serial_ + 1;
         e.document.revision = ++e.serial_;
     };
     if (inTransaction_)
@@ -324,8 +362,8 @@ bool Editor::removeSectionBreak() {
     for (auto i = selection.focus.paragraph; i < document.paragraphs.size(); ++i)
         if (document.paragraphs[i].sectionBreak) {
             checkpoint();
-            document.paragraphs[i].sectionBreak.reset();
-            document.paragraphs[i].revision = serial_ + 1;
+            document.paragraphs.edit(i).sectionBreak.reset();
+            document.paragraphs.edit(i).revision = serial_ + 1;
             document.revision = ++serial_;
             return true;
         }
@@ -509,7 +547,7 @@ ChangeSet Editor::transact(const std::function<void(Editor &)> &command) {
     candidate.document.pruneUnusedImages();
     candidate.document.nextId = std::max(
         {document.nextId, candidate.document.nextId, idHighWater_, candidate.idHighWater_});
-    validateDocument(candidate.document);
+    validateDocument(candidate.document, &document);
     candidate.validate(candidate.selection);
     validateCharacterStyle(candidate.typingStyle);
     ChangeSet changes;
@@ -543,30 +581,44 @@ ChangeSet Editor::transact(const std::function<void(Editor &)> &command) {
     for (const auto &bookmark : candidate.document.bookmarks)
         if (bookmark.id < idHighWater_ && !previousBookmarks.contains(bookmark.id))
             throw std::invalid_argument("Transaction reuses a retired bookmark identifier");
+    // Paragraphs both documents still share are unchanged; only the span between the
+    // shared prefix and the shared suffix is compared.
+    const auto &before = document.paragraphs;
+    const auto &after = std::as_const(candidate.document.paragraphs);
+    std::size_t prefix = 0, suffix = 0;
+    while (prefix < before.size() && prefix < after.size() && after.shares(prefix, before, prefix))
+        ++prefix;
+    while (suffix < before.size() - prefix && suffix < after.size() - prefix &&
+           after.shares(after.size() - 1 - suffix, before, before.size() - 1 - suffix))
+        ++suffix;
     std::unordered_map<std::uint64_t, const Paragraph *> previous;
-    for (const auto &paragraph : document.paragraphs)
-        previous.emplace(paragraph.id, &paragraph);
+    for (auto index = prefix; index < before.size() - suffix; ++index)
+        previous.emplace(before[index].id, &before[index]);
     std::vector<std::uint64_t> previousOrder, nextOrder;
+    std::vector<std::size_t> dirty;
     std::unordered_set<std::uint64_t> remaining;
-    for (std::size_t index = 0; index < candidate.document.paragraphs.size(); ++index) {
-        const auto &paragraph = candidate.document.paragraphs[index];
+    for (auto index = prefix; index < after.size() - suffix; ++index) {
+        const auto &paragraph = after[index];
         remaining.insert(paragraph.id);
         const auto found = previous.find(paragraph.id);
         if (found == previous.end()) {
             if (paragraph.id < idHighWater_)
                 throw std::invalid_argument("Transaction reuses a retired document identifier");
             changes.inserted.push_back(paragraph.id);
+            dirty.push_back(index);
         } else {
             nextOrder.push_back(paragraph.id);
-            if (paragraph != *found->second)
+            if (&paragraph != found->second && paragraph != *found->second) {
                 changes.changed.push_back(paragraph.id);
+                dirty.push_back(index);
+            }
         }
     }
-    for (const auto &paragraph : document.paragraphs)
-        if (!remaining.contains(paragraph.id))
-            changes.removed.push_back(paragraph.id);
+    for (auto index = prefix; index < before.size() - suffix; ++index)
+        if (!remaining.contains(before[index].id))
+            changes.removed.push_back(before[index].id);
         else
-            previousOrder.push_back(paragraph.id);
+            previousOrder.push_back(before[index].id);
     changes.orderChanged = previousOrder != nextOrder;
     const bool contentChanged =
         changes.pageChanged || changes.orderChanged || changes.bookmarksChanged ||
@@ -575,11 +627,8 @@ ChangeSet Editor::transact(const std::function<void(Editor &)> &command) {
         !changes.inserted.empty() || !changes.removed.empty() || !changes.changed.empty();
     if (contentChanged) {
         candidate.document.revision = ++candidate.serial_;
-        std::unordered_set<std::uint64_t> dirty(changes.changed.begin(), changes.changed.end());
-        dirty.insert(changes.inserted.begin(), changes.inserted.end());
-        for (auto &paragraph : candidate.document.paragraphs)
-            if (dirty.contains(paragraph.id))
-                paragraph.revision = candidate.document.revision;
+        for (const auto index : dirty)
+            candidate.document.paragraphs.edit(index).revision = candidate.document.revision;
         candidate.undo_.push_back(std::make_shared<const State>(state()));
         candidate.redo_.clear();
     } else
@@ -598,8 +647,12 @@ void Editor::restore(State state, bool preserveAllocator) {
     selection = state.selection;
     typingStyle = std::move(state.typingStyle);
     document.revision = ++serial_;
-    for (auto &p : document.paragraphs)
-        p.revision = serial_;
+    // Undo and redo bring back paragraphs exactly as they were at their revisions, so those
+    // keep them (and layout reuses what is unchanged). A new document's paragraphs are
+    // stamped afresh: their revisions came from elsewhere.
+    if (!preserveAllocator)
+        for (std::size_t i = 0; i < document.paragraphs.size(); ++i)
+            document.paragraphs.edit(i).revision = serial_;
 }
 void Editor::replace(const std::u16string &input) {
     if (document.trackChanges && !untracked_)
@@ -794,7 +847,7 @@ void Editor::format(const std::function<void(CharacterStyle &)> &change) {
     checkpoint();
     typingStyle = updated;
     for (auto i = start.paragraph; i <= end.paragraph; ++i) {
-        auto &p = document.paragraphs[i];
+        auto &p = document.paragraphs.edit(i);
         const auto a = i == start.paragraph ? start.offset : 0,
                    b = i == end.paragraph ? end.offset : p.text().size();
         auto runs = slice(p, 0, a), selected = slice(p, a, b),
@@ -837,7 +890,7 @@ void Editor::formatParagraph(const std::function<void(ParagraphFormat &)> &chang
     checkpoint();
     document.revision = ++serial_;
     for (auto i = first; i <= last; ++i) {
-        auto &paragraph = document.paragraphs[i];
+        auto &paragraph = document.paragraphs.edit(i);
         paragraph.direct |=
             differingFields(static_cast<const ParagraphFormat &>(paragraph), updated[i - first]);
         static_cast<ParagraphFormat &>(paragraph) = updated[i - first];
@@ -854,8 +907,8 @@ void Editor::applyStyle(const std::string &id) {
     checkpoint();
     document.revision = ++serial_;
     for (auto i = first; i <= last; ++i) {
-        setStyle(document.paragraphs[i], id, style, document.styles);
-        document.paragraphs[i].revision = serial_;
+        setStyle(document.paragraphs.edit(i), id, style, document.styles);
+        document.paragraphs.edit(i).revision = serial_;
     }
     typingStyle = style.character;
 }
@@ -870,7 +923,7 @@ void Editor::clearCharacterFormatting() {
     }
     checkpoint();
     for (auto i = start.paragraph; i <= end.paragraph; ++i) {
-        auto &p = document.paragraphs[i];
+        auto &p = document.paragraphs.edit(i);
         const auto inherited = resolveStyle(document.styles, p.style).character;
         const auto a = i == start.paragraph ? start.offset : 0,
                    b = i == end.paragraph ? end.offset : p.text().size();
@@ -893,7 +946,8 @@ void Editor::clearCharacterFormatting() {
 }
 void Editor::restyle() {
     std::unordered_map<std::string, ResolvedStyle> resolved;
-    for (auto &paragraph : document.paragraphs) {
+    for (std::size_t index = 0; index < document.paragraphs.size(); ++index) {
+        auto paragraph = document.paragraphs[index];
         auto found = resolved.find(paragraph.style);
         if (found == resolved.end())
             found =
@@ -906,13 +960,15 @@ void Editor::restyle() {
                 run.style,
                 inheritedCharacter(document.styles, found->second.character, run.characterStyle),
                           run.direct);
-        if (paragraph != before)
+        if (paragraph != before) {
             paragraph.revision = serial_ + 1;
+            document.paragraphs.edit(index) = std::move(paragraph);
+        }
     }
 }
 void Editor::updateStyleFromSelection() {
     validate(selection);
-    auto &source = document.paragraphs[selection.focus.paragraph];
+    const auto &source = document.paragraphs[selection.focus.paragraph];
     auto styles = document.styles;
     auto *style = styles.find(source.style);
     const auto base =
@@ -924,8 +980,9 @@ void Editor::updateStyleFromSelection() {
     document.styles = std::move(styles);
     const auto now = resolveStyle(document.styles, source.style);
     // The source paragraph now matches its style; keep only what still differs from it.
-    source.direct = differingFields(static_cast<const ParagraphFormat &>(source), now.paragraph);
-    for (auto &run : source.runs)
+    auto &edited = document.paragraphs.edit(selection.focus.paragraph);
+    edited.direct = differingFields(static_cast<const ParagraphFormat &>(edited), now.paragraph);
+    for (auto &run : edited.runs)
         run.direct = differingFields(
             run.style, inheritedCharacter(document.styles, now.character, run.characterStyle));
     restyle();
@@ -948,7 +1005,7 @@ std::string Editor::createStyleFromSelection(const std::string &name) {
     const auto [first, last] = selectedParagraphs(selection);
     for (auto i = first; i <= last; ++i) {
         // Same appearance; only what differs from the new style stays direct.
-        auto &paragraph = document.paragraphs[i];
+        auto &paragraph = document.paragraphs.edit(i);
         paragraph.style = style.id;
         paragraph.direct =
             differingFields(static_cast<const ParagraphFormat &>(paragraph), resolved.paragraph);
@@ -995,12 +1052,13 @@ void Editor::deleteStyle(const std::string &id) {
         validateStyles(styles);
         checkpoint();
         document.styles = std::move(styles);
-        for (auto &paragraph : document.paragraphs)
+        document.paragraphs.editEach([&](Paragraph &paragraph) {
             for (auto &run : paragraph.runs)
                 if (run.characterStyle == id) {
                     run.characterStyle = removed.basedOn;
                     paragraph.revision = serial_ + 1;
                 }
+        });
         restyle();
         typingStyle = document.styleAt(selection.focus);
         document.revision = ++serial_;
@@ -1025,9 +1083,10 @@ void Editor::deleteStyle(const std::string &id) {
     validateStyles(styles);
     checkpoint();
     document.styles = std::move(styles);
-    for (auto &paragraph : document.paragraphs)
+    document.paragraphs.editEach([&](Paragraph &paragraph) {
         if (paragraph.style == id)
             paragraph.style = replacement;
+    });
     restyle();
     typingStyle = document.styleAt(selection.focus);
     document.revision = ++serial_;
@@ -1045,7 +1104,7 @@ void Editor::applyCharacterStyle(const std::string &id) {
     }
     checkpoint();
     for (auto i = start.paragraph; i <= end.paragraph; ++i) {
-        auto &p = document.paragraphs[i];
+        auto &p = document.paragraphs.edit(i);
         const auto paragraphCharacter = resolveStyle(document.styles, p.style).character;
         const auto a = i == start.paragraph ? start.offset : 0,
                    b = i == end.paragraph ? end.offset : p.text().size();
@@ -1088,7 +1147,7 @@ std::string Editor::createCharacterStyleFromSelection(const std::string &name) {
     checkpoint();
     document.styles = std::move(styles);
     for (auto i = start.paragraph; i <= end.paragraph; ++i) {
-        auto &p = document.paragraphs[i];
+        auto &p = document.paragraphs.edit(i);
         const auto inherited = inheritedCharacter(
             document.styles, resolveStyle(document.styles, p.style).character, style.id);
         const auto a = i == start.paragraph ? start.offset : 0,
@@ -1125,7 +1184,7 @@ void Editor::insertParagraphBreak() {
     replace(u"\n");
     if (body) {
         const auto resolved = resolveStyle(document.styles, next);
-        auto &created = document.paragraphs[selection.focus.paragraph];
+        auto &created = document.paragraphs.edit(selection.focus.paragraph);
         setStyle(created, next, resolved, document.styles);
         created.revision = document.revision;
         typingStyle = resolved.character;
@@ -1309,7 +1368,7 @@ void Editor::markRuns(std::size_t index, std::size_t from, std::size_t to,
                       const std::function<void(Run &)> &change) {
     if (from >= to)
         return;
-    auto &paragraph = document.paragraphs[index];
+    auto &paragraph = document.paragraphs.edit(index);
     const auto size = paragraph.text().size();
     auto runs = slice(paragraph, 0, from);
     for (auto run : slice(paragraph, from, to)) {
@@ -1325,7 +1384,7 @@ std::size_t Editor::resolveRange(Position start, Position end,
     Raise guard(untracked_);
     std::size_t droppedAtEnd = 0;
     for (auto i = end.paragraph + 1; i-- > start.paragraph;) {
-        auto &paragraph = document.paragraphs[i];
+        auto &paragraph = document.paragraphs.edit(i);
         const auto size = paragraph.text().size();
         const auto from = i == start.paragraph ? start.offset : 0;
         const auto to = i == end.paragraph ? end.offset : size;
@@ -1601,7 +1660,7 @@ void Editor::setLink(const std::string &target, const std::u16string &text) {
         end = selection.focus;
     }
     for (auto i = start.paragraph; i <= end.paragraph; ++i) {
-        auto &p = document.paragraphs[i];
+        auto &p = document.paragraphs.edit(i);
         const auto a = i == start.paragraph ? start.offset : 0,
                    b = i == end.paragraph ? end.offset : p.text().size();
         const auto inherited = resolveStyle(document.styles, p.style).character;

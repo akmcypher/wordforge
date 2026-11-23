@@ -51,7 +51,8 @@ input-method preview stay full.
 
 - Key computation and moving the reused output are still O(paragraphs) per edit. They are
   cheap (about 3 ms at 1000 pages) but not O(change).
-- The model transaction copies the document (Phase 1 copy-on-write), and
+- (Done 2026-11-23: copy-on-write paragraphs, `docs/evidence/2026-11-23-shared-paragraphs.md`.)
+  The model transaction copied the document, and
   `PageRenderer::synchronize` rebuilds page keys for every page. Both are O(document).
 - No background or visible-page-first layout, cancellation or stale-result fencing (2C).
 - The cell index can't change within a row group. Table row groups stay one step, with

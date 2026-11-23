@@ -15,6 +15,21 @@ These don't cover the editor's document copy. Since page stamps were added (2026
 renderer sync after the same edit takes 0.27 ms instead of 56–60 ms, re-recording 1 page
 (`docs/evidence/2026-11-23-page-stamps.md`). Evidence: `docs/evidence/2026-11-23-incremental-pagination.md`.
 
+## Copy-on-write paragraphs (2026-11-23)
+
+Windows ARM64 Release, single runs; before is main 7939d73 on the same machine.
+
+| Workload | Before | After |
+|---|---:|---:|
+| 34,000 paragraphs: single edit ms | 8.9–13.4 | 0.9–1.9 |
+| 34,000 paragraphs: grouped page break ms | 41 | 2.7–9 |
+| 34,000 paragraphs: undo / redo ms | 19–21 | <0.01 |
+| 34,000 paragraphs: peak MiB | 126 | 36 |
+| 32,000 paragraphs, `PageView` keystroke + paint, median ms | 115.5 | 94–95 |
+
+About 70 ms of the keystroke is the status bar's whole-document word count.
+Evidence: `docs/evidence/2026-11-23-shared-paragraphs.md`.
+
 ## Anchor-heavy model workload (0.5)
 
 `wordforge_transaction_benchmark --anchors`: one 100,000-character paragraph,

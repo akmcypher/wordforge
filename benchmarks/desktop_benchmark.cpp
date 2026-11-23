@@ -3,7 +3,10 @@
 #include <QElapsedTimer>
 #include <QKeyEvent>
 #include <QPainter>
+#include <algorithm>
 #include <cstdio>
+#include <cstring>
+#include <vector>
 
 int main(int argc, char **argv) {
     QElapsedTimer startup;
@@ -13,6 +16,43 @@ int main(int argc, char **argv) {
 #ifdef _WIN32
     QApplication::setFont(QFont("Segoe UI", 10));
 #endif
+    if (argc > 1 && std::strcmp(argv[1], "--long") == 0) {
+        // Typing in a 32,000-paragraph (about 1000-page) document through the editor's own
+        // path: model edit, incremental layout, renderer sync and a viewport paint.
+        wf::Document document;
+        document.paragraphs.clear();
+        for (int i = 0; i < 32000; ++i) {
+            wf::Paragraph paragraph(document.allocateId());
+            paragraph.runs = {{u"Long document paragraph used to measure typing latency.", {}}};
+            document.paragraphs.push_back(std::move(paragraph));
+        }
+        wf::MainWindow window;
+        auto *view = window.pageView();
+        QElapsedTimer opened;
+        opened.start();
+        view->setDocument(std::move(document));
+        const auto open = opened.nsecsElapsed() / 1e6;
+        window.show();
+        view->setFocus();
+        QKeyEvent end(QEvent::KeyPress, Qt::Key_End, Qt::ControlModifier);
+        QApplication::sendEvent(view, &end);
+        QImage target(view->viewport()->size(), QImage::Format_ARGB32_Premultiplied);
+        view->viewport()->render(&target);
+        std::vector<double> samples;
+        for (int i = 0; i < 50; ++i) {
+            QElapsedTimer keystroke;
+            keystroke.start();
+            view->insertText(QStringLiteral("x"));
+            view->viewport()->render(&target);
+            samples.push_back(keystroke.nsecsElapsed() / 1e6);
+        }
+        std::sort(samples.begin(), samples.end());
+        std::printf("paragraphs,open_ms,keystrokes,median_keystroke_ms,p95_keystroke_ms,max_"
+                    "keystroke_ms\n32000,%.2f,%zu,%.2f,%.2f,%.2f\n",
+                    open, samples.size(), samples[samples.size() / 2],
+                    samples[samples.size() * 95 / 100], samples.back());
+        return 0;
+    }
     wf::MainWindow window;
     window.pageView()->setDocument(wf::sampleDocument());
     const auto constructed = startup.nsecsElapsed() / 1e6;

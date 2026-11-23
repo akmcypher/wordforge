@@ -41,7 +41,7 @@ TEST(BaselineText, AutomaticFootnoteDoesNotDoubleScaleWithCharacterMode) {
     Shaper shaper(systemFontFiles());
     Editor e;
     e.insertFootnote(u"note");
-    auto &p = e.document.paragraphs[0];
+    auto &p = e.document.paragraphs.edit(0);
     const auto ordinary = shaper.shape(p, 0, 1);
     p.runs[0].style.baseline = TextBaseline::Superscript;
     const auto raised = shaper.shape(p, 0, 1);
@@ -109,7 +109,7 @@ TEST(Widows, ColumnsContinuousSectionsAndKeepsUseTheSameReservations) {
     EXPECT_EQ(layout.lines[6].page, 1u);
     engine.clear();
     auto continuous = widowFixture(shaper, 3, 4, 4.5);
-    continuous.document.paragraphs[2].sectionBreak = SectionBreak{continuous.document.page, true};
+    continuous.document.paragraphs.edit(2).sectionBreak = SectionBreak{continuous.document.page, true};
     continuous.formatParagraph([](auto &p) { p.widowControl = true; });
     const auto continued = engine.compose(continuous.document);
     EXPECT_EQ(continued.lines[3].page, 1u);
@@ -257,8 +257,8 @@ TEST(Pagination, KeepsUseColumnsAndExplicitBreaksWin) {
         EXPECT_EQ(broken.lines[i].page, oracle.lines[i].page);
         EXPECT_DOUBLE_EQ(broken.lines[i].baseline, oracle.lines[i].baseline);
     }
-    e.document.paragraphs[2].pageBreakBefore = false;
-    e.document.paragraphs[1].sectionBreak = SectionBreak{e.document.page, false};
+    e.document.paragraphs.edit(2).pageBreakBefore = false;
+    e.document.paragraphs.edit(1).sectionBreak = SectionBreak{e.document.page, false};
     const auto section = engine.compose(e.document);
     EXPECT_EQ(section.lines[1].page, 0u);
     EXPECT_DOUBLE_EQ(section.lines[1].x, section.lines[0].x);
@@ -316,7 +316,7 @@ TEST(Pagination, ContinuousSectionPreflightsItsFirstKeptHeading) {
     e.formatParagraph([](auto &p) { p.spaceBefore = p.spaceAfter = 0; p.lineSpacing = 1; });
     const double height = engine.compose(e.document).lines[0].height;
     e.document.page = {300, height * 3.5 + 40, 20};
-    e.document.paragraphs[1].sectionBreak = SectionBreak{e.document.page, true};
+    e.document.paragraphs.edit(1).sectionBreak = SectionBreak{e.document.page, true};
     e.selection = {{2, 0}, {2, 0}};
     e.formatParagraph([](auto &p) { p.keepWithNext = true; });
     const auto kept = engine.compose(e.document);

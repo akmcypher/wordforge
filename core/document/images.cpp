@@ -197,7 +197,7 @@ void Editor::resizeImage(double width, double height) {
         const auto location = selected(editor);
         if (!location)
             throw std::invalid_argument("Select a picture first");
-        auto &paragraph = editor.document.paragraphs[location->first];
+        auto &paragraph = editor.document.paragraphs.edit(location->first);
         auto &run = paragraph.runs[location->second];
         auto image = *run.image();
         if (image.width == width && image.height == height)

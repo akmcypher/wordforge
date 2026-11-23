@@ -98,7 +98,10 @@ TEST(Anchors, BookmarksFollowEditsReorderingAndUndo) {
     ASSERT_TRUE(editor.undo());
     EXPECT_EQ(editor.document.bookmarks[0].anchor.offset, 3);
     editor.transact([](Editor &candidate) {
-        std::swap(candidate.document.paragraphs.front(), candidate.document.paragraphs.back());
+        auto &list = candidate.document.paragraphs;
+        const auto first = list[0], last = list.back();
+        list.edit(0) = last;
+        list.edit(list.size() - 1) = first;
         candidate.selection = {};
     });
     EXPECT_EQ(editor.document.resolve(editor.document.bookmarks[0].anchor)->paragraph, 0);
@@ -205,7 +208,10 @@ TEST(Transactions, ReportsMovesAndRejectsInvalidTypingState) {
     editor.selection = {};
     const auto oldRevision = editor.document.revision;
     const auto changes = editor.transact([](Editor &candidate) {
-        std::swap(candidate.document.paragraphs[0], candidate.document.paragraphs[1]);
+        auto &list = candidate.document.paragraphs;
+        const auto first = list[0], second = list[1];
+        list.edit(0) = second;
+        list.edit(1) = first;
     });
     EXPECT_GT(changes.afterRevision, oldRevision);
     EXPECT_TRUE(changes.orderChanged);
@@ -494,7 +500,7 @@ TEST(Footnotes, ReferencesAndNotesMustMatch) {
     orphan.footnotes.push_back({orphan.allocateId(), u"orphan"});
     EXPECT_THROW(validateDocument(orphan), std::invalid_argument);
     auto twice = e.document;
-    twice.paragraphs[0].runs.push_back(Run::fromNote({id}));
+    twice.paragraphs.edit(0).runs.push_back(Run::fromNote({id}));
     EXPECT_THROW(validateDocument(twice), std::invalid_argument);
     auto missing = e.document;
     missing.footnotes.clear();
@@ -689,7 +695,7 @@ TEST(TrackedChanges, ParagraphsAndOtherContent) {
     EXPECT_EQ(e.document.paragraphs[0].text(), u"￼");
     // Invalid documents: a mark without a revision, an empty tracked run.
     auto broken = e.document;
-    broken.paragraphs[0].runs[0].inserted = 999999;
+    broken.paragraphs.edit(0).runs[0].inserted = 999999;
     EXPECT_THROW(validateDocument(broken), std::invalid_argument);
     e.reviewer = std::string(300, 'x');
     e.setTrackChanges(true);
@@ -807,7 +813,7 @@ TEST(Links, InsertAtCaretAndRejectUnsafeTargets) {
     EXPECT_FALSE(externalLink("file:///etc/passwd"));
     EXPECT_FALSE(externalLink("#Intro"));
     auto document = editor.document;
-    document.paragraphs[0].runs[0].link = "javascript:void(0)";
+    document.paragraphs.edit(0).runs[0].link = "javascript:void(0)";
     EXPECT_THROW(validateDocument(document), std::invalid_argument);
 }
 TEST(Links, CopyAndPasteKeepTheTarget) {
@@ -925,8 +931,8 @@ TEST(Sections, InsertSetAndRemoveBreaks) {
     EXPECT_FALSE(e.removeSectionBreak());
     // Invalid: a break inside a table, or one that carries its own header.
     auto document = e.document;
-    document.paragraphs[0].sectionBreak = SectionBreak{};
-    document.paragraphs[0].sectionBreak->page.header.left = u"x";
+    document.paragraphs.edit(0).sectionBreak = SectionBreak{};
+    document.paragraphs.edit(0).sectionBreak->page.header.left = u"x";
     EXPECT_THROW(validateDocument(document), std::invalid_argument);
     page = PageStyle{};
     page.columns = 7;
