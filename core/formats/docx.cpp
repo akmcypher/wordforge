@@ -224,8 +224,86 @@ std::string baselineName(TextBaseline value) {
     return value == TextBaseline::Superscript ? "superscript" :
            value == TextBaseline::Subscript ? "subscript" : "baseline";
 }
+// Style and document-default properties Wordforge does not read, kept for saving (merged
+// back into the same style), in their schema order. The "shown" ones look the same here
+// as in Word, so they need no warning: Wordforge always kerns and uses standard
+// ligatures, and outline levels only affect Word's navigation.
+const std::set<std::string_view> keptRun{
+    "caps",      "smallCaps",       "dstrike",    "outline",   "shadow",  "emboss",
+    "imprint",   "snapToGrid",      "vanish",     "webHidden", "spacing", "w",
+    "kern",      "position",        "effect",     "bdr",       "fitText", "rtl",
+    "cs",        "em",              "eastAsianLayout", "specVanish", "ligatures",
+    "numForm",   "numSpacing",      "stylisticSets", "cntxtAlts"};
+const std::set<std::string_view> keptParagraph{
+    "suppressLineNumbers", "pBdr",        "shd",          "suppressAutoHyphens",
+    "kinsoku",             "wordWrap",    "overflowPunct", "topLinePunct",
+    "autoSpaceDE",         "autoSpaceDN", "bidi",         "adjustRightInd",
+    "snapToGrid",          "contextualSpacing", "mirrorIndents", "suppressOverlap",
+    "textDirection",       "textAlignment", "outlineLvl"};
+// The schema order of run and paragraph properties (local names; Word 2010 run
+// extensions such as ligatures come last).
+const std::vector<std::string_view> runOrder{
+    "rStyle",  "rFonts",  "b",        "bCs",       "i",          "iCs",       "caps",
+    "smallCaps", "strike", "dstrike", "outline",   "shadow",     "emboss",    "imprint",
+    "noProof", "snapToGrid", "vanish", "webHidden", "color",     "spacing",   "w",
+    "kern",    "position", "sz",      "szCs",      "highlight",  "u",         "effect",
+    "bdr",     "shd",     "fitText",  "vertAlign", "rtl",        "cs",        "em",
+    "lang",    "eastAsianLayout", "specVanish", "oMath", "ligatures", "numForm",
+    "numSpacing", "stylisticSets", "cntxtAlts"};
+const std::vector<std::string_view> paragraphOrder{
+    "pStyle",  "keepNext", "keepLines", "pageBreakBefore", "framePr", "widowControl",
+    "numPr",   "suppressLineNumbers", "pBdr", "shd", "tabs", "suppressAutoHyphens",
+    "kinsoku", "wordWrap", "overflowPunct", "topLinePunct", "autoSpaceDE", "autoSpaceDN",
+    "bidi",    "adjustRightInd", "snapToGrid", "spacing", "ind", "contextualSpacing",
+    "mirrorIndents", "suppressOverlap", "jc", "textDirection", "textAlignment",
+    "textboxTightWrap", "outlineLvl", "divId", "cnfStyle", "rPr", "sectPr", "pPrChange"};
+// The preserved part that holds them; it is read back when saving, never written as is.
+constexpr const char *keptStylesPath = "wordforge/style-properties.xml";
+// Inserts copies of `from`'s children into `into` at their schema positions, skipping
+// properties `into` already has.
+void mergeProperties(pugi::xml_node from, pugi::xml_node into, bool run) {
+    const auto &order = run ? runOrder : paragraphOrder;
+    auto rank = [&](pugi::xml_node node) {
+        const auto found = std::find(order.begin(), order.end(), local(node.name()));
+        return found == order.end() ? std::ptrdiff_t{-1} : found - order.begin();
+    };
+    for (auto node : from.children()) {
+        if (node.type() != pugi::node_element || into.child(node.name()))
+            continue;
+        const auto mine = rank(node);
+        pugi::xml_node before;
+        for (auto existing : into.children())
+            if (rank(existing) > mine) {
+                before = existing;
+                break;
+            }
+        if (before)
+            into.insert_copy_before(node, before);
+        else
+            into.append_copy(node);
+    }
+}
+bool keptProperty(pugi::xml_node node, bool run) {
+    return (run ? keptRun : keptParagraph).contains(local(node.name()));
+}
+bool shownAlike(pugi::xml_node node, bool run) {
+    const auto name = local(node.name());
+    if (!run)
+        return name == "outlineLvl";
+    if (name == "kern")
+        return true;
+    if (name == "ligatures") {
+        std::string value;
+        for (auto attribute : node.attributes())
+            if (local(attribute.name()) == "val")
+                value = attribute.value();
+        return value == "standard" || value == "standardContextual";
+    }
+    return false;
+}
 void runProperties(pugi::xml_node properties, CharacterStyle &style,
-                   std::vector<std::string> &warnings, bool styleDefinition = false) {
+                   std::vector<std::string> &warnings, bool styleDefinition = false,
+                   bool kept = false) {
     auto toggle = [styleDefinition](bool previous, pugi::xml_node node) {
         return styleDefinition ? (previous != enabled(node)) : enabled(node);
     };
@@ -306,6 +384,10 @@ void runProperties(pugi::xml_node properties, CharacterStyle &style,
                 style.highlight = found->second;
             else
                 warn(warnings, "An unknown highlight color was omitted.");
+        } else if (kept && keptProperty(node, true)) {
+            if (!shownAlike(node, true))
+                warn(warnings, "Some character options are kept but not shown: " +
+                                   local(node.name()));
         } else if (!is(node, "rStyle") && !is(node, "szCs") && !is(node, "bCs") &&
                    !is(node, "iCs") && !is(node, "lang") && !is(node, "noProof"))
             warn(warnings, "Some character options are not supported: " + local(node.name()));
@@ -352,7 +434,7 @@ void readIndent(pugi::xml_node node, ParagraphFormat &paragraph,
         }
 }
 void paragraphProperties(pugi::xml_node properties, Paragraph &paragraph,
-                         std::vector<std::string> &warnings) {
+                         std::vector<std::string> &warnings, bool kept = false) {
     for (auto node : properties.children()) {
         if (node.type() != pugi::node_element)
             continue;
@@ -420,6 +502,10 @@ void paragraphProperties(pugi::xml_node properties, Paragraph &paragraph,
             }
             std::sort(paragraph.tabs.begin(), paragraph.tabs.end(),
                       [](const auto &a, const auto &b) { return a.position < b.position; });
+        } else if (kept && keptProperty(node, false)) {
+            if (!shownAlike(node, false))
+                warn(warnings, "Some paragraph options are kept but not shown: " +
+                                   local(node.name()));
         } else if (!is(node, "pStyle") && !is(node, "numPr") && !is(node, "rPr") &&
                    !is(node, "sectPr"))
             warn(warnings, "Some paragraph options are not supported: " + local(node.name()));
@@ -1136,6 +1222,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
     pugi::xml_document styles;
     std::map<std::string, pugi::xml_node> styleNodes;
     std::string defaultTableStyle;
+    bool keepStyleProperties = false;
     const auto stylesPart = relationship(parts, main, "styles");
     std::string defaultStyle;
     if (!stylesPart.empty()) {
@@ -1143,10 +1230,13 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             throw std::runtime_error("Missing DOCX styles part");
         styles = xml(parts.at(stylesPart));
         auto root = styles.document_element();
+        // Kept properties are written back under the transitional "w" prefix.
+        keepStyleProperties = std::string(root.attribute("xmlns:w").value()) == wordNs;
         auto defaults = child(root, "docDefaults");
-        runProperties(child(child(defaults, "rPrDefault"), "rPr"), defaultRun, warnings);
+        runProperties(child(child(defaults, "rPrDefault"), "rPr"), defaultRun, warnings, false,
+                      keepStyleProperties);
         paragraphProperties(child(child(defaults, "pPrDefault"), "pPr"), defaultParagraph,
-                            warnings);
+                            warnings, keepStyleProperties);
         if (auto baseline = readBaseline(child(child(defaults, "rPrDefault"), "rPr"), warnings))
             document.styles.find("Normal")->character.baseline = *baseline;
         readKeeps(child(child(defaults, "pPrDefault"), "pPr"),
@@ -1176,8 +1266,9 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         if (auto found = styleNodes.find(id); found != styleNodes.end()) {
             auto node = found->second;
             applyStyle(val(child(node, "basedOn")), p, s, seen);
-            paragraphProperties(child(node, "pPr"), p, warnings);
-            runProperties(child(node, "rPr"), s, warnings, true);
+            const bool keep = keepStyleProperties && attr(node, "type") != "table";
+            paragraphProperties(child(node, "pPr"), p, warnings, keep);
+            runProperties(child(node, "rPr"), s, warnings, true, keep);
         } else
             warn(warnings, "A referenced document style is missing; local defaults are used.");
         seen.erase(id);
@@ -1485,7 +1576,10 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             if (propertyNode.type() == pugi::node_element && !is(propertyNode, "pgSz") &&
                 !is(propertyNode, "pgMar") && !is(propertyNode, "headerReference") &&
                 !is(propertyNode, "footerReference") && !is(propertyNode, "titlePg") &&
-                !is(propertyNode, "cols") && !is(propertyNode, "type"))
+                !is(propertyNode, "cols") && !is(propertyNode, "type") &&
+                // A document grid without a type (Word's default) changes nothing.
+                !(is(propertyNode, "docGrid") &&
+                  (attr(propertyNode, "type").empty() || attr(propertyNode, "type") == "default")))
                 warn(warnings, "Section features are not preserved: " + local(propertyNode.name()));
         const auto type = val(child(section, "type"));
         if (type == "evenPage" || type == "oddPage" || type == "nextColumn")
@@ -2546,6 +2640,60 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             warn(warnings, "Keep with next across table boundaries is preserved, but not laid out.");
     }
     document.preserved = preservePackage(parts, main, warnings);
+    // Style and default properties Wordforge does not read, kept for saving.
+    if (keepStyleProperties) {
+        pugi::xml_document kept;
+        auto keptRoot = kept.append_child("styleProperties");
+        const auto stylesRoot = styles.document_element();
+        // Sorted, so the kept bytes are the same after saving and reopening.
+        std::map<std::string, std::string> declarations;
+        for (auto attribute : stylesRoot.attributes())
+            if (std::string_view(attribute.name()).starts_with("xmlns") ||
+                local(attribute.name()) == "Ignorable")
+                declarations[attribute.name()] = attribute.value();
+        for (const auto &[name, value] : declarations)
+            keptRoot.append_attribute(name.c_str()) = value.c_str();
+        bool any = false;
+        auto copy = [&](pugi::xml_node from, pugi::xml_node owner, const char *name, bool run) {
+            pugi::xml_node into;
+            for (auto node : from.children())
+                if (node.type() == pugi::node_element && keptProperty(node, run)) {
+                    if (!into)
+                        into = owner.append_child(name);
+                    into.append_copy(node);
+                    any = true;
+                }
+        };
+        auto addOwner = [&](const char *name, pugi::xml_node pPr, pugi::xml_node rPr,
+                            const std::string &id) {
+            auto owner = keptRoot.append_child(name);
+            if (!id.empty())
+                owner.append_attribute("id") = id.c_str();
+            copy(pPr, owner, "pPr", false);
+            copy(rPr, owner, "rPr", true);
+            if (!owner.first_child())
+                keptRoot.remove_child(owner);
+        };
+        const auto defaults = child(stylesRoot, "docDefaults");
+        addOwner("docDefaults", child(child(defaults, "pPrDefault"), "pPr"),
+                 child(child(defaults, "rPrDefault"), "rPr"), {});
+        for (auto node : stylesRoot.children())
+            if (is(node, "style") &&
+                (attr(node, "type") == "paragraph" || attr(node, "type") == "character"))
+                addOwner("style", child(node, "pPr"), child(node, "rPr"), attr(node, "styleId"));
+        if (any) {
+            auto package = document.preserved
+                               ? std::make_shared<PreservedPackage>(*document.preserved)
+                               : std::make_shared<PreservedPackage>();
+            package->parts.push_back({keptStylesPath, "application/xml", saved(kept)});
+            try {
+                validatePreserved(*package);
+                document.preserved = std::move(package);
+            } catch (const std::invalid_argument &) {
+                warn(warnings, "Some style options could not be kept.");
+            }
+        }
+    }
     // Read settings that affect editing; retain the original package bytes.
     if (document.preserved)
         for (const auto &part : document.preserved->parts)
@@ -3155,6 +3303,45 @@ std::string serializeDocx(const Document &document) {
             set(shading, "fill", hex(*c.highlight));
         }
     }
+    // Properties kept from the imported styles go back into the styles they came from.
+    if (document.preserved)
+        for (const auto &part : document.preserved->parts) {
+            if (part.path != keptStylesPath)
+                continue;
+            pugi::xml_document kept;
+            if (!kept.load_buffer(part.data.data(), part.data.size()))
+                break;
+            const auto keptRoot = kept.document_element();
+            for (auto attribute : keptRoot.attributes())
+                if (!styleRoot.attribute(attribute.name()))
+                    styleRoot.append_attribute(attribute.name()) = attribute.value();
+            auto target = [](pugi::xml_node owner, const char *name) {
+                const auto qualified = "w:" + std::string(name);
+                auto found = owner.child(qualified.c_str());
+                return found ? found : owner.append_child(qualified.c_str());
+            };
+            auto mergeInto = [&](pugi::xml_node owner, pugi::xml_node pPr, pugi::xml_node rPr) {
+                if (pPr)
+                    mergeProperties(pPr, target(owner, "pPr"),
+                                    false);
+                if (rPr)
+                    mergeProperties(rPr, target(owner, "rPr"), true);
+            };
+            for (auto owner : keptRoot.children()) {
+                if (std::string_view(owner.name()) == "docDefaults") {
+                    auto defaults = styleRoot.child("w:docDefaults");
+                    if (auto pPr = owner.child("pPr"))
+                        mergeProperties(pPr, target(target(defaults, "pPrDefault"), "pPr"), false);
+                    if (auto rPr = owner.child("rPr"))
+                        mergeProperties(rPr, target(target(defaults, "rPrDefault"), "rPr"), true);
+                    continue;
+                }
+                const std::string id = owner.attribute("id").value();
+                for (auto style : styleRoot.children("w:style"))
+                    if (id == style.attribute("w:styleId").value())
+                        mergeInto(style, owner.child("pPr"), owner.child("rPr"));
+            }
+        }
     opc::Parts parts{
         {"[Content_Types].xml",
          "<Types xmlns='http://schemas.openxmlformats.org/package/2006/content-types'><Default "
@@ -3369,6 +3556,8 @@ std::string serializeDocx(const Document &document) {
         packageRelationships.load_string(parts.at("_rels/.rels").c_str());
         relationships.load_string(parts.at("word/_rels/document.xml.rels").c_str());
         for (const auto &part : document.preserved->parts) {
+            if (part.path == keptStylesPath)
+                continue;
             const bool settings =
                 part.contentType ==
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml";

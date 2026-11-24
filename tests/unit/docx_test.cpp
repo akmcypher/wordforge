@@ -1053,7 +1053,16 @@ TEST(Docx, KeepsDocumentPropertiesThemeSettingsAndCustomXmlThroughEditsAndSave) 
     // Reopening keeps the same parts.
     const auto again = parseDocx(opc::write(saved));
     ASSERT_TRUE(again.document.preserved);
-    EXPECT_EQ(*again.document.preserved, *document.preserved);
+    // (The kept style properties shrink to the styles Wordforge saved, so they're compared
+    // in their own test.)
+    auto withoutStyleProperties = [](PreservedPackage package) {
+        std::erase_if(package.parts, [](const PreservedPart &part) {
+            return part.path == "wordforge/style-properties.xml";
+        });
+        return package;
+    };
+    EXPECT_EQ(withoutStyleProperties(*again.document.preserved),
+              withoutStyleProperties(*document.preserved));
     EXPECT_EQ(again.document.paragraphs[0].text().substr(0, 8), u"Edited. ");
 }
 TEST(Docx, NamesDroppedPartsAndKeepsOnlyCompleteOnes) {
@@ -1819,4 +1828,93 @@ TEST(Docx, AppliesWordTableStylesToCellShadingTextAndSpacing) {
             EXPECT_TRUE(p.runs[0].style.bold);
             EXPECT_EQ(p.runs[0].style.color, 0xffffffffu);
         }
+}
+TEST(Docx, KeepsWordStyleDefaultsWithoutWarningAndSavesThemBack) {
+    // What Word writes into every document: kerning and ligatures in the defaults, outline
+    // levels on headings, a document grid without a type, and in some styles spacing
+    // options Wordforge doesn't show yet.
+    auto parts = wordDocument(
+        "<w:p><w:pPr><w:pStyle w:val='Chapter'/></w:pPr><w:r><w:t>Title</w:t></w:r></w:p>"
+        "<w:p><w:r><w:t>Body</w:t></w:r></w:p>"
+        "<w:sectPr><w:pgSz w:w='11906' w:h='16838'/><w:pgMar w:top='1440' w:right='1440' "
+        "w:bottom='1440' w:left='1440'/><w:docGrid w:linePitch='360'/></w:sectPr>");
+    auto &styles = parts["word/styles.xml"];
+    const auto open = styles.find('>', styles.find("<w:styles")) ;
+    styles.insert(open, " xmlns:mc='http://schemas.openxmlformats.org/markup-compatibility/2006' "
+                        "xmlns:w14='http://schemas.microsoft.com/office/word/2010/wordml' "
+                        "mc:Ignorable='w14'");
+    const auto defaults = styles.find("</w:rPr>", styles.find("<w:rPrDefault>"));
+    ASSERT_NE(defaults, std::string::npos);
+    styles.insert(defaults, "<w:kern w:val='2'/><w14:ligatures w14:val='standardContextual'/>");
+    styles.insert(styles.rfind("</w:styles>"),
+                  "<w:style w:type='paragraph' w:styleId='Chapter'><w:name w:val='Chapter'/>"
+                  "<w:pPr><w:keepNext/><w:spacing w:before='240'/><w:outlineLvl w:val='0'/>"
+                  "</w:pPr><w:rPr><w:b/><w:kern w:val='32'/><w:sz w:val='32'/></w:rPr></w:style>"
+                  "<w:style w:type='paragraph' w:styleId='ListParagraph'><w:name w:val='List "
+                  "Paragraph'/><w:pPr><w:ind w:left='720'/><w:contextualSpacing/></w:pPr></w:style>");
+    const auto imported = parseDocx(opc::write(parts));
+    EXPECT_TRUE(imported.warnings.empty()) << imported.warnings.front();
+    // Saved back into the same styles, in schema order and with their namespaces.
+    const auto saved = opc::read(serializeDocx(imported.document));
+    EXPECT_FALSE(saved.contains("wordforge/style-properties.xml"));
+    pugi::xml_document out;
+    ASSERT_TRUE(out.load_string(saved.at("word/styles.xml").c_str()));
+    const auto root = out.document_element();
+    EXPECT_STREQ(root.attribute("mc:Ignorable").value(), "w14");
+    EXPECT_STREQ(root.attribute("xmlns:w14").value(),
+                 "http://schemas.microsoft.com/office/word/2010/wordml");
+    const auto rPrDefault = root.child("w:docDefaults").child("w:rPrDefault").child("w:rPr");
+    EXPECT_STREQ(rPrDefault.child("w:kern").attribute("w:val").value(), "2");
+    EXPECT_STREQ(rPrDefault.child("w14:ligatures").attribute("w14:val").value(),
+                 "standardContextual");
+    EXPECT_STREQ(rPrDefault.last_child().name(), "w14:ligatures");
+    auto style = [&](const char *id) {
+        for (auto node : root.children("w:style"))
+            if (std::string_view(node.attribute("w:styleId").value()) == id)
+                return node;
+        return pugi::xml_node{};
+    };
+    const auto heading = style("Chapter");
+    ASSERT_TRUE(heading);
+    EXPECT_STREQ(heading.child("w:pPr").child("w:outlineLvl").attribute("w:val").value(), "0");
+    // kern comes before sz in a run's properties.
+    const auto headingRun = heading.child("w:rPr");
+    EXPECT_TRUE(headingRun.child("w:kern"));
+    bool kernFirst = false;
+    for (auto node : headingRun.children()) {
+        if (std::string_view(node.name()) == "w:kern")
+            kernFirst = true;
+        if (std::string_view(node.name()) == "w:sz") {
+            EXPECT_TRUE(kernFirst);
+            break;
+        }
+    }
+    // A style that wasn't saved (List Paragraph is unused) takes its properties with it;
+    // the rest survive a second round trip.
+    const auto again = parseDocx(opc::write(saved));
+    EXPECT_TRUE(again.warnings.empty()) << again.warnings.front();
+    const auto twice = opc::read(serializeDocx(again.document));
+    EXPECT_NE(twice.at("word/styles.xml").find("w:outlineLvl"), std::string::npos);
+    EXPECT_NE(twice.at("word/styles.xml").find("w14:ligatures"), std::string::npos);
+}
+TEST(Docx, WarnsAboutKeptStyleOptionsThatAreNotShown) {
+    auto parts = wordDocument("<w:p><w:pPr><w:pStyle w:val='ListParagraph'/></w:pPr><w:r>"
+                              "<w:t>item</w:t></w:r></w:p>");
+    auto &styles = parts["word/styles.xml"];
+    styles.insert(styles.rfind("</w:styles>"),
+                  "<w:style w:type='paragraph' w:styleId='ListParagraph'><w:name w:val='List "
+                  "Paragraph'/><w:pPr><w:contextualSpacing/></w:pPr><w:rPr><w:spacing "
+                  "w:val='10'/></w:rPr></w:style>");
+    const auto imported = parseDocx(opc::write(parts));
+    EXPECT_EQ(imported.warnings,
+              (std::vector<std::string>{
+                  "Some paragraph options are kept but not shown: contextualSpacing",
+                  "Some character options are kept but not shown: spacing"}));
+    const auto saved = opc::read(serializeDocx(imported.document));
+    EXPECT_NE(saved.at("word/styles.xml").find("<w:contextualSpacing"), std::string::npos);
+    // A direct (not style) option is still dropped with the old warning.
+    const auto direct = parseDocx(opc::write(wordDocument(
+        "<w:p><w:pPr><w:contextualSpacing/></w:pPr><w:r><w:t>x</w:t></w:r></w:p>")));
+    EXPECT_EQ(direct.warnings, (std::vector<std::string>{
+                                   "Some paragraph options are not supported: contextualSpacing"}));
 }
