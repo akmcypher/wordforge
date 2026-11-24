@@ -14,7 +14,9 @@ per-feature support table.
 Both channels read WFG1–17. Previous release: 0.6.11 (df9bb14). Release notes:
 `docs/releases/v0.6.12.md`.
 
-## On main, not yet released (since 0.6.12)
+## In 0.6.13 (since 0.6.12; prepared, not yet published)
+
+Release notes: `docs/releases/v0.6.13.md`. Version 0.6.13 / `0.6.13-preview`.
 
 - **Word table styles** applied on import (PR #59).
 - **Word's style defaults kept** instead of warning on every DOCX (PR #61).
