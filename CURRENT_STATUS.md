@@ -8,17 +8,17 @@ per-feature support table.
 
 | Channel | Version | Source | Notes |
 |---|---|---|---|
-| GitHub release (Windows x64/ARM64) | 0.6.11 | df9bb14 | Released 2026-11-23, checksums verified |
-| Snap stable (amd64 76 / arm64 75) | 0.6.11-preview | df9bb14 | Promotion run 45199653472 |
+| GitHub release (Windows x64/ARM64) | 0.6.12 | a13c8d2 | Released 2026-11-24, checksums verified |
+| Snap stable (amd64 78 / arm64 77) | 0.6.12-preview | a13c8d2 | Promotion run 45263092624 |
 
-Both channels read WFG1–17. Previous release: 0.6.10 (7eedc2b). Release notes:
-`docs/releases/v0.6.11.md`.
+Both channels read WFG1–17. Previous release: 0.6.11 (df9bb14). Release notes:
+`docs/releases/v0.6.12.md`.
 
-## In 0.6.12 (prepared on `release/0.6.12`, not yet tagged or published)
+## In 0.6.12 (since 0.6.11; performance only)
 
 - **Per-paragraph pagination keys and in-place checkpoints (PR #57):** a keystroke's
   layout no longer hashes every paragraph or copies every checkpoint. A 1000-page
-  keystroke takes a median of 3.1�3.7 ms instead of about 5.6 ms.
+  keystroke takes a median of 3.1–3.7 ms instead of about 5.6 ms.
   - Evidence: `docs/evidence/2026-11-23-keystroke-profile.md` (follow-up section).
 
 ## In 0.6.10 (since 0.6.9)
