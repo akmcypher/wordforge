@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
+#include <cstdlib>
 #include <cmath>
 #include <filesystem>
 #include <functional>
@@ -1134,6 +1135,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
     defaultParagraph.lineSpacing = 1;
     pugi::xml_document styles;
     std::map<std::string, pugi::xml_node> styleNodes;
+    std::string defaultTableStyle;
     const auto stylesPart = relationship(parts, main, "styles");
     std::string defaultStyle;
     if (!stylesPart.empty()) {
@@ -1155,9 +1157,12 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                 if (!styleNodes.emplace(id, node).second)
                     throw std::runtime_error("Duplicate DOCX style identifier");
                 const auto defaultValue = attr(node, "default");
-                if (attr(node, "type") == "paragraph" &&
-                    (defaultValue == "1" || defaultValue == "true" || defaultValue == "on"))
+                const bool isDefault =
+                    defaultValue == "1" || defaultValue == "true" || defaultValue == "on";
+                if (attr(node, "type") == "paragraph" && isDefault)
                     defaultStyle = id;
+                if (attr(node, "type") == "table" && isDefault)
+                    defaultTableStyle = id;
             }
     }
     std::function<void(const std::string &, Paragraph &, CharacterStyle &, std::set<std::string> &)>
@@ -1495,6 +1500,9 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
     // Each section break's paragraph, and how each section starts (w:type), in order.
     std::vector<std::size_t> breakParagraphs;
     std::vector<std::string> sectionStarts;
+    // The table style parts that apply to the cell being read (wholeTable first, then
+    // banding, columns, rows and corners), each holding pPr/rPr/tcPr.
+    std::vector<pugi::xml_node> cellStyle;
     std::function<void(pugi::xml_node, const std::optional<TableCell> &)> readParagraph =
         [&](pugi::xml_node node, const std::optional<TableCell> &cell) {
         Paragraph paragraph = defaultParagraph;
@@ -1506,7 +1514,21 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         if (styleId.empty())
             styleId = defaultStyle;
         std::set<std::string> seen;
+        // A table style's paragraph and text formatting for this cell: Word lets it override
+        // the default paragraph style, while other paragraph styles override it.
+        auto applyTableStyle = [&] {
+            if (cell)
+                for (auto node : cellStyle) {
+                    paragraphProperties(child(node, "pPr"), paragraph, warnings);
+                    runProperties(child(node, "rPr"), base, warnings, true);
+                }
+        };
+        const bool tableStyleFirst = styleId != defaultStyle;
+        if (tableStyleFirst)
+            applyTableStyle();
         applyStyle(styleId, paragraph, base, seen);
+        if (!tableStyleFirst)
+            applyTableStyle();
         paragraph.style = styleId.empty() ? std::string("Normal") : importStyle(styleId);
         paragraphProperties(properties, paragraph, warnings);
         if (child(properties, "keepNext"))
@@ -1996,9 +2018,126 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             if (!created.fillAt(fill.row, fill.column))
                 created.shading.push_back({fill.row, fill.column, fill.color});
         }
-        // Borders: one width and colour for the whole table, from its own border settings
-        // (borders from a table style keep Wordforge's default).
-        if (const auto borders = child(child(table, "tblPr"), "tblBorders")) {
+        // The table style (or the document's default table style), base styles first.
+        std::vector<pugi::xml_node> styleChain;
+        {
+            auto id = val(child(child(table, "tblPr"), "tblStyle"));
+            if (id.empty())
+                id = defaultTableStyle;
+            std::set<std::string> seen;
+            while (!id.empty() && seen.size() < 64 && seen.insert(id).second) {
+                const auto found = styleNodes.find(id);
+                if (found == styleNodes.end()) {
+                    warn(warnings, "A referenced table style is missing; its formatting is not shown.");
+                    break;
+                }
+                styleChain.insert(styleChain.begin(), found->second);
+                id = val(child(found->second, "basedOn"));
+            }
+        }
+        // Which conditional parts show (w:tblLook attributes, or the older hexadecimal value).
+        auto look = [&](const char *name, unsigned bit) {
+            const auto node = child(child(table, "tblPr"), "tblLook");
+            const auto value = attr(node, name);
+            if (!value.empty())
+                return value == "1" || value == "true" || value == "on";
+            const auto hex = attr(node, "val");
+            return !hex.empty() && (std::strtoul(hex.c_str(), nullptr, 16) & bit) != 0;
+        };
+        const bool firstRow = look("firstRow", 0x20), lastRow = look("lastRow", 0x40),
+                   firstColumn = look("firstColumn", 0x80), lastColumn = look("lastColumn", 0x100),
+                   rowBands = !look("noHBand", 0x200), columnBands = !look("noVBand", 0x400);
+        auto bandSize = [&](const char *name) {
+            double size = 1;
+            for (auto node : styleChain)
+                if (const auto found = val(child(child(node, "tblPr"), name)); !found.empty())
+                    size = std::clamp(number(found), 1.0, 1000.0);
+            return static_cast<std::size_t>(size);
+        };
+        const auto rowBand = bandSize("tblStyleRowBandSize"),
+                   columnBand = bandSize("tblStyleColBandSize");
+        auto conditional = [&](std::vector<pugi::xml_node> &into, const char *type) {
+            for (auto node : styleChain)
+                for (auto part : node.children())
+                    if (is(part, "tblStylePr") && attr(part, "type") == type)
+                        into.push_back(part);
+        };
+        bool styleCellBorders = false;
+        auto partsFor = [&](std::size_t r, std::size_t c) {
+            std::vector<pugi::xml_node> parts(styleChain);
+            conditional(parts, "wholeTable");
+            const bool top = firstRow && r == 0, bottom = lastRow && r + 1 == rows.size(),
+                       left = firstColumn && c == 0, right = lastColumn && c + 1 == columns;
+            if (columnBands && !left && !right) {
+                const auto index = c - (firstColumn ? 1 : 0);
+                conditional(parts, (index / columnBand) % 2 ? "band2Vert" : "band1Vert");
+            }
+            if (rowBands && !top && !bottom) {
+                const auto index = r - (firstRow ? 1 : 0);
+                conditional(parts, (index / rowBand) % 2 ? "band2Horz" : "band1Horz");
+            }
+            if (left)
+                conditional(parts, "firstCol");
+            if (right)
+                conditional(parts, "lastCol");
+            if (top)
+                conditional(parts, "firstRow");
+            if (bottom)
+                conditional(parts, "lastRow");
+            if (top && left)
+                conditional(parts, "nwCell");
+            if (top && right)
+                conditional(parts, "neCell");
+            if (bottom && left)
+                conditional(parts, "swCell");
+            if (bottom && right)
+                conditional(parts, "seCell");
+            for (auto part : parts)
+                if (child(child(part, "tcPr"), "tcBorders"))
+                    styleCellBorders = true;
+            return parts;
+        };
+        // Cell fills from the style, under the cell's own.
+        for (std::size_t r = 0; r < rows.size(); ++r)
+            for (std::size_t c = 0; c < columns; ++c) {
+                if (const auto *merge = created.mergeAt(r, c);
+                    merge && (merge->row != r || merge->column != c))
+                    continue;
+                if (created.fillAt(r, c))
+                    continue;
+                bool own = false;
+                if (c < rows[r].size() && rows[r][c])
+                    own = static_cast<bool>(child(child(rows[r][c], "tcPr"), "shd"));
+                if (own)
+                    continue;
+                std::uint32_t fill = 0;
+                for (auto part : partsFor(r, c))
+                    if (const auto shading = child(child(part, "tcPr"), "shd")) {
+                        const auto value = attr(shading, "fill");
+                        if (value.empty() || value == "auto")
+                            fill = 0;
+                        else
+                            try {
+                                fill = color(value);
+                            } catch (const std::runtime_error &) {
+                            }
+                    }
+                if (fill)
+                    created.shading.push_back({r, c, fill});
+            }
+        if (styleCellBorders)
+            warn(warnings, "Table style borders on some cells are shown like the table's borders.");
+        // Borders: one width and colour for the whole table, from its own border settings or
+        // else its style's; a table whose style sets none has none, like in Word.
+        pugi::xml_node tableBorders = child(child(table, "tblPr"), "tblBorders");
+        if (!tableBorders) {
+            for (auto node : styleChain)
+                if (const auto found = child(child(node, "tblPr"), "tblBorders"))
+                    tableBorders = found;
+            if (!tableBorders && !styleChain.empty())
+                created.border.width = 0;
+        }
+        if (const auto borders = tableBorders) {
             bool any = false, none = true, plain = true;
             for (auto side : borders.children()) {
                 if (side.type() != pugi::node_element)
@@ -2044,8 +2183,10 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             for (std::size_t c = 0; c < columns; ++c) {
                 const TableCell cell{created.id, r, c};
                 const auto before = document.paragraphs.size();
+                cellStyle = partsFor(r, c);
                 if (c < rows[r].size() && rows[r][c])
                     readCell(rows[r][c], cell, 0);
+                cellStyle.clear();
                 if (document.paragraphs.size() == before)
                     document.paragraphs.push_back(emptyParagraph(cell));
             }

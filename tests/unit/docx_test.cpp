@@ -1747,3 +1747,76 @@ TEST(Docx, SectionsWithOrientationAndColumnsBothWays) {
     for (const auto &warning : imported.warnings)
         EXPECT_EQ(warning.find("Section"), std::string::npos) << warning;
 }
+TEST(Docx, AppliesWordTableStylesToCellShadingTextAndSpacing) {
+    // A style like Word's "Grid Table 4": blue header row with white bold text, banded
+    // rows, grey borders and no space after cell paragraphs; based on a style that sets
+    // the space after.
+    const std::string styles =
+        "<w:style w:type='table' w:styleId='Base'><w:name w:val='Base'/>"
+        "<w:pPr><w:spacing w:after='120'/></w:pPr></w:style>"
+        "<w:style w:type='table' w:styleId='GridTable4'><w:name w:val='Grid Table 4'/>"
+        "<w:basedOn w:val='Base'/><w:pPr><w:spacing w:after='0' w:line='240' "
+        "w:lineRule='auto'/></w:pPr>"
+        "<w:tblPr><w:tblStyleRowBandSize w:val='1'/><w:tblBorders>"
+        "<w:top w:val='single' w:sz='4' w:color='8EAADB'/><w:bottom w:val='single' w:sz='4' "
+        "w:color='8EAADB'/><w:insideH w:val='single' w:sz='4' w:color='8EAADB'/></w:tblBorders>"
+        "</w:tblPr>"
+        "<w:tblStylePr w:type='firstRow'><w:rPr><w:b/><w:color w:val='FFFFFF'/></w:rPr>"
+        "<w:tcPr><w:shd w:val='clear' w:color='auto' w:fill='4472C4'/></w:tcPr></w:tblStylePr>"
+        "<w:tblStylePr w:type='band1Horz'><w:tcPr><w:shd w:val='clear' w:color='auto' "
+        "w:fill='D9E2F3'/></w:tcPr></w:tblStylePr>"
+        "<w:tblStylePr w:type='firstCol'><w:rPr><w:i/></w:rPr></w:tblStylePr></w:style>"
+        "<w:style w:type='table' w:default='1' w:styleId='TableNormal'>"
+        "<w:name w:val='Normal Table'/></w:style>";
+    auto row = [](const char *a, const char *b) {
+        return std::string("<w:tr>") + cell(a) + cell(b) + "</w:tr>";
+    };
+    const auto body =
+        "<w:tbl><w:tblPr><w:tblStyle w:val='GridTable4'/><w:tblLook w:firstRow='1' "
+        "w:lastRow='0' w:firstColumn='0' w:lastColumn='0' w:noHBand='0' w:noVBand='1'/>"
+        "</w:tblPr><w:tblGrid><w:gridCol w:w='3000'/><w:gridCol w:w='3000'/></w:tblGrid>" +
+        row("Site", "Value") + row("North", "8") + row("Mill", "7") +
+        "<w:tr>" + cell("Delta", "<w:tcPr><w:shd w:val='clear' w:fill='FFEEDD'/></w:tcPr>") +
+        cell("6") + "</w:tr></w:tbl>"
+        "<w:p/><w:tbl><w:tblPr><w:tblLook w:val='04A0'/></w:tblPr><w:tr>" + cell("plain") +
+        "</w:tr></w:tbl>";
+    auto parts = wordDocument(body);
+    auto &styleXml = parts["word/styles.xml"];
+    styleXml.insert(styleXml.rfind("</w:styles>"), styles);
+    const auto imported = parseDocx(opc::write(parts));
+    EXPECT_TRUE(imported.warnings.empty()) << imported.warnings.front();
+    const auto &document = imported.document;
+    ASSERT_EQ(document.tables.size(), 2u);
+    const auto &table = document.tables[0];
+    EXPECT_EQ(table.fillAt(0, 0), 0xff4472c4u); // header row
+    EXPECT_EQ(table.fillAt(0, 1), 0xff4472c4u);
+    EXPECT_EQ(table.fillAt(1, 0), 0xffd9e2f3u); // first band
+    EXPECT_EQ(table.fillAt(2, 1), 0u);          // second band
+    EXPECT_EQ(table.fillAt(3, 0), 0xffffeeddu); // the cell's own shading wins
+    EXPECT_EQ(table.fillAt(3, 1), 0xffd9e2f3u);
+    EXPECT_DOUBLE_EQ(table.border.width, 0.5);
+    EXPECT_EQ(table.border.color, 0xff8eaadbu);
+    // The default table style has no borders, so neither does a table without a style.
+    EXPECT_DOUBLE_EQ(document.tables[1].border.width, 0);
+    auto at = [&](std::size_t row, std::size_t column) -> const Paragraph & {
+        for (const auto &p : document.paragraphs)
+            if (p.cell && p.cell->tableId == table.id && p.cell->row == row &&
+                p.cell->column == column)
+                return p;
+        throw std::runtime_error("missing cell");
+    };
+    EXPECT_TRUE(at(0, 0).runs[0].style.bold);
+    EXPECT_EQ(at(0, 0).runs[0].style.color, 0xffffffffu);
+    EXPECT_FALSE(at(1, 0).runs[0].style.bold);
+    EXPECT_FALSE(at(1, 0).runs[0].style.italic); // firstColumn is off in tblLook
+    EXPECT_DOUBLE_EQ(at(1, 0).spaceAfter, 0);
+    // Saved as direct formatting, it survives a round trip.
+    const auto again = parseDocx(serializeDocx(document)).document;
+    EXPECT_EQ(again.tables[0].fillAt(0, 0), 0xff4472c4u);
+    EXPECT_EQ(again.tables[0].fillAt(1, 1), 0xffd9e2f3u);
+    for (const auto &p : again.paragraphs)
+        if (p.cell && p.cell->tableId == again.tables[0].id && p.cell->row == 0) {
+            EXPECT_TRUE(p.runs[0].style.bold);
+            EXPECT_EQ(p.runs[0].style.color, 0xffffffffu);
+        }
+}
