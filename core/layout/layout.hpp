@@ -69,7 +69,8 @@ class LayoutEngine {
         std::uint64_t revision;
         double width;
         std::vector<Line> lines;
-        std::size_t number = 0, firstNote = 1, firstEndnote = 1;
+        std::u16string label; // the list label it was measured with
+        std::size_t firstNote = 1, firstEndnote = 1;
     };
     struct NoteBlock {
         std::uint64_t id = 0, text = 0; // the note and a hash of its text
@@ -79,7 +80,7 @@ class LayoutEngine {
     };
     // Pagination state where a paragraph (or a table's row group) starts.
     struct State {
-        std::size_t pageIndex = 0, column = 0, listNumber = 0, notesSoFar = 0, endnotes = 0;
+        std::size_t pageIndex = 0, column = 0, notesSoFar = 0, endnotes = 0;
         double y = 0, sectionTop = 0, sectionBottom = 0, notesHeight = 0;
         std::vector<NoteBlock> pageNotes; // footnotes waiting for the bottom of this page
     };
@@ -100,7 +101,11 @@ class LayoutEngine {
     // composition (shared paragraphs are unchanged, so their entries carry over).
     struct Local {
         std::uint64_t key = 0, id = 0, tableId = 0;
-        std::uint64_t group = 0; // style and container, for contextual spacing
+        std::uint64_t group = 0;     // style and container, for contextual spacing
+        std::uint64_t container = 0; // the body or a table cell, for list numbering
+        std::uint64_t listId = 0;
+        ListKind list{};
+        std::uint8_t listLevel = 0;
         bool sectionBreak = false, cell = false, notes = false, contextual = false;
     };
     ParagraphList paragraphs_;

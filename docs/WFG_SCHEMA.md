@@ -5,8 +5,20 @@
 after each character, -1584 to 1584. Omitted paragraph and run values are false and 0,
 and omitted style values inherit. Paragraph mask bit 10 (0x7ff in total) and character
 mask bit 9 (0x3ff in total) record explicit overrides. WFG1–17 keep their previous masks
-and reject the new attributes and bits. WFG18 is written only for a paragraph or run
-using either option, a direct bit, or an optional style value. It includes everything in
+and reject the new attributes and bits.
+
+WFG18 also adds list numbering:
+- **List definitions:** top-level `<list id>` elements, each with exactly nine
+  `<level format text start>` children.
+  - `format` is 0–6: decimal, lower letter, upper letter, lower Roman, upper Roman,
+    bullet, none.
+  - `text` is the label, at most 32 characters, with `%1`–`%9` standing for level numbers.
+  - `start` is 0–32767.
+- **Paragraph attributes:** `listId` names a definition; omitted or 0 means Wordforge's own
+  list of the paragraph's kind. `level` is 0–8. Neither is part of styles or masks.
+
+WFG18 is written only for a paragraph or run using any of these options, a direct bit, an
+optional style value, a list definition, a list id or a level. It includes everything in
 WFG17.
 
 **WFG17 (superscript/subscript)** adds character attribute `baseline`: integer 0

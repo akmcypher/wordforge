@@ -1041,3 +1041,32 @@ TEST(Spacing, CharacterSpacingFollowsEachCharacterWithoutLigatures) {
     p.runs[0].style.spacing = 1;
     EXPECT_EQ(shaper.shape(p, 0, 6).runs[0].glyphs.size(), 6u);
 }
+TEST(Lists, LayoutShowsEachLevelsLabel) {
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    Editor e;
+    e.replace(u"one\nnested\ntwo");
+    e.selection = {{0, 0}, {2, 1}};
+    e.formatParagraph([](auto &p) { p.list = ListKind::Decimal; });
+    e.selection = {{1, 0}, {1, 0}};
+    e.formatParagraph([](auto &p) {
+        p.listLevel = 1;
+        p.indentLeft = 36;
+    });
+    auto layout = engine.compose(e.document);
+    ASSERT_EQ(layout.lines.size(), 3u);
+    EXPECT_EQ(layout.lines[0].markerText, u"1.");
+    EXPECT_EQ(layout.lines[1].markerText, u"a.");
+    EXPECT_EQ(layout.lines[2].markerText, u"2.");
+    EXPECT_GT(layout.lines[1].markerX, layout.lines[0].markerX);
+    ListDefinition list{e.document.allocateId(), {}};
+    list.levels[0] = {NumberFormat::Decimal, u"Step %1:", 1};
+    list.levels[1] = {NumberFormat::Decimal, u"%1.%2", 1};
+    e.document.lists.push_back(list);
+    e.selection = {{0, 0}, {2, 1}};
+    e.formatParagraph([&](auto &p) { p.listId = list.id; });
+    layout = engine.compose(e.document);
+    EXPECT_EQ(layout.lines[0].markerText, u"Step 1:");
+    EXPECT_EQ(layout.lines[1].markerText, u"1.1");
+    EXPECT_EQ(layout.lines[2].markerText, u"Step 2:");
+}

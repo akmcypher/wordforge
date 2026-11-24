@@ -342,8 +342,12 @@ TEST(Docx, RoundTripsUnicodeFormattingListsAndPageGeometry) {
     EXPECT_TRUE(imported.warnings.empty());
     EXPECT_EQ(document.text(), editor.document.text());
     EXPECT_EQ(document.paragraphs[0].runs[0].style, editor.document.paragraphs[0].runs[0].style);
-    EXPECT_EQ(static_cast<const ParagraphFormat &>(document.paragraphs[1]),
-              static_cast<const ParagraphFormat &>(editor.document.paragraphs[1]));
+    // Wordforge's own list comes back as a Word list with the same levels.
+    auto listed = static_cast<ParagraphFormat>(document.paragraphs[1]);
+    ASSERT_NE(document.list(listed.listId), nullptr);
+    EXPECT_EQ(document.list(listed.listId)->levels[0], builtinListLevel(ListKind::Decimal, 0));
+    listed.listId = 0;
+    EXPECT_EQ(listed, static_cast<const ParagraphFormat &>(editor.document.paragraphs[1]));
     EXPECT_EQ(document.page.width, 612);
     EXPECT_EQ(document.page.margin, 36);
 }
@@ -417,7 +421,7 @@ TEST(Docx, RejectsBrokenPackagesAndReportsUnsupportedContent) {
                                  "w:id='1'/></w:p></w:body></w:document>";
     EXPECT_FALSE(parseDocx(opc::write(parts)).warnings.empty());
 }
-TEST(Docx, InheritsDefaultTrueStylesAndNumberingAndWarnsForCustomLabels) {
+TEST(Docx, InheritsDefaultTrueStylesAndNumberingWithCustomLabels) {
     auto parts = opc::read(serializeDocx(Document{}));
     parts["word/styles.xml"] =
         "<w:styles xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'><w:style "
@@ -437,7 +441,10 @@ TEST(Docx, InheritsDefaultTrueStylesAndNumberingAndWarnsForCustomLabels) {
     const auto imported = parseDocx(opc::write(parts));
     EXPECT_TRUE(imported.document.paragraphs[0].runs[0].style.bold);
     EXPECT_EQ(imported.document.paragraphs[0].list, ListKind::Decimal);
-    EXPECT_FALSE(imported.warnings.empty());
+    EXPECT_TRUE(imported.warnings.empty()) << imported.warnings.front();
+    const auto *list = imported.document.list(imported.document.paragraphs[0].listId);
+    ASSERT_NE(list, nullptr);
+    EXPECT_EQ(list->levels[0].text, u"Article %1:");
 }
 TEST(Docx, RejectsDuplicateZipNamesOversizeInputAndCyclicStyles) {
     auto duplicate = opc::write({{"a.xml", "first"}, {"b.xml", "second"}});
@@ -1971,4 +1978,77 @@ TEST(Docx, ReadsShowsAndSavesContextualAndCharacterSpacing) {
     EXPECT_TRUE(before(list.child("w:pPr"), "w:ind", "w:contextualSpacing"));
     EXPECT_STREQ(list.child("w:rPr").child("w:spacing").attribute("w:val").value(), "40");
     check(parseDocx(opc::write(saved)).document);
+}
+TEST(Docx, ReadsWordListLevelsLabelsBulletsAndRestarts) {
+    auto item = [](const char *num, const char *level, const char *text) {
+        return std::string("<w:p><w:pPr><w:numPr><w:ilvl w:val='") + level +
+               "'/><w:numId w:val='" + num + "'/></w:numPr></w:pPr><w:r><w:t>" + text +
+               "</w:t></w:r></w:p>";
+    };
+    auto parts = wordDocument(item("1", "0", "one") + item("1", "1", "sub") +
+                              item("1", "1", "sub2") + item("1", "0", "two") +
+                              item("2", "0", "restart") + item("3", "0", "bullet") +
+                              "<w:p><w:r><w:t>body</w:t></w:r></w:p>" + item("1", "0", "three"));
+    parts["word/numbering.xml"] =
+        "<w:numbering xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'>"
+        "<w:abstractNum w:abstractNumId='0'><w:multiLevelType w:val='hybridMultilevel'/>"
+        "<w:lvl w:ilvl='0'><w:start w:val='1'/><w:numFmt w:val='decimal'/>"
+        "<w:lvlText w:val='%1)'/><w:lvlJc w:val='left'/><w:pPr><w:ind w:left='720' "
+        "w:hanging='360'/></w:pPr></w:lvl>"
+        "<w:lvl w:ilvl='1'><w:start w:val='1'/><w:numFmt w:val='lowerLetter'/>"
+        "<w:lvlText w:val='%2)'/><w:lvlJc w:val='left'/><w:pPr><w:ind w:left='1440' "
+        "w:hanging='360'/></w:pPr></w:lvl></w:abstractNum>"
+        "<w:abstractNum w:abstractNumId='1'><w:lvl w:ilvl='0'><w:start w:val='1'/>"
+        "<w:numFmt w:val='bullet'/><w:lvlText w:val='\xef\x82\xb7'/><w:lvlJc w:val='left'/>"
+        "<w:pPr><w:ind w:left='720' w:hanging='360'/></w:pPr><w:rPr><w:rFonts "
+        "w:ascii='Symbol' w:hAnsi='Symbol' w:hint='default'/></w:rPr></w:lvl></w:abstractNum>"
+        "<w:num w:numId='1'><w:abstractNumId w:val='0'/></w:num>"
+        "<w:num w:numId='2'><w:abstractNumId w:val='0'/><w:lvlOverride w:ilvl='0'>"
+        "<w:startOverride w:val='5'/></w:lvlOverride></w:num>"
+        "<w:num w:numId='3'><w:abstractNumId w:val='1'/></w:num></w:numbering>";
+    const auto imported = parseDocx(opc::write(parts));
+    EXPECT_TRUE(imported.warnings.empty()) << imported.warnings.front();
+    auto labels = [](const Document &d) {
+        ListNumbering numbering(d.lists);
+        std::vector<std::u16string> result;
+        for (const auto &p : d.paragraphs)
+            result.push_back(numbering.next(p.list, p.listId, p.listLevel, 0));
+        return result;
+    };
+    const std::vector<std::u16string> expected{u"1)", u"a)", u"b)", u"2)", u"5)",
+                                               u"•", u"", u"3)"};
+    EXPECT_EQ(labels(imported.document), expected);
+    EXPECT_EQ(imported.document.paragraphs[1].listLevel, 1);
+    EXPECT_EQ(imported.document.paragraphs[5].list, ListKind::Bullet);
+    // Saved and opened again: the same lists, levels and labels.
+    const auto saved = opc::read(serializeDocx(imported.document));
+    pugi::xml_document numbering;
+    ASSERT_TRUE(numbering.load_string(saved.at("word/numbering.xml").c_str()));
+    // Every abstract list comes before the first instance.
+    bool instance = false;
+    for (auto node : numbering.document_element().children()) {
+        if (std::string_view(node.name()) == "w:num")
+            instance = true;
+        else
+            EXPECT_FALSE(instance) << node.name();
+    }
+    const auto again = parseDocx(opc::write(saved));
+    EXPECT_TRUE(again.warnings.empty()) << again.warnings.front();
+    EXPECT_EQ(labels(again.document), expected);
+}
+TEST(Docx, WarnsOnlyForListOptionsThatAreApproximated) {
+    auto parts = wordDocument(
+        "<w:p><w:pPr><w:numPr><w:ilvl w:val='0'/><w:numId w:val='1'/></w:numPr></w:pPr>"
+        "<w:r><w:t>x</w:t></w:r></w:p>");
+    parts["word/numbering.xml"] =
+        "<w:numbering xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'>"
+        "<w:abstractNum w:abstractNumId='0'><w:lvl w:ilvl='0'><w:start w:val='1'/>"
+        "<w:numFmt w:val='ordinal'/><w:lvlText w:val='%1'/><w:lvlJc w:val='right'/>"
+        "<w:suff w:val='space'/></w:lvl></w:abstractNum>"
+        "<w:num w:numId='1'><w:abstractNumId w:val='0'/></w:num></w:numbering>";
+    const auto imported = parseDocx(opc::write(parts));
+    EXPECT_EQ(imported.warnings,
+              (std::vector<std::string>{"Some list options are approximated: number style ordinal",
+                                        "Some list options are approximated: number alignment",
+                                        "Some list options are approximated: number spacing"}));
 }

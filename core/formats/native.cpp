@@ -199,7 +199,7 @@ CharacterProperties readCharacterProperties(pugi::xml_node node) {
 }
 // `indented`: WFG11, which adds first-line and right indents and justified alignment.
 // `themed`: WFG12, which adds Word theme colours.
-// `spaced`: WFG18, which adds contextual spacing and character spacing.
+// `spaced`: WFG18, which adds contextual spacing, character spacing and list levels.
 ParagraphStyle readStyle(pugi::xml_node node, bool indented, bool themed, bool tabbed, bool kept,
                          bool widowed, bool baseline, bool spaced) {
     if (indented)
@@ -370,7 +370,8 @@ std::string serializeNative(const Document &document) {
         [](const ParagraphStyle &s) { return s.character.baseline.has_value(); }) ||
         std::any_of(document.styles.characterStyles.begin(), document.styles.characterStyles.end(),
         [](const NamedCharacterStyle &s) { return s.character.baseline.has_value(); });
-    // WFG18 only for contextual or character spacing, so other files stay readable by 0.6.12.
+    // WFG18 only for contextual or character spacing or list levels and definitions, so
+    // other files stay readable by 0.6.12.
     const bool spaced =
         std::any_of(document.paragraphs.begin(), document.paragraphs.end(),
                     [](const Paragraph &p) {
@@ -385,7 +386,11 @@ std::string serializeNative(const Document &document) {
                                s.character.spacing.has_value();
                     }) ||
         std::any_of(document.styles.characterStyles.begin(), document.styles.characterStyles.end(),
-                    [](const NamedCharacterStyle &s) { return s.character.spacing.has_value(); });
+                    [](const NamedCharacterStyle &s) { return s.character.spacing.has_value(); }) ||
+        // and for list levels and numbering definitions
+        !document.lists.empty() ||
+        std::any_of(document.paragraphs.begin(), document.paragraphs.end(),
+                    [](const Paragraph &p) { return p.listId || p.listLevel; });
     const bool semantic = styled || banded || preserving || noted || reviewed || decorated ||
                           themed || sectioned || tabbed || kept || widowed || baseline || spaced;
     root.append_attribute("version") = spaced ? "18" : baseline ? "17" : widowed ? "16" : kept                         ? "15"
@@ -503,6 +508,16 @@ std::string serializeNative(const Document &document) {
             node.append_attribute("target") = relationship.target.c_str();
         }
     }
+    for (const auto &definition : document.lists) {
+        auto node = root.append_child("list");
+        node.append_attribute("id") = static_cast<unsigned long long>(definition.id);
+        for (const auto &level : definition.levels) {
+            auto item = node.append_child("level");
+            item.append_attribute("format") = static_cast<unsigned>(level.format);
+            item.append_attribute("text") = utf8(level.text).c_str();
+            item.append_attribute("start") = static_cast<unsigned long long>(level.start);
+        }
+    }
     for (const auto &table : document.tables) {
         auto node = root.append_child("table");
         node.append_attribute("id") = static_cast<unsigned long long>(table.id);
@@ -571,6 +586,10 @@ std::string serializeNative(const Document &document) {
             paragraph.append_attribute("widow") = true;
         if (p.contextualSpacing)
             paragraph.append_attribute("contextual") = true;
+        if (p.listId)
+            paragraph.append_attribute("listId") = static_cast<unsigned long long>(p.listId);
+        if (p.listLevel)
+            paragraph.append_attribute("level") = static_cast<unsigned>(p.listLevel);
         if (const auto &end = p.sectionBreak) {
             paragraph.append_attribute("section") = end->continuous ? "continuous" : "page";
             paragraph.append_attribute("sectionWidth") = end->page.width;
@@ -834,6 +853,36 @@ Document parseNative(const std::string &input) {
             document.styles.paragraphStyles.push_back(readStyle(p, v11, v12, v14, v15, v16, v17, v18));
             continue;
         }
+        if (v18 && std::string_view(p.name()) == "list") {
+            attributes(p, {"id"});
+            ListDefinition definition{identifier(p, "id"), {}};
+            std::size_t levels = 0;
+            for (auto item : p.children()) {
+                if (indentation(item))
+                    continue;
+                if (std::string_view(item.name()) != "level" || levels == listLevels ||
+                    item.first_child())
+                    throw std::runtime_error("Invalid native list level");
+                attributes(item, {"format", "text", "start"});
+                auto &level = definition.levels[levels++];
+                const auto format = number(item, "format", 0, 0, 6);
+                const auto start = number(item, "start", 1, 0, 32767);
+                if (std::floor(format) != format || std::floor(start) != start)
+                    throw std::runtime_error("Invalid native list level");
+                level.format = static_cast<NumberFormat>(static_cast<int>(format));
+                level.text = utf16(item.attribute("text").value());
+                level.start = static_cast<std::uint32_t>(start);
+            }
+            if (levels != listLevels)
+                throw std::runtime_error("A native list needs nine levels");
+            try {
+                validateListDefinition(definition);
+            } catch (const std::invalid_argument &error) {
+                throw std::runtime_error(error.what());
+            }
+            document.lists.push_back(std::move(definition));
+            continue;
+        }
         if (v7 && std::string_view(p.name()) == "charStyle") {
             document.styles.characterStyles.push_back(readCharacterStyle(p, v12, v17, v18));
             continue;
@@ -949,7 +998,8 @@ Document parseNative(const std::string &input) {
                            v13 ? "sectionGap" : "id",
                            v14 ? "tabs" : "id", v15 ? "keepNext" : "id",
                            v15 ? "keepLines" : "id", v16 ? "widow" : "id",
-                           v18 ? "contextual" : "id"});
+                           v18 ? "contextual" : "id", v18 ? "listId" : "id",
+                           v18 ? "level" : "id"});
         else if (v6)
             attributes(p, {"align", "after", "list", "style", "direct", "indent", "before", "line",
                            "break", "id", "table", "row", "column"});
@@ -992,6 +1042,12 @@ Document parseNative(const std::string &input) {
         paragraph.keepLines = boolean(p, "keepLines");
         paragraph.widowControl = boolean(p, "widow");
         paragraph.contextualSpacing = boolean(p, "contextual");
+        if (p.attribute("listId"))
+            paragraph.listId = identifier(p, "listId");
+        const auto level = number(p, "level", 0, 0, listLevels - 1);
+        if (std::floor(level) != level)
+            throw std::runtime_error("Invalid list level");
+        paragraph.listLevel = static_cast<std::uint8_t>(level);
         if (p.attribute("section")) {
             const std::string_view kind = p.attribute("section").value();
             if (kind != "page" && kind != "continuous")

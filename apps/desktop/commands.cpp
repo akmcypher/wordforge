@@ -479,19 +479,29 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
     auto list = [view](ListKind kind) {
         return [view, kind] {
             const auto value = selectedList(view, kind) ? ListKind::None : kind;
-            view->formatParagraph([value](auto &f) { f.list = value; });
+            view->formatParagraph([value](auto &f) {
+                f.list = value;
+                f.listId = 0; // Wordforge's own list of that kind
+            });
         };
     };
     create("bullets", "Bulleted list", "Paragraph", list(ListKind::Bullet));
     create("numbering", "Numbered list", "Paragraph", list(ListKind::Decimal));
     create("decreaseIndent", "Decrease indent", "Paragraph", [view] {
         view->formatParagraph([](auto &p) {
+            // A list paragraph moves up a level too, as in Word.
+            if (p.list != ListKind::None && p.indentLeft > 0 && p.listLevel > 0)
+                --p.listLevel;
             p.indentLeft = std::max(0.0, p.indentLeft - 18);
             p.indentFirstLine = std::max(p.indentFirstLine, -p.indentLeft);
         });
     });
     create("increaseIndent", "Increase indent", "Paragraph", [view] {
-        view->formatParagraph([](auto &p) { p.indentLeft += 18; });
+        view->formatParagraph([](auto &p) {
+            p.indentLeft += 18;
+            if (p.list != ListKind::None && p.listLevel + 1 < listLevels)
+                ++p.listLevel;
+        });
     });
     const QStringList alignments{"Left", "Center", "Right", "Justify"};
     for (int index = 0; index < 4; ++index)

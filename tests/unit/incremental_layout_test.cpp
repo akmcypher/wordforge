@@ -239,6 +239,40 @@ TEST(IncrementalLayout, ContextualAndCharacterSpacingMatchFullLayout) {
         e.format([](CharacterStyle &c) { c.spacing = 3; });
     });
 }
+TEST(IncrementalLayout, ListLevelsAndDefinitionsMatchFullLayout) {
+    Session s(longDocument(150));
+    s.edit([](Editor &e) {
+        e.selection = {{10, 0}, {60, 0}};
+        e.formatParagraph([](ParagraphFormat &p) { p.list = ListKind::Decimal; });
+    });
+    for (std::size_t at = 12; at < 60; at += 5)
+        s.edit([&](Editor &e) {
+            caret(e, at);
+            e.formatParagraph([](ParagraphFormat &p) {
+                p.listLevel = 1;
+                p.indentLeft = 36;
+            });
+        });
+    // Breaking the list early renumbers everything after it.
+    s.edit([](Editor &e) {
+        caret(e, 15);
+        e.formatParagraph([](ParagraphFormat &p) { p.list = ListKind::None; });
+    });
+    s.edit([](Editor &e) {
+        ListDefinition list{e.document.allocateId(), {}};
+        list.levels[0] = {NumberFormat::UpperRoman, u"Part %1 -", 1};
+        e.document.lists.push_back(list);
+        e.selection = {{30, 0}, {70, 0}};
+        e.formatParagraph([&](ParagraphFormat &p) {
+            p.list = ListKind::Decimal;
+            p.listId = list.id;
+        });
+    });
+    s.edit([](Editor &e) {
+        caret(e, 31);
+        e.replace(u"text that changes the line breaks of this numbered paragraph ");
+    });
+}
 TEST(IncrementalLayout, FootnotesEndnotesAndHeadersMatchFullLayout) {
     Session s(longDocument(200));
     s.edit([](Editor &e) {

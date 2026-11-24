@@ -109,6 +109,34 @@ class DesktopTest : public QObject {
             QVERIFY(restored.findChild<QCheckBox *>("panelWidowControl")->isChecked());
         }
     }
+    void indentingAListItemMovesItALevelAndPersists() {
+        QTemporaryDir directory;
+        wf::MainWindow window;
+        auto *view = window.pageView();
+        view->insertText("one\nnested");
+        view->selectAll();
+        window.findChild<QAction *>("numberingAction")->trigger();
+        auto *increase = window.findChild<QAction *>("increaseIndentAction");
+        auto *decrease = window.findChild<QAction *>("decreaseIndentAction");
+        QVERIFY(increase);
+        QVERIFY(decrease);
+        view->selectRange({wf::Position{1, 0}, wf::Position{1, 0}});
+        increase->trigger();
+        QCOMPARE(view->document().paragraphs[1].listLevel, 1);
+        QCOMPARE(view->document().paragraphs[0].listLevel, 0);
+        for (const auto &suffix : {QString("wfg"), QString("docx")}) {
+            const auto path = directory.filePath("levels." + suffix);
+            window.saveFile(path);
+            wf::MainWindow restored;
+            restored.openFile(path);
+            QCOMPARE(restored.pageView()->document().paragraphs[1].listLevel, 1);
+            QCOMPARE(restored.pageView()->document().paragraphs[1].list, wf::ListKind::Decimal);
+        }
+        decrease->trigger();
+        QCOMPARE(view->document().paragraphs[1].listLevel, 0);
+        view->undo();
+        QCOMPARE(view->document().paragraphs[1].listLevel, 1);
+    }
     void contextualAndCharacterSpacingApplyFromPanelAndPersist() {
         QTemporaryDir directory;
         wf::MainWindow window;

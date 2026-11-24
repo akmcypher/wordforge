@@ -1,4 +1,5 @@
 #pragma once
+#include "core/document/lists.hpp"
 #include "core/document/styles.hpp"
 #include <cstdint>
 #include <functional>
@@ -45,6 +46,10 @@ struct ParagraphFormat {
     // Word's "Don't add space between paragraphs of the same style": the space before is
     // dropped after a paragraph of the same style, the space after before one.
     bool contextualSpacing = false;
+    // A list paragraph's level (0-8) and the document list numbering it (a
+    // ListDefinition id; 0 for Wordforge's own list of its kind). Not part of styles.
+    std::uint64_t listId = 0;
+    std::uint8_t listLevel = 0;
     bool operator==(const ParagraphFormat &) const = default;
 };
 void validateParagraphFormat(const ParagraphFormat &);
@@ -484,6 +489,8 @@ struct Document {
     std::vector<Field> fields;
     std::vector<Comment> comments;
     std::vector<Revision> revisions; // each used by at least one run
+    ListDefinitions lists;           // numbering that list paragraphs may refer to
+    const ListDefinition *list(std::uint64_t id) const;
     bool trackChanges = false;       // record edits as tracked changes
     StyleSheet styles = builtinStyles();
     PageStyle page;

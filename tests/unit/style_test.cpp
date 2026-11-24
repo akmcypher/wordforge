@@ -597,3 +597,31 @@ TEST(Spacing, NativeKeepsContextualAndCharacterSpacingInWfg18) {
     e.document.paragraphs.edit(0).runs[0].style.spacing = 2000;
     EXPECT_THROW(validateDocument(e.document), std::invalid_argument);
 }
+TEST(Lists, NativeKeepsDefinitionsAndLevelsInWfg18) {
+    Editor e;
+    e.replace(u"one\ntwo");
+    ListDefinition list{e.document.allocateId(), {}};
+    list.levels[0] = {NumberFormat::LowerRoman, u"%1)", 4};
+    list.levels[1] = {NumberFormat::Bullet, u"–", 1};
+    e.document.lists.push_back(list);
+    e.selection = {{0, 0}, {1, 1}};
+    e.formatParagraph([&](auto &p) {
+        p.list = ListKind::Decimal;
+        p.listId = list.id;
+    });
+    e.selection = {{1, 0}, {1, 0}};
+    e.formatParagraph([](auto &p) { p.listLevel = 1; });
+    const auto bytes = serializeNative(e.document);
+    ASSERT_NE(bytes.find("version=\"18\""), std::string::npos);
+    const auto restored = parseNative(bytes);
+    ASSERT_EQ(restored.lists.size(), 1u);
+    EXPECT_EQ(restored.lists[0], list);
+    EXPECT_EQ(restored.paragraphs[0].listId, list.id);
+    EXPECT_EQ(restored.paragraphs[1].listLevel, 1);
+    auto old = bytes;
+    old.replace(old.find("version=\"18\""), 12, "version=\"17\"");
+    EXPECT_THROW(parseNative(old), std::runtime_error);
+    auto missing = bytes;
+    missing.replace(missing.find("<list "), 5, "<lost");
+    EXPECT_THROW(parseNative(missing), std::runtime_error);
+}

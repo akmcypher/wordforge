@@ -13,8 +13,9 @@ Condensed on 2026-11-23. The full earlier notes are kept verbatim in
     stamps, copy-on-write paragraphs, incremental word count, O(1) page positions,
     and PR #57's per-paragraph pagination keys and in-place checkpoints
 
-  Native format WFG18; the reader supports WFG1–18. WFG18, from the contextual and
-  character spacing PR, is not in a release yet.
+  Native format WFG18; the reader supports WFG1–18. WFG18 (contextual and character
+  spacing, list levels and definitions) is not in a release yet; add further format
+  changes to it until it ships.
 - Last published release: **v0.6.12** (tag at a13c8d2, 2026-11-24).
   - Windows installers and ZIPs are checksum-verified.
   - Snap stable is `0.6.12-preview`, amd64 rev 78 / arm64 rev 77, promoted by verified
@@ -45,7 +46,8 @@ Condensed on 2026-11-23. The full earlier notes are kept verbatim in
    `tests/unit/shared_paragraphs_test.cpp` green. Any new pagination input must go
    into the paragraph or global key in `layout.cpp`.
 2. Phase 1C/3/4 from `ENGINEERING_ROADMAP.md`:
-   - numbering definitions
+   - numbering through styles (Word heading numbering), and Word's list continuation
+     past other paragraphs for Wordforge's own lists (list levels and definitions are done)
    - table styles and row splitting
    - theme fonts
    - language and OpenType controls (character spacing is done)

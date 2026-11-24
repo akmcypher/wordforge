@@ -22,6 +22,12 @@ void validateCharacterStyle(const CharacterStyle &style) {
         style.theme.tint < -1 || style.theme.tint > 255)
         throw std::invalid_argument("Invalid character formatting");
 }
+const ListDefinition *Document::list(std::uint64_t id) const {
+    for (const auto &definition : lists)
+        if (definition.id == id)
+            return &definition;
+    return nullptr;
+}
 std::uint64_t Document::allocateId() {
     if (!nextId || nextId == std::numeric_limits<std::uint64_t>::max())
         throw std::overflow_error("Document node identifiers exhausted");
@@ -110,6 +116,13 @@ void validateDocument(const Document &document, const Document *validated) {
                         [](char c) { return c < 0x20 || c > 0x7e; }))
             throw std::invalid_argument("Invalid revision date");
     }
+    if (document.lists.size() > 10000)
+        throw std::invalid_argument("Too many lists");
+    for (const auto &definition : document.lists) {
+        validateListDefinition(definition);
+        if (definition.id >= document.nextId || !ids.insert(definition.id).second)
+            throw std::invalid_argument("Invalid list identifier");
+    }
     std::unordered_set<std::uint64_t> noteReferences;
     // Paragraphs shared with an already validated document (with the same styles) passed
     // the checks that depend on them alone; references to other parts are still checked.
@@ -130,6 +143,8 @@ void validateDocument(const Document &document, const Document *validated) {
             throw std::invalid_argument("Invalid or duplicate document node identifier");
         if (index < prefix || index >= paragraphs.size() - suffix) {
             // Shared paragraphs had distinct ids; they are checked against the rest below.
+            if (paragraph.listId && !document.list(paragraph.listId))
+                throw std::invalid_argument("Paragraph refers to a missing list");
             for (const auto &run : paragraph.runs) {
                 if (const auto *image = run.image(); image && !document.images.contains(image->resourceId))
                     throw std::invalid_argument("Missing image resource");
@@ -145,6 +160,8 @@ void validateDocument(const Document &document, const Document *validated) {
         }
         if (!ids.insert(paragraph.id).second)
             throw std::invalid_argument("Invalid or duplicate document node identifier");
+        if (paragraph.listId && !document.list(paragraph.listId))
+            throw std::invalid_argument("Paragraph refers to a missing list");
         validateParagraphFormat(paragraph);
         if (paragraph.runs.empty())
             throw std::invalid_argument("Paragraph requires a text run");
@@ -268,7 +285,7 @@ void validateParagraphFormat(const ParagraphFormat &value) {
         !std::isfinite(value.indentFirstLine) || value.indentFirstLine < -value.indentLeft ||
         value.indentFirstLine > 360 || !std::isfinite(value.indentRight) || value.indentRight < 0 ||
         value.indentRight > 360 || static_cast<unsigned>(value.alignment) > 3 ||
-        static_cast<unsigned>(value.list) > 2)
+        static_cast<unsigned>(value.list) > 2 || value.listLevel >= listLevels)
         throw std::invalid_argument("Invalid paragraph formatting");
 }
 void validatePage(const PageStyle &page) {
@@ -1174,7 +1191,11 @@ void Editor::insertParagraphBreak() {
     const auto &current = document.paragraphs[selection.focus.paragraph];
     if (selection.anchor == selection.focus && current.text().empty() &&
         current.list != ListKind::None) {
-        formatParagraph([](auto &p) { p.list = ListKind::None; });
+        formatParagraph([](auto &p) {
+            p.list = ListKind::None;
+            p.listId = 0;
+            p.listLevel = 0;
+        });
         return;
     }
     // Enter at the end of a paragraph continues with its style's "next" style.
@@ -1279,6 +1300,9 @@ void Editor::insertFragment(const std::vector<Paragraph> &fragment) {
                 e.formatParagraph([&](ParagraphFormat &format) {
                     format = fragment[i];
                     format.pageBreakBefore = false;
+                    // A list this document lacks (pasted from elsewhere) becomes its own.
+                    if (format.listId && !e.document.list(format.listId))
+                        format.listId = 0;
                 });
             for (const auto &run : fragment[i].runs) {
                 if (run.atom() || run.text().empty())

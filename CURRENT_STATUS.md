@@ -24,6 +24,13 @@ Both channels read WFG1–17. Previous release: 0.6.11 (df9bb14). Release notes:
   - 74 of 114 Word documents now open without the import-limitations dialog, up from 51.
   - Evidence: `docs/evidence/2026-11-24-contextual-character-spacing.md`.
   - WFG18 needs this newer reader.
+- **List levels and numbering definitions:**
+  - Nine list levels, each with its own format (1, a, A, i, I, bullets, none), label template
+    (`%1)`, `%1.%2.`) and start.
+  - Separate Word lists number separately, and nested levels restart under each parent.
+  - Increase and Decrease indent move a list item between levels.
+  - 88 of 114 Word documents now open without the import-limitations dialog.
+  - Evidence: `docs/evidence/2026-11-24-list-levels.md`.
 
 ## In 0.6.12 (since 0.6.11; performance only)
 
@@ -87,7 +94,7 @@ Both channels read WFG1–17. Previous release: 0.6.11 (df9bb14). Release notes:
 ## Not done
 
 - Background pagination, renderer and model copy costs per edit (rest of M2).
-- Numbering definitions, row splitting, theme fonts, language and OpenType controls.
+- Numbering through styles, row splitting, theme fonts, language and OpenType controls.
 - Fuller DOCX fidelity (formatting revisions, unknown body content is omitted with
   a warning, notes and comments are plain text).
 - Balanced columns and per-section headers.

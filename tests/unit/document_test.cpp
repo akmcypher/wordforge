@@ -938,3 +938,74 @@ TEST(Sections, InsertSetAndRemoveBreaks) {
     page.columns = 7;
     EXPECT_THROW(validatePage(page), std::invalid_argument);
 }
+TEST(Lists, NumbersLevelsFormatsAndRestartsLikeWord) {
+    EXPECT_EQ(formatListNumber(28, NumberFormat::LowerLetter), u"bb");
+    EXPECT_EQ(formatListNumber(14, NumberFormat::UpperRoman), u"XIV");
+    EXPECT_EQ(formatListNumber(9, NumberFormat::Decimal), u"9");
+    // Wordforge's own lists: 1. a. i. by level; restarted outside a list and per container.
+    ListDefinitions none;
+    ListNumbering own(none);
+    EXPECT_EQ(own.next(ListKind::Decimal, 0, 0, 0), u"1.");
+    EXPECT_EQ(own.next(ListKind::Decimal, 0, 1, 0), u"a.");
+    EXPECT_EQ(own.next(ListKind::Decimal, 0, 1, 0), u"b.");
+    EXPECT_EQ(own.next(ListKind::Bullet, 0, 2, 0), u"▪");
+    EXPECT_EQ(own.next(ListKind::Decimal, 0, 0, 0), u"2.");
+    EXPECT_EQ(own.next(ListKind::Decimal, 0, 1, 0), u"a."); // restarted under a new parent
+    EXPECT_EQ(own.next(ListKind::None, 0, 0, 0), u"");
+    EXPECT_EQ(own.next(ListKind::Decimal, 0, 0, 0), u"1.");
+    EXPECT_EQ(own.next(ListKind::Decimal, 0, 0, 7), u"1."); // a new table cell
+    // Definitions: labels with several levels, starts, and numbering that continues past
+    // other paragraphs; two definitions count separately.
+    ListDefinition outline{5, {}};
+    outline.levels[0] = {NumberFormat::UpperRoman, u"%1.", 3};
+    outline.levels[1] = {NumberFormat::Decimal, u"%1.%2)", 1};
+    ListDefinition other{6, {}};
+    other.levels[0] = {NumberFormat::LowerLetter, u"(%1)", 1};
+    ListDefinitions lists{outline, other};
+    ListNumbering defined(lists);
+    EXPECT_EQ(defined.next(ListKind::Decimal, 5, 0, 0), u"III.");
+    EXPECT_EQ(defined.next(ListKind::Decimal, 5, 1, 0), u"III.1)");
+    EXPECT_EQ(defined.next(ListKind::Decimal, 6, 0, 0), u"(a)");
+    EXPECT_EQ(defined.next(ListKind::None, 0, 0, 0), u"");
+    EXPECT_EQ(defined.next(ListKind::Decimal, 5, 1, 0), u"III.2)");
+    EXPECT_EQ(defined.next(ListKind::Decimal, 5, 0, 0), u"IV.");
+    EXPECT_EQ(defined.next(ListKind::Decimal, 6, 0, 0), u"(b)");
+}
+TEST(Lists, ValidatesLevelsDefinitionsAndPastedReferences) {
+    Editor e;
+    e.replace(u"item");
+    ListDefinition list{e.document.allocateId(), {}};
+    list.levels[0] = {NumberFormat::Bullet, u"–", 1};
+    e.document.lists.push_back(list);
+    e.formatParagraph([&](auto &p) {
+        p.list = ListKind::Bullet;
+        p.listId = list.id;
+        p.listLevel = 2;
+    });
+    validateDocument(e.document);
+    auto bad = e.document;
+    bad.paragraphs.edit(0).listId = 999;
+    EXPECT_THROW(validateDocument(bad), std::invalid_argument);
+    bad = e.document;
+    bad.paragraphs.edit(0).listLevel = 9;
+    EXPECT_THROW(validateDocument(bad), std::invalid_argument);
+    bad = e.document;
+    bad.lists[0].levels[3].start = 40000;
+    EXPECT_THROW(validateDocument(bad), std::invalid_argument);
+    // Pasted into a document without that list, the paragraph joins its own list.
+    e.selection = {{0, 0}, {0, 4}};
+    const auto fragment = e.copySelection();
+    Editor target;
+    target.replace(u"x\n");
+    target.insertFragment(fragment);
+    validateDocument(target.document);
+    EXPECT_EQ(target.document.paragraphs[1].listId, 0u);
+    EXPECT_EQ(target.document.paragraphs[1].list, ListKind::Bullet);
+    // Enter on an empty list item leaves the list entirely.
+    e.selection = {{0, 0}, {0, 4}};
+    e.replace(u"");
+    e.insertParagraphBreak();
+    EXPECT_EQ(e.document.paragraphs[0].list, ListKind::None);
+    EXPECT_EQ(e.document.paragraphs[0].listId, 0u);
+    EXPECT_EQ(e.document.paragraphs[0].listLevel, 0);
+}

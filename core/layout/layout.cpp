@@ -173,7 +173,8 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
                 .add(static_cast<std::uint64_t>(p.list)).add(static_cast<std::uint64_t>(p.alignment))
                 .add(p.indentLeft).add(p.indentRight).add(p.indentFirstLine).add(p.spaceBefore)
                 .add(p.spaceAfter).add(p.lineSpacing).add(p.pageBreakBefore).add(p.keepWithNext)
-                .add(p.keepLines).add(p.widowControl).add(p.contextualSpacing);
+                .add(p.keepLines).add(p.widowControl).add(p.contextualSpacing).add(p.listId)
+                .add(static_cast<std::uint64_t>(p.listLevel));
             for (const auto &tab : p.tabs)
                 key.add(tab.position).add(static_cast<std::uint64_t>(tab.alignment))
                     .add(static_cast<std::uint64_t>(tab.leader));
@@ -194,12 +195,16 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
             local.id = p.id;
             local.contextual = p.contextualSpacing;
             // Paragraphs "of the same style" for contextual spacing: one style, one container.
-            Key group;
-            group.add(p.style).add(p.cell.has_value());
+            Key container;
+            container.add(p.cell.has_value());
             if (p.cell)
-                group.add(p.cell->tableId).add(static_cast<std::uint64_t>(p.cell->row))
+                container.add(p.cell->tableId).add(static_cast<std::uint64_t>(p.cell->row))
                     .add(static_cast<std::uint64_t>(p.cell->column));
-            local.group = group.value;
+            local.container = container.value;
+            local.group = Key{}.add(p.style).add(local.container).value;
+            local.list = p.list;
+            local.listId = p.listId;
+            local.listLevel = p.listLevel;
             local.sectionBreak = p.sectionBreak.has_value();
             local.cell = p.cell.has_value();
             changed.push_back(local);
@@ -247,6 +252,16 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
     auto spaceAfter = [&](std::size_t i) {
         return dropAfter[i] ? 0.0 : document.paragraphs[i].spaceAfter;
     };
+    // List labels depend only on the paragraphs before, never on pagination.
+    std::vector<std::u16string> labels(count);
+    if (std::any_of(locals_.begin(), locals_.end(),
+                    [](const Local &local) { return local.list != ListKind::None; })) {
+        ListNumbering numbering(document.lists);
+        for (std::size_t i = 0; i < count; ++i) {
+            const auto &local = locals_[i];
+            labels[i] = numbering.next(local.list, local.listId, local.listLevel, local.container);
+        }
+    }
     std::vector<std::uint64_t> keys(count), ids(count);
     {
         std::vector<std::uint64_t> sectionKeys;
@@ -262,6 +277,8 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
             Key key;
             key.add(local.key).add(sectionKeys[sectionOf[i]]).add(dropBefore[i] != 0)
                 .add(dropAfter[i] != 0);
+            if (!labels[i].empty())
+                key.add(labels[i]);
             if (local.cell) {
                 const auto found = tables.find(local.tableId);
                 key.add(found == tables.end() ? std::uint64_t{0} : found->second);
@@ -395,17 +412,16 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
     auto columnLeft = [&] {
         return page.margin + static_cast<double>(column) * (columnWidth + page.columnGap);
     };
-    auto &listNumber = state.listNumber;
     std::unordered_set<std::uint64_t> liveIds;
     validateTables(document);
-    auto measure = [&](const Paragraph &paragraph, double width, std::size_t listNumber,
+    auto measure = [&](const Paragraph &paragraph, double width, const std::u16string &label,
                        std::size_t firstNote,
                        std::size_t firstEndnote = 1) -> const std::vector<Line> & {
         validateParagraphFormat(paragraph);
         liveIds.insert(paragraph.id);
         auto found = cache_.find(paragraph.id);
         if (found == cache_.end() || found->second.revision != paragraph.revision ||
-            found->second.width != width || found->second.number != listNumber ||
+            found->second.width != width || found->second.label != label ||
             found->second.firstNote != firstNote || found->second.firstEndnote != firstEndnote) {
             ++result.measuredParagraphs;
             std::vector<Line> lines;
@@ -413,10 +429,8 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
             const auto paragraphBoundaries = paragraph.boundaries();
             std::u16string markerText;
             ShapedLine marker;
-            if (paragraph.list != ListKind::None) {
-                markerText = paragraph.list == ListKind::Bullet
-                                 ? u"•"
-                                 : utf16(std::to_string(listNumber) + ".");
+            if (paragraph.list != ListKind::None && !label.empty()) {
+                markerText = label;
                 Paragraph label;
                 auto style =
                     paragraph.runs.empty() ? CharacterStyle{} : paragraph.runs.front().style;
@@ -540,7 +554,7 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
                 start = fit;
             } while (start < text.size());
             cache_.insert_or_assign(paragraph.id,
-                                    Cached{paragraph.revision, width, std::move(lines), listNumber,
+                                    Cached{paragraph.revision, width, std::move(lines), label,
                                            firstNote, firstEndnote});
             found = cache_.find(paragraph.id);
         }
@@ -561,7 +575,7 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
         block.text = text.revision;
         block.number = number;
         for (const auto &line :
-             measure(text, width, 0, endnote ? 1 : number, endnote ? number : 1)) {
+             measure(text, width, {}, endnote ? 1 : number, endnote ? number : 1)) {
             block.height += line.height;
             block.lines.push_back(line);
         }
@@ -657,7 +671,7 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
     };
     auto sameState = [](const State &a, const State &b) {
         if (a.y != b.y || a.column != b.column || a.sectionTop != b.sectionTop ||
-            a.sectionBottom != b.sectionBottom || a.listNumber != b.listNumber ||
+            a.sectionBottom != b.sectionBottom ||
             a.notesSoFar != b.notesSoFar || a.endnotes != b.endnotes ||
             a.notesHeight != b.notesHeight || a.pageNotes.size() != b.pageNotes.size())
             return false;
@@ -798,7 +812,7 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
                 std::size_t row, column, rows = 1, columns = 1;
                 std::vector<Line> lines;
                 double height = 4;
-                std::size_t number = 0, first = 0, last = 0;
+                std::size_t first = 0, last = 0;
                 bool seen = false;
             };
             std::map<std::pair<std::size_t, std::size_t>, Box> boxes;
@@ -827,14 +841,13 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
                 const double boxWidth = edges[column + box.columns] - edges[column];
                 if (!ghost)
                     box.height += spaceBefore(end);
-                box.number = p.list == ListKind::Decimal ? box.number + 1 : 0;
                 const auto firstNote = notesSoFar + 1;
                 for (auto &block : notesIn(p, firstNote, 0, p.text().size()))
                     groupNotes.push_back(std::move(block));
                 notesSoFar += countNotes(p);
                 const auto firstEndnote = endnoteIds.size() + 1;
                 collectEndnotes(p);
-                for (auto line : measure(p, boxWidth - 8, box.number, firstNote, firstEndnote)) {
+                for (auto line : measure(p, boxWidth - 8, labels[end], firstNote, firstEndnote)) {
                     line.paragraph = end;
                     line.x += 4 + edges[column];
                     line.markerX += 4 + edges[column];
@@ -905,10 +918,8 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
             for (auto k = index + 1; k < end; ++k)
                 checkpoints[k].valid = false;
             index = end - 1;
-            listNumber = 0;
             continue;
         }
-        listNumber = paragraph.list == ListKind::Decimal ? listNumber + 1 : 0;
         if (index && paragraph.pageBreakBefore)
             newPage();
         if ((y > page.margin || sectionBottom > page.margin) &&
@@ -918,7 +929,7 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
             double bodyHeight = 0, noteHeight = 0;
             double ownBody = 0, ownNotes = 0;
             bool chainHasLink = false;
-            auto number = listNumber, noteNumber = notesSoFar + 1;
+            auto noteNumber = notesSoFar + 1;
             auto endnoteNumber = endnoteIds.size() + 1;
             for (auto k = index; k < document.paragraphs.size(); ++k) {
                 const auto &p = document.paragraphs[k];
@@ -926,7 +937,7 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
                     k + 1 < document.paragraphs.size() &&
                     !document.paragraphs[k + 1].cell &&
                     !document.paragraphs[k + 1].pageBreakBefore;
-                const auto &lines = measure(p, columnWidth, number, noteNumber, endnoteNumber);
+                const auto &lines = measure(p, columnWidth, labels[k], noteNumber, endnoteNumber);
                 const bool whole = p.keepLines || follows;
                 const auto minimum = whole ? lines.size() :
                     p.widowControl ? std::min(lines.size(), std::size_t{lines.size() == 3 ? 3u : 2u}) : 1u;
@@ -947,7 +958,6 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
                 bodyHeight += spaceAfter(k);
                 noteNumber += countNotes(p);
                 endnoteNumber += countNotes(p, true);
-                number = document.paragraphs[k + 1].list == ListKind::Decimal ? number + 1 : 0;
             }
             const bool oversized = bodyHeight + noteHeight + (noteHeight > 0 ? noteGap : 0) >
                                    availableHeight;
@@ -977,7 +987,7 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
         notesSoFar += countNotes(paragraph);
         const auto firstEndnote = endnoteIds.size() + 1;
         collectEndnotes(paragraph);
-        const auto &paragraphLines = measure(paragraph, columnWidth, listNumber, firstNote, firstEndnote);
+        const auto &paragraphLines = measure(paragraph, columnWidth, labels[index], firstNote, firstEndnote);
         std::size_t segmentStart = 0;
         for (std::size_t n = 0; n < paragraphLines.size(); ++n) {
             auto line = paragraphLines[n];

@@ -423,6 +423,76 @@ void runProperties(pugi::xml_node properties, CharacterStyle &style,
             warn(warnings, "Different Latin and complex-script font sizes are approximated.");
     }
 }
+// A Word list level's format, label and start into `level`; `note` is told about each
+// option that is only approximated.
+void readListLevel(pugi::xml_node lvl, ListLevel &level,
+                   const std::function<void(const std::string &)> &note) {
+    static const std::map<std::string, NumberFormat> formats{
+        {"decimal", NumberFormat::Decimal},         {"lowerLetter", NumberFormat::LowerLetter},
+        {"upperLetter", NumberFormat::UpperLetter}, {"lowerRoman", NumberFormat::LowerRoman},
+        {"upperRoman", NumberFormat::UpperRoman},   {"bullet", NumberFormat::Bullet},
+        {"none", NumberFormat::None}};
+    std::string font;
+    if (auto fonts = child(child(lvl, "rPr"), "rFonts"))
+        font = attr(fonts, "ascii").empty() ? attr(fonts, "hAnsi") : attr(fonts, "ascii");
+    for (auto option : lvl.children()) {
+        if (option.type() != pugi::node_element)
+            continue;
+        const auto name = local(option.name());
+        if (name == "start")
+            level.start =
+                static_cast<std::uint32_t>(std::clamp(std::atoi(val(option).c_str()), 0, 32767));
+        else if (name == "numFmt") {
+            const auto found = formats.find(val(option));
+            level.format = found == formats.end() ? NumberFormat::Decimal : found->second;
+            if (found == formats.end())
+                note("number style " + val(option));
+        } else if (name == "lvlText") {
+            auto text = utf16(val(option));
+            if (text.size() > 32) {
+                text.resize(32);
+                note("long label");
+            }
+            for (auto &ch : text)
+                if (ch < 32)
+                    ch = u' ';
+            level.text = text;
+        } else if (name == "lvlJc") {
+            if (val(option) != "left" && val(option) != "start")
+                note("number alignment");
+        } else if (name == "suff") {
+            if (val(option) != "tab")
+                note("number spacing");
+        } else if (name == "pPr") {
+            for (auto item : option.children())
+                if (item.type() == pugi::node_element && !is(item, "ind") && !is(item, "tabs"))
+                    note(local(item.name()));
+        } else if (name == "rPr") {
+            for (auto item : option.children())
+                if (item.type() == pugi::node_element && !is(item, "rFonts"))
+                    note("number " + local(item.name()));
+        } else if (name != "pStyle")
+            note(name);
+    }
+    if (level.format != NumberFormat::Bullet)
+        return;
+    // Symbol and Wingdings bullets are private-use characters; show their Unicode look.
+    static const std::map<char16_t, char16_t> symbols{
+        {0xf0b7, 0x2022}, {0x00b7, 0x2022}, {0xf0a7, 0x25aa}, {0xf0d8, 0x27a2},
+        {0xf076, 0x2756}, {0xf0fc, 0x2713}, {0xf0a8, 0x25a1}, {0xf06e, 0x25a0},
+        {0xf071, 0x2751}, {0xf0e0, 0x27a2}};
+    for (auto &ch : level.text) {
+        if (const auto found = symbols.find(ch);
+            found != symbols.end() && (ch >= 0xf000 || font == "Symbol"))
+            ch = found->second;
+        else if (ch >= 0xf000 && ch <= 0xf0ff) {
+            ch = 0x2022;
+            note("bullet symbol");
+        }
+    }
+    if (level.text.empty())
+        level.text = u"•";
+}
 // Word's w:ind in Word's terms (left edge, first-line offset, right edge; points). List
 // paragraphs are converted to Wordforge's list geometry once the paragraph is complete.
 void readIndent(pugi::xml_node node, ParagraphFormat &paragraph,
@@ -1293,8 +1363,16 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             warn(warnings, "A referenced document style is missing; local defaults are used.");
         seen.erase(id);
     };
-    std::map<std::string, ListKind> numbering;
-    std::map<std::string, bool> approximateNumbering;
+    // Word's numbering instances (w:num) by numId: each level's format, label and start,
+    // with the level options Wordforge only approximates. A ListDefinition is made for an
+    // instance once a paragraph uses it.
+    struct WordList {
+        std::array<ListLevel, listLevels> levels;
+        std::array<bool, listLevels> defined{};
+        std::vector<std::string> approximated;
+    };
+    std::map<std::string, WordList> numbering;
+    std::map<std::string, std::uint64_t> numberingLists; // numId -> ListDefinition id
     // Each list level's w:ind by numId then ilvl (copies kept in `levelIndentStore`).
     pugi::xml_document levelIndentStore;
     std::map<std::string, std::map<std::string, pugi::xml_node>> levelIndents;
@@ -1303,49 +1381,79 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         if (!parts.contains(numberingPart))
             throw std::runtime_error("Missing DOCX numbering part");
         auto definitions = xml(parts.at(numberingPart));
-        std::map<std::string, ListKind> abstracts;
-        std::map<std::string, bool> approximate;
+        std::map<std::string, WordList> abstracts;
         std::map<std::string, std::map<std::string, pugi::xml_node>> abstractIndents;
         // Copies keep the numbering part's namespace declarations.
         auto indentHolder = levelIndentStore.append_child(definitions.document_element().name());
         for (auto attribute : definitions.document_element().attributes())
             if (std::string_view(attribute.name()).starts_with("xmlns"))
                 indentHolder.append_attribute(attribute.name()) = attribute.value();
+        auto readLevels = [](pugi::xml_node owner, WordList &list) {
+            for (auto lvl : owner.children()) {
+                if (!is(lvl, "lvl"))
+                    continue;
+                const auto at = std::atoi(attr(lvl, "ilvl").c_str());
+                if (at < 0 || at >= static_cast<int>(listLevels))
+                    continue;
+                list.defined[at] = true;
+                list.approximated.erase(
+                    std::remove_if(list.approximated.begin(), list.approximated.end(),
+                                   [&](const std::string &note) {
+                                       return note.starts_with(std::to_string(at) + ":");
+                                   }),
+                    list.approximated.end());
+                auto note = [&](const std::string &option) {
+                    list.approximated.push_back(std::to_string(at) + ":" + option);
+                };
+                readListLevel(lvl, list.levels[at], note);
+            }
+        };
         for (auto node : definitions.document_element().children())
             if (is(node, "abstractNum")) {
-                auto level = child(node, "lvl");
-                auto format = val(child(level, "numFmt"));
-                abstracts[attr(node, "abstractNumId")] = format == "bullet"    ? ListKind::Bullet
-                                                         : format == "decimal" ? ListKind::Decimal
-                                                                               : ListKind::None;
-                const auto expectedLabel = format == "bullet" ? "•" : "%1.";
-                // Level indents are kept; other level paragraph options are not.
-                bool otherOptions = false;
-                for (auto option : child(level, "pPr").children())
-                    if (option.type() == pugi::node_element && !is(option, "ind") &&
-                        !is(option, "tabs"))
-                        otherOptions = true;
-                approximate[attr(node, "abstractNumId")] =
-                    val(child(level, "start")) != "1" ||
-                    val(child(level, "lvlText")) != expectedLabel || otherOptions ||
-                    bool(child(level, "rPr"));
+                const auto id = attr(node, "abstractNumId");
+                auto &list = abstracts[id];
+                for (std::size_t n = 0; n < listLevels; ++n)
+                    list.levels[n] = builtinListLevel(ListKind::Decimal, n);
+                readLevels(node, list);
+                for (auto option : node.children())
+                    if (option.type() == pugi::node_element && !is(option, "lvl") &&
+                        !is(option, "nsid") && !is(option, "multiLevelType") &&
+                        !is(option, "tmpl") && !is(option, "name"))
+                        list.approximated.push_back("-:" + local(option.name()));
                 for (auto lvl : node.children())
                     if (is(lvl, "lvl"))
                         if (auto ind = child(child(lvl, "pPr"), "ind"))
-                            abstractIndents[attr(node, "abstractNumId")][attr(lvl, "ilvl")] =
-                                indentHolder.append_copy(ind);
+                            abstractIndents[id][attr(lvl, "ilvl")] = indentHolder.append_copy(ind);
             }
         for (auto node : definitions.document_element().children())
             if (is(node, "num")) {
                 const auto id = attr(node, "numId");
                 const auto abstract = val(child(node, "abstractNumId"));
-                numbering[id] = abstracts[abstract];
+                auto list = abstracts[abstract];
+                // Level overrides: a new start, or a whole new level.
+                for (auto override : node.children()) {
+                    if (!is(override, "lvlOverride"))
+                        continue;
+                    const auto at = std::atoi(attr(override, "ilvl").c_str());
+                    if (at < 0 || at >= static_cast<int>(listLevels))
+                        continue;
+                    if (auto start = child(override, "startOverride"))
+                        list.levels[at].start =
+                            static_cast<std::uint32_t>(std::clamp(std::atoi(val(start).c_str()), 0, 32767));
+                    if (auto lvl = child(override, "lvl")) {
+                        pugi::xml_document holder;
+                        auto wrapper = holder.append_child("w:abstractNum");
+                        auto copy = wrapper.append_copy(lvl);
+                        copy.attribute("w:ilvl")
+                            ? copy.attribute("w:ilvl").set_value(std::to_string(at).c_str())
+                            : copy.append_attribute("w:ilvl").set_value(std::to_string(at).c_str());
+                        readLevels(wrapper, list);
+                    }
+                }
+                numbering[id] = std::move(list);
                 levelIndents[id] = abstractIndents[abstract];
-                approximateNumbering[id] =
-                    approximate[abstract] || bool(child(node, "lvlOverride"));
             }
     }
-    std::string previousNum;
     // Custom paragraph styles become Wordforge styles: each records what differs from the
     // style it is based on, so its paragraphs resolve to exactly what Word shows.
     auto styleNameTaken = [&](const std::string &candidate) {
@@ -1685,20 +1793,37 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             }
         if (hasNumbering) {
             const auto &id = numberId;
-            if (id != "0") {
-                paragraph.list = numbering[id];
-                if (paragraph.list == ListKind::None)
-                    warn(warnings, "An unsupported list format was omitted.");
-                if (approximateNumbering[id])
-                        warn(warnings,
-                             "Custom list labels, starts, marker styles or indentation are "
-                                   "approximated.");
-                if (!previousNum.empty() && previousNum != id)
-                    warn(warnings, "Adjacent list restarts may be renumbered.");
-            }
             const auto &level = numberLevel;
-            if (!level.empty() && level != "0")
-                warn(warnings, "Nested lists are shown at a single level.");
+            const auto at = static_cast<std::size_t>(
+                std::clamp(level.empty() ? 0 : std::atoi(level.c_str()), 0,
+                           static_cast<int>(listLevels) - 1));
+            paragraph.list = ListKind::None;
+            paragraph.listId = 0;
+            paragraph.listLevel = 0;
+            if (id != "0") {
+                const auto found = numbering.find(id);
+                if (found == numbering.end() || !found->second.defined[at])
+                    warn(warnings, "An unsupported list format was omitted.");
+                else {
+                    const auto &list = found->second;
+                    auto &listId = numberingLists[id];
+                    if (!listId) {
+                        if (document.lists.size() >= 10000)
+                            throw std::runtime_error("Too many DOCX lists");
+                        listId = document.allocateId();
+                        document.lists.push_back({listId, list.levels});
+                    }
+                    paragraph.listId = listId;
+                    paragraph.listLevel = static_cast<std::uint8_t>(at);
+                    paragraph.list = list.levels[at].format == NumberFormat::Bullet
+                                         ? ListKind::Bullet
+                                         : ListKind::Decimal;
+                    for (const auto &note : list.approximated)
+                        if (note.starts_with("-:") || note.starts_with(std::to_string(at) + ":"))
+                            warn(warnings, "Some list options are approximated: " +
+                                               note.substr(note.find(':') + 1));
+                }
+            }
             // Word: the paragraph's own indent, else its list level's, else its style's.
             if (paragraph.list != ListKind::None && !child(properties, "ind")) {
                 const auto &levels = levelIndents[id];
@@ -1706,9 +1831,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                         found != levels.end())
                     readIndent(found->second, paragraph, warnings);
             }
-            previousNum = id;
-        } else
-            previousNum.clear();
+        }
         if (paragraph.list != ListKind::None) {
             // Word puts the number at left + firstLine and the text at left; Wordforge puts
             // the number at indentLeft + indentFirstLine and the text 18 pt after indentLeft.
@@ -2757,21 +2880,48 @@ std::string serializeDocx(const Document &document) {
     pugi::xml_document numbers;
     auto numRoot = numbers.append_child("w:numbering");
     numRoot.append_attribute("xmlns:w") = wordNs;
+    // Abstract lists 0 and 1 are Wordforge's own bullets and numbers; then one per list
+    // definition, each with a single instance (numId 1, 2...) so its paragraphs are
+    // numbered together as they are here.
+    auto writeLevels = [&](pugi::xml_node abstract, auto levelAt) {
+        static const char *names[] = {"decimal",    "lowerLetter", "upperLetter", "lowerRoman",
+                                      "upperRoman", "bullet",      "none"};
+        property(abstract, "multiLevelType", std::string("hybridMultilevel"));
+        for (std::size_t n = 0; n < listLevels; ++n) {
+            const ListLevel value = levelAt(n);
+            auto level = element(abstract, "lvl");
+            set(level, "ilvl", static_cast<double>(n));
+            property(level, "start", value.start);
+            property(level, "numFmt", std::string(names[static_cast<int>(value.format)]));
+            property(level, "lvlText", utf8(value.text));
+            property(level, "lvlJc", std::string("left"));
+            auto indent = element(element(level, "pPr"), "ind");
+            set(indent, "left", 360.0 * static_cast<double>(n + 1));
+            set(indent, "hanging", 360);
+        }
+    };
     for (int kind = 0; kind < 2; ++kind) {
         auto abstract = element(numRoot, "abstractNum");
         set(abstract, "abstractNumId", kind);
-        auto level = element(abstract, "lvl");
-        set(level, "ilvl", 0);
-        property(level, "start", 1);
-        property(level, "numFmt", std::string(kind ? "decimal" : "bullet"));
-        property(level, "lvlText", std::string(kind ? "%1." : "•"));
-        property(level, "lvlJc", std::string("left"));
-        auto indent = element(element(level, "pPr"), "ind");
-        set(indent, "left", 360);
-        set(indent, "hanging", 360);
+        writeLevels(abstract, [kind](std::size_t n) {
+            return builtinListLevel(kind ? ListKind::Decimal : ListKind::Bullet, n);
+        });
     }
-    ListKind previous = ListKind::None;
-    int numId = 0;
+    std::map<std::uint64_t, int> listNums; // ListDefinition id -> numId
+    for (std::size_t k = 0; k < document.lists.size(); ++k) {
+        auto abstract = element(numRoot, "abstractNum");
+        set(abstract, "abstractNumId", static_cast<double>(k + 2));
+        const auto &definition = document.lists[k];
+        writeLevels(abstract, [&](std::size_t n) { return definition.levels[n]; });
+        listNums[definition.id] = static_cast<int>(k + 1);
+    }
+    std::vector<std::pair<int, int>> listInstances; // numId, abstractNumId (written last)
+    for (std::size_t k = 0; k < document.lists.size(); ++k)
+        listInstances.emplace_back(static_cast<int>(k + 1), static_cast<int>(k + 2));
+    int numId = static_cast<int>(document.lists.size());
+    // Wordforge's own lists restart outside a list and in each table cell; until then
+    // each kind continues its current instance.
+    std::array<int, 2> ownNum{};
     std::map<std::uint64_t, const Table *> tables;
     for (const auto &table : document.tables)
         tables.emplace(table.id, &table);
@@ -2966,7 +3116,7 @@ std::string serializeDocx(const Document &document) {
                     else
                         element(cellNode, "p"); // Word requires a paragraph in every cell
                 }
-                previous = ListKind::None;
+                ownNum = {};
             }
             if (!anchor) {
                 // Content typed into a covered cell is shown in, and saved to, the merged cell.
@@ -2977,7 +3127,7 @@ std::string serializeDocx(const Document &document) {
             } else
                 parent = cellNode;
         } else if (previousCell) {
-            previous = ListKind::None;
+            ownNum = {};
         }
         previousCell = paragraph.cell;
         auto p = element(parent, "p");
@@ -2994,17 +3144,22 @@ std::string serializeDocx(const Document &document) {
         if (paragraph.pageBreakBefore)
             element(ppr, "pageBreakBefore");
         if (paragraph.list != ListKind::None) {
-            if (paragraph.list != previous) {
-                ++numId;
-                auto num = element(numRoot, "num");
-                set(num, "numId", numId);
-                property(num, "abstractNumId", paragraph.list == ListKind::Bullet ? 0 : 1);
+            int instance = 0;
+            if (const auto found = listNums.find(paragraph.listId); found != listNums.end())
+                instance = found->second;
+            else {
+                auto &own = ownNum[paragraph.list == ListKind::Bullet ? 0 : 1];
+                if (!own) {
+                    own = ++numId;
+                    listInstances.emplace_back(own, paragraph.list == ListKind::Bullet ? 0 : 1);
+                }
+                instance = own;
             }
             auto num = element(ppr, "numPr");
-            property(num, "ilvl", 0);
-            property(num, "numId", numId);
-        }
-        previous = paragraph.list;
+            property(num, "ilvl", paragraph.listLevel);
+            property(num, "numId", instance);
+        } else
+            ownNum = {};
         auto spacing = element(ppr, "spacing");
         set(spacing, "before", paragraph.spaceBefore * 20);
         set(spacing, "after", paragraph.spaceAfter * 20);
@@ -3333,6 +3488,13 @@ std::string serializeDocx(const Document &document) {
             set(shading, "val", std::string("clear"));
             set(shading, "fill", hex(*c.highlight));
         }
+    }
+    // List instances follow every abstract list, as the schema requires.
+    std::sort(listInstances.begin(), listInstances.end());
+    for (const auto &[instance, abstract] : listInstances) {
+        auto num = element(numRoot, "num");
+        set(num, "numId", instance);
+        property(num, "abstractNumId", abstract);
     }
     // Properties kept from the imported styles go back into the styles they came from.
     if (document.preserved)
