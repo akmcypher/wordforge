@@ -20,6 +20,8 @@ struct CharacterStyle {
     double size = 12;
     bool bold = false, italic = false, underline = false;
     bool strike = false;
+    // Points added after each character (Word's character spacing); negative condenses.
+    double spacing = 0;
     std::uint32_t color = 0xff202631;
     std::uint32_t highlight = 0;
     ThemeColor theme; // the Word theme colour `color` came from, if any
@@ -40,6 +42,9 @@ struct ParagraphFormat {
     double indentFirstLine = 0, indentRight = 0;
     bool pageBreakBefore = false;
     bool keepWithNext = false, keepLines = false, widowControl = false;
+    // Word's "Don't add space between paragraphs of the same style": the space before is
+    // dropped after a paragraph of the same style, the space after before one.
+    bool contextualSpacing = false;
     bool operator==(const ParagraphFormat &) const = default;
 };
 void validateParagraphFormat(const ParagraphFormat &);

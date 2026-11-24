@@ -566,3 +566,34 @@ TEST(CharacterStyles, WfgSevenPersistsAndOlderVersionsAreKept) {
     e.deleteStyle("Label");
     EXPECT_EQ(serializeNative(e.document).find("version=\"7\""), std::string::npos);
 }
+TEST(Spacing, NativeKeepsContextualAndCharacterSpacingInWfg18) {
+    EXPECT_EQ(serializeNative(Document{}).find("version=\"18\""), std::string::npos);
+    Editor e;
+    e.replace(u"ab");
+    e.selection = {{0, 0}, {0, 2}};
+    e.format([](auto &s) { s.spacing = 1.5; });
+    e.formatParagraph([](auto &p) { p.contextualSpacing = true; });
+    const auto bytes = serializeNative(e.document);
+    ASSERT_NE(bytes.find("version=\"18\""), std::string::npos);
+    const auto restored = parseNative(bytes);
+    EXPECT_TRUE(restored.paragraphs[0].contextualSpacing);
+    EXPECT_NE(restored.paragraphs[0].direct & ContextualSpacingField, 0);
+    EXPECT_DOUBLE_EQ(restored.paragraphs[0].runs[0].style.spacing, 1.5);
+    EXPECT_NE(restored.paragraphs[0].runs[0].direct & SpacingField, 0);
+    auto old = bytes;
+    old.replace(old.find("version=\"18\""), 12, "version=\"17\"");
+    EXPECT_THROW(parseNative(old), std::runtime_error);
+    // Through styles.
+    Editor styled;
+    styled.document.styles.find("Normal")->paragraph.contextualSpacing = true;
+    styled.document.styles.find("Normal")->character.spacing = -0.5;
+    styled.applyStyle("Normal");
+    const auto again = parseNative(serializeNative(styled.document));
+    EXPECT_TRUE(resolveStyle(again.styles, "Normal").paragraph.contextualSpacing);
+    EXPECT_DOUBLE_EQ(resolveStyle(again.styles, "Normal").character.spacing, -0.5);
+    EXPECT_TRUE(again.paragraphs[0].contextualSpacing);
+    EXPECT_EQ(again.paragraphs[0].direct, 0);
+    // Out of range.
+    e.document.paragraphs.edit(0).runs[0].style.spacing = 2000;
+    EXPECT_THROW(validateDocument(e.document), std::invalid_argument);
+}

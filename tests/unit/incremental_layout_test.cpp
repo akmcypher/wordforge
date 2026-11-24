@@ -211,6 +211,34 @@ TEST(IncrementalLayout, KeepsWidowControlListsAndHeadingsMatchFullLayout) {
             e.replace(u"words added to change how this paragraph and its neighbours paginate ");
         });
 }
+TEST(IncrementalLayout, ContextualAndCharacterSpacingMatchFullLayout) {
+    Session s(longDocument(150));
+    s.edit([](Editor &e) {
+        e.selection = {{0, 0}, {e.document.paragraphs.size() - 1, 0}};
+        e.formatParagraph([](ParagraphFormat &p) {
+            p.contextualSpacing = true;
+            p.spaceBefore = 12;
+            p.spaceAfter = 18;
+        });
+    });
+    for (std::size_t at = 3; at < 145; at += 17)
+        s.edit([&](Editor &e) {
+            caret(e, at);
+            e.applyPreset(ParagraphPreset::Heading1);
+        });
+    s.edit([](Editor &e) {
+        caret(e, 20);
+        e.applyPreset(ParagraphPreset::Normal);
+    });
+    s.edit([](Editor &e) {
+        caret(e, 50);
+        e.formatParagraph([](ParagraphFormat &p) { p.contextualSpacing = false; });
+    });
+    s.edit([](Editor &e) {
+        e.selection = {{10, 0}, {12, 5}};
+        e.format([](CharacterStyle &c) { c.spacing = 3; });
+    });
+}
 TEST(IncrementalLayout, FootnotesEndnotesAndHeadersMatchFullLayout) {
     Session s(longDocument(200));
     s.edit([](Editor &e) {

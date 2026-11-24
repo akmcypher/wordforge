@@ -307,7 +307,11 @@ ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::siz
             hb_buffer_set_script(buffer.get(),
                                  hb_script_from_string(uscript_getShortName(span.script), -1));
             hb_buffer_set_language(buffer.get(), hb_language_from_string("und", -1));
-            hb_shape(font.get(), buffer.get(), nullptr, 0);
+            // Letter-spaced text is not joined into ligatures, as in Word.
+            const hb_feature_t unjoined[] = {{HB_TAG('l', 'i', 'g', 'a'), 0, 0, ~0u},
+                                             {HB_TAG('c', 'l', 'i', 'g'), 0, 0, ~0u}};
+            const bool spaced = span.style.spacing != 0;
+            hb_shape(font.get(), buffer.get(), spaced ? unjoined : nullptr, spaced ? 2u : 0u);
             unsigned glyphCount = 0;
             auto info = hb_buffer_get_glyph_infos(buffer.get(), &glyphCount);
             auto positions = hb_buffer_get_glyph_positions(buffer.get(), nullptr);
@@ -328,11 +332,15 @@ ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::siz
                 shaped.width = 36 - std::fmod(result.width, 36);
             for (unsigned i = 0; !span.tab && i < glyphCount; ++i) {
                 const auto &p = positions[i];
+                // Character spacing follows each character: the last glyph of each cluster.
+                const bool last = i + 1 == glyphCount || info[i + 1].cluster != info[i].cluster;
+                const double advance =
+                    p.x_advance / 64.0 * metricScale + (last ? span.style.spacing : 0);
                 shaped.glyphs.push_back(
                     {static_cast<std::uint16_t>(info[i].codepoint), info[i].cluster,
                      shaped.width + p.x_offset / 64.0 * metricScale,
-                     -p.y_offset / 64.0 * metricScale + offset, p.x_advance / 64.0 * metricScale});
-                shaped.width += p.x_advance / 64.0 * metricScale;
+                     -p.y_offset / 64.0 * metricScale + offset, advance});
+                shaped.width += advance;
             }
             result.width += shaped.width;
             result.ascent = std::max(result.ascent, shaped.ascent);
@@ -377,7 +385,9 @@ ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::siz
             run.width = std::max(0.0, target - lineOrigin - x);
             if (chosen && chosen->leader == TabLeader::Dots) {
                 Paragraph dots;
-                dots.runs = {{u".", run.style}};
+                auto dotStyle = run.style;
+                dotStyle.spacing = 0;
+                dots.runs = {{u".", dotStyle}};
                 const auto dot = shape(dots, 0, 1);
                 if (!dot.runs.empty() && dot.width > 0) {
                     run.fontPath = dot.runs[0].fontPath;

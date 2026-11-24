@@ -230,7 +230,7 @@ std::string baselineName(TextBaseline value) {
 // ligatures, and outline levels only affect Word's navigation.
 const std::set<std::string_view> keptRun{
     "caps",      "smallCaps",       "dstrike",    "outline",   "shadow",  "emboss",
-    "imprint",   "snapToGrid",      "vanish",     "webHidden", "spacing", "w",
+    "imprint",   "snapToGrid",      "vanish",     "webHidden", "w",
     "kern",      "position",        "effect",     "bdr",       "fitText", "rtl",
     "cs",        "em",              "eastAsianLayout", "specVanish", "ligatures",
     "numForm",   "numSpacing",      "stylisticSets", "cntxtAlts"};
@@ -238,7 +238,7 @@ const std::set<std::string_view> keptParagraph{
     "suppressLineNumbers", "pBdr",        "shd",          "suppressAutoHyphens",
     "kinsoku",             "wordWrap",    "overflowPunct", "topLinePunct",
     "autoSpaceDE",         "autoSpaceDN", "bidi",         "adjustRightInd",
-    "snapToGrid",          "contextualSpacing", "mirrorIndents", "suppressOverlap",
+    "snapToGrid",          "mirrorIndents", "suppressOverlap",
     "textDirection",       "textAlignment", "outlineLvl"};
 // The schema order of run and paragraph properties (local names; Word 2010 run
 // extensions such as ligatures come last).
@@ -282,6 +282,13 @@ void mergeProperties(pugi::xml_node from, pugi::xml_node into, bool run) {
         else
             into.append_copy(node);
     }
+}
+// Adds w:<name> w:val=<value> to run or paragraph properties at its schema position.
+void orderedProperty(pugi::xml_node properties, const char *name, double value, bool run) {
+    pugi::xml_document scratch;
+    auto holder = scratch.append_child("w:holder");
+    set(element(holder, name), "val", value);
+    mergeProperties(holder, properties, run);
 }
 bool keptProperty(pugi::xml_node node, bool run) {
     return (run ? keptRun : keptParagraph).contains(local(node.name()));
@@ -331,7 +338,12 @@ void runProperties(pugi::xml_node properties, CharacterStyle &style,
             style.italic = toggle(style.italic, node);
         else if (is(node, "strike"))
             style.strike = toggle(style.strike, node);
-        else if (is(node, "vertAlign"))
+        else if (is(node, "spacing")) {
+            const double points = twips(val(node)) / 20;
+            style.spacing = std::clamp(points, -1584.0, 1584.0);
+            if (points != style.spacing)
+                warn(warnings, "Character spacing beyond 1584 points is limited.");
+        } else if (is(node, "vertAlign"))
             style.baseline = readBaseline(properties, warnings).value_or(style.baseline);
         else if (is(node, "sz"))
             style.size = halfPoints(val(node)) / 2;
@@ -462,6 +474,8 @@ void paragraphProperties(pugi::xml_node properties, Paragraph &paragraph,
             paragraph.keepLines = enabled(node);
         else if (is(node, "widowControl"))
             paragraph.widowControl = enabled(node);
+        else if (is(node, "contextualSpacing"))
+            paragraph.contextualSpacing = enabled(node);
         else if (is(node, "spacing")) {
             if (!attr(node, "before").empty())
                 paragraph.spaceBefore = twips(attr(node, "before")) / 20;
@@ -520,6 +534,8 @@ void readKeeps(pugi::xml_node ppr, ParagraphProperties &properties) {
         properties.keepLines = enabled(node);
     if (auto node = child(ppr, "widowControl"))
         properties.widowControl = enabled(node);
+    if (auto node = child(ppr, "contextualSpacing"))
+        properties.contextualSpacing = enabled(node);
 }
 std::string relationship(const opc::Parts &parts, const std::string &owner, const char *type,
                          const std::string &id = {}) {
@@ -899,6 +915,8 @@ void writeCharacter(pugi::xml_node rpr, const CharacterStyle &value, const Chara
         opaque(value.color);
         writeColor(rpr, value.color, theme, true);
     }
+    if (differs(&CharacterStyle::spacing))
+        property(rpr, "spacing", value.spacing * 20);
     if (differs(&CharacterStyle::baseline))
         property(rpr, "vertAlign", baselineName(value.baseline));
     if (differs(&CharacterStyle::size)) {
@@ -980,6 +998,8 @@ void writeParagraph(pugi::xml_node ppr, const ParagraphFormat &value, const Para
     if (differs(&ParagraphFormat::indentLeft) || differs(&ParagraphFormat::indentFirstLine) ||
         differs(&ParagraphFormat::indentRight))
         writeIndent(element(ppr, "ind"), value);
+    if (base ? value.contextualSpacing != base->contextualSpacing : value.contextualSpacing)
+        property(ppr, "contextualSpacing", value.contextualSpacing ? 1.0 : 0.0);
     if (differs(&ParagraphFormat::alignment))
         property(ppr, "jc", jcValue(value.alignment));
 }
@@ -1631,6 +1651,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             paragraph.direct |= KeepLinesField;
         if (child(properties, "widowControl"))
             paragraph.direct |= WidowControlField;
+        if (child(properties, "contextualSpacing"))
+            paragraph.direct |= ContextualSpacingField;
         if (cell) {
             paragraph.cell = cell;
             paragraph.pageBreakBefore = false; // not allowed inside a table
@@ -2991,6 +3013,8 @@ std::string serializeDocx(const Document &document) {
         writeTabs(ppr, paragraph.tabs,
                   resolveStyle(document.styles, paragraph.style).paragraph.tabs);
         writeIndent(element(ppr, "ind"), paragraph);
+        if (paragraph.direct & ContextualSpacingField)
+            property(ppr, "contextualSpacing", paragraph.contextualSpacing ? 1.0 : 0.0);
         property(ppr, "jc", jcValue(paragraph.alignment));
         if (const auto &end = paragraph.sectionBreak) {
             writeSection(element(ppr, "sectPr"), end->page, previousContinuous, true);
@@ -3113,6 +3137,8 @@ std::string serializeDocx(const Document &document) {
                     "DOCX export cannot preserve transparent text colors; save as .wfg");
             // Wordforge's default ink is Word's automatic text colour.
             writeColor(rpr, run.style.color, activeTheme(run.style.theme, run.style.color), true);
+            if (run.style.spacing || (run.direct & SpacingField))
+                property(rpr, "spacing", run.style.spacing * 20);
             if (!run.note() && (run.direct & BaselineField))
                 property(rpr, "vertAlign", baselineName(run.style.baseline));
             property(rpr, "sz", run.style.size * 2);
@@ -3252,6 +3278,9 @@ std::string serializeDocx(const Document &document) {
             property(ppr, "keepLines", *definition.paragraph.keepLines ? 1.0 : 0.0);
         if (definition.paragraph.widowControl)
             property(ppr, "widowControl", *definition.paragraph.widowControl ? 1.0 : 0.0);
+        if (definition.paragraph.contextualSpacing && !child(ppr, "contextualSpacing"))
+            orderedProperty(ppr, "contextualSpacing",
+                            *definition.paragraph.contextualSpacing ? 1.0 : 0.0, false);
         auto rpr = element(style, "rPr");
         writeCharacter(rpr, self.character, &base.character);
         if (definition.character.baseline && !child(rpr, "vertAlign"))
@@ -3286,6 +3315,8 @@ std::string serializeDocx(const Document &document) {
             writeColor(rpr, *c.color, c.theme ? activeTheme(*c.theme, *c.color) : std::nullopt,
                        false);
         }
+        if (c.spacing)
+            property(rpr, "spacing", *c.spacing * 20);
         if (c.baseline)
             property(rpr, "vertAlign", baselineName(*c.baseline));
         if (c.size)

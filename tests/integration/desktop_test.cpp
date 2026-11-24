@@ -109,6 +109,41 @@ class DesktopTest : public QObject {
             QVERIFY(restored.findChild<QCheckBox *>("panelWidowControl")->isChecked());
         }
     }
+    void contextualAndCharacterSpacingApplyFromPanelAndPersist() {
+        QTemporaryDir directory;
+        wf::MainWindow window;
+        auto *view = window.pageView();
+        view->insertText("First\nSecond");
+        auto *contextual = window.findChild<QCheckBox *>("panelContextualSpacing");
+        auto *spacing = window.findChild<QDoubleSpinBox *>("panelCharacterSpacing");
+        QVERIFY(contextual);
+        QVERIFY(spacing);
+        QVERIFY(!contextual->accessibleName().isEmpty());
+        QVERIFY(!spacing->accessibleName().isEmpty());
+        view->selectAll();
+        contextual->click();
+        spacing->setValue(1.5);
+        for (const auto &p : view->document().paragraphs) {
+            QVERIFY(p.contextualSpacing);
+            for (const auto &run : p.runs)
+                if (!run.text().empty())
+                    QCOMPARE(run.style.spacing, 1.5);
+        }
+        view->undo();
+        QCOMPARE(view->document().paragraphs[0].runs[0].style.spacing, 0.0);
+        view->redo();
+        QCOMPARE(view->document().paragraphs[0].runs[0].style.spacing, 1.5);
+        for (const auto &suffix : {QString("wfg"), QString("docx")}) {
+            const auto path = directory.filePath("spacing." + suffix);
+            window.saveFile(path);
+            wf::MainWindow restored;
+            restored.openFile(path);
+            const auto &p = restored.pageView()->document().paragraphs[0];
+            QVERIFY(p.contextualSpacing);
+            QCOMPARE(p.runs[0].style.spacing, 1.5);
+            QVERIFY(restored.findChild<QCheckBox *>("panelContextualSpacing")->isChecked());
+        }
+    }
     void paragraphKeepsApplyToSelectionUndoAndPersist() {
         QTemporaryDir directory;
         wf::MainWindow window;

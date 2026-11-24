@@ -100,7 +100,8 @@ class LayoutEngine {
     // composition (shared paragraphs are unchanged, so their entries carry over).
     struct Local {
         std::uint64_t key = 0, id = 0, tableId = 0;
-        bool sectionBreak = false, cell = false, notes = false;
+        std::uint64_t group = 0; // style and container, for contextual spacing
+        bool sectionBreak = false, cell = false, notes = false, contextual = false;
     };
     ParagraphList paragraphs_;
     std::vector<Local> locals_;

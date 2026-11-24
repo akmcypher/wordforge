@@ -14,6 +14,17 @@ per-feature support table.
 Both channels read WFG1–17. Previous release: 0.6.11 (df9bb14). Release notes:
 `docs/releases/v0.6.12.md`.
 
+## On main, not yet released (since 0.6.12)
+
+- **Word table styles** applied on import (PR #59).
+- **Word's style defaults kept** instead of warning on every DOCX (PR #61).
+- **Contextual spacing and character spacing:**
+  - Covered through styles, direct formatting, WFG18, DOCX both ways, layout and the
+    Format panel.
+  - 74 of 114 Word documents now open without the import-limitations dialog, up from 51.
+  - Evidence: `docs/evidence/2026-11-24-contextual-character-spacing.md`.
+  - WFG18 needs this newer reader.
+
 ## In 0.6.12 (since 0.6.11; performance only)
 
 - **Per-paragraph pagination keys and in-place checkpoints (PR #57):** a keystroke's
@@ -76,7 +87,7 @@ Both channels read WFG1–17. Previous release: 0.6.11 (df9bb14). Release notes:
 ## Not done
 
 - Background pagination, renderer and model copy costs per edit (rest of M2).
-- Numbering definitions, table styles/row splitting, theme fonts, typography controls.
+- Numbering definitions, row splitting, theme fonts, language and OpenType controls.
 - Fuller DOCX fidelity (formatting revisions, unknown body content is omitted with
   a warning, notes and comments are plain text).
 - Balanced columns and per-section headers.

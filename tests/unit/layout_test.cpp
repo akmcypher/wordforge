@@ -991,3 +991,53 @@ TEST(Layout, SectionsChangePageSizeAndColumnsFlowLeftToRight) {
     EXPECT_EQ(same.pageCount, 1u);
     EXPECT_GT(same.lines[1].baseline, same.lines[0].baseline);
 }
+TEST(Spacing, ContextualSpacingDropsSpaceOnlyNextToTheSameStyle) {
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    Editor e;
+    e.replace(u"one\ntwo\nthree");
+    e.selection = {{0, 0}, {2, 1}};
+    e.formatParagraph([](auto &p) {
+        p.spaceBefore = 10;
+        p.spaceAfter = 20;
+        p.lineSpacing = 1;
+    });
+    auto gap = [&](std::size_t a) {
+        engine.clear();
+        const auto layout = engine.compose(e.document);
+        const auto &first = layout.lines[a], &second = layout.lines[a + 1];
+        return (second.baseline - second.shaped.ascent) -
+               (first.baseline - first.shaped.ascent + first.height);
+    };
+    EXPECT_NEAR(gap(0), 30, 0.01);
+    e.selection = {{0, 0}, {0, 0}};
+    e.formatParagraph([](auto &p) { p.contextualSpacing = true; });
+    EXPECT_NEAR(gap(0), 10, 0.01); // only the first paragraph drops its space after
+    EXPECT_NEAR(gap(1), 30, 0.01);
+    e.selection = {{0, 0}, {2, 1}};
+    e.formatParagraph([](auto &p) { p.contextualSpacing = true; });
+    EXPECT_NEAR(gap(0), 0, 0.01);
+    EXPECT_NEAR(gap(1), 0, 0.01);
+    e.selection = {{2, 0}, {2, 0}};
+    e.applyStyle("Heading1");
+    EXPECT_NEAR(gap(0), 0, 0.01);
+    // Different styles keep their spacing (Heading 1 brings its own space before).
+    EXPECT_GT(e.document.paragraphs[2].spaceBefore, 0);
+    EXPECT_NEAR(gap(1), e.document.paragraphs[1].spaceAfter + e.document.paragraphs[2].spaceBefore, 0.01);
+}
+TEST(Spacing, CharacterSpacingFollowsEachCharacterWithoutLigatures) {
+    Shaper shaper(systemFontFiles());
+    Paragraph p;
+    p.runs = {{u"abc", {}}};
+    const auto plain = shaper.shape(p, 0, 3);
+    p.runs[0].style.spacing = 2;
+    const auto spaced = shaper.shape(p, 0, 3);
+    EXPECT_NEAR(spaced.width, plain.width + 6, 0.001);
+    ASSERT_EQ(spaced.runs[0].glyphs.size(), 3u);
+    EXPECT_NEAR(spaced.runs[0].glyphs[1].x, plain.runs[0].glyphs[1].x + 2, 0.001);
+    p.runs[0].style.spacing = -1;
+    EXPECT_NEAR(shaper.shape(p, 0, 3).width, plain.width - 3, 0.001);
+    p.runs = {{u"office", {}}};
+    p.runs[0].style.spacing = 1;
+    EXPECT_EQ(shaper.shape(p, 0, 6).runs[0].glyphs.size(), 6u);
+}

@@ -223,6 +223,18 @@ FormatPanel::FormatPanel(PageView *view, Commands &commands, QWidget *parent)
         textRow->addWidget(actionButton(id));
     textRow->addStretch();
     text->addRow(textRow);
+    auto *letterSpacing = new QDoubleSpinBox;
+    letterSpacing->setObjectName("panelCharacterSpacing");
+    letterSpacing->setAccessibleName("Character spacing");
+    letterSpacing->setToolTip("Space added after each character; negative values condense the text");
+    letterSpacing->setRange(-20, 100);
+    letterSpacing->setSingleStep(0.5);
+    letterSpacing->setDecimals(1);
+    letterSpacing->setSuffix(" pt");
+    text->addRow("Character spacing", letterSpacing);
+    connect(letterSpacing, &QDoubleSpinBox::valueChanged, this, [view](double value) {
+        view->format([value](auto &s) { s.spacing = value; });
+    });
 
     auto *paragraph = section("Paragraph");
     auto *spacing = new QComboBox;
@@ -282,6 +294,9 @@ FormatPanel::FormatPanel(PageView *view, Commands &commands, QWidget *parent)
 
     auto *widow = keep("panelWidowControl", "Widow/orphan control", &ParagraphFormat::widowControl);
     widow->setToolTip("Keep at least two paragraph lines together at page or column boundaries when possible");
+    auto *contextual = keep("panelContextualSpacing", "No space between same-style paragraphs",
+                            &ParagraphFormat::contextualSpacing);
+    contextual->setToolTip("Leave out this paragraph's space before and after next to paragraphs of the same style");
 
     auto *picture = section("Picture");
     auto *pictureSize = new QPushButton("Picture size…");
@@ -349,7 +364,7 @@ FormatPanel::FormatPanel(PageView *view, Commands &commands, QWidget *parent)
         const auto page = view->sectionPage();
         QSignalBlocker s(spacing), i(indent), fl(firstLine), ri(rightIndent), b(before),
             a(after), m(margins), o(orientation), pa(paper), c(columns),
-            kn(keepNext), kl(keepLines), wc(widow);
+            kn(keepNext), kl(keepLines), wc(widow), cs(contextual), ls(letterSpacing);
         spacing->setCurrentIndex(spacing->findData(p.lineSpacing));
         indent->setValue(p.indentLeft);
         firstLine->setValue(p.indentFirstLine);
@@ -359,6 +374,8 @@ FormatPanel::FormatPanel(PageView *view, Commands &commands, QWidget *parent)
         keepNext->setChecked(p.keepWithNext);
         keepLines->setChecked(p.keepLines);
         widow->setChecked(p.widowControl);
+        contextual->setChecked(p.contextualSpacing);
+        letterSpacing->setValue(view->typingStyle().spacing);
         const QList<double> marginValues{56.7, 72, 54, 36};
         int marginIndex = -1;
         for (int n = 0; n < marginValues.size(); ++n)

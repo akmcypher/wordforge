@@ -1903,18 +1903,72 @@ TEST(Docx, WarnsAboutKeptStyleOptionsThatAreNotShown) {
     auto &styles = parts["word/styles.xml"];
     styles.insert(styles.rfind("</w:styles>"),
                   "<w:style w:type='paragraph' w:styleId='ListParagraph'><w:name w:val='List "
-                  "Paragraph'/><w:pPr><w:contextualSpacing/></w:pPr><w:rPr><w:spacing "
-                  "w:val='10'/></w:rPr></w:style>");
+                  "Paragraph'/><w:pPr><w:mirrorIndents/></w:pPr><w:rPr><w:caps/>"
+                  "</w:rPr></w:style>");
     const auto imported = parseDocx(opc::write(parts));
     EXPECT_EQ(imported.warnings,
               (std::vector<std::string>{
-                  "Some paragraph options are kept but not shown: contextualSpacing",
-                  "Some character options are kept but not shown: spacing"}));
+                  "Some paragraph options are kept but not shown: mirrorIndents",
+                  "Some character options are kept but not shown: caps"}));
     const auto saved = opc::read(serializeDocx(imported.document));
-    EXPECT_NE(saved.at("word/styles.xml").find("<w:contextualSpacing"), std::string::npos);
+    EXPECT_NE(saved.at("word/styles.xml").find("<w:mirrorIndents"), std::string::npos);
     // A direct (not style) option is still dropped with the old warning.
     const auto direct = parseDocx(opc::write(wordDocument(
-        "<w:p><w:pPr><w:contextualSpacing/></w:pPr><w:r><w:t>x</w:t></w:r></w:p>")));
+        "<w:p><w:pPr><w:mirrorIndents/></w:pPr><w:r><w:t>x</w:t></w:r></w:p>")));
     EXPECT_EQ(direct.warnings, (std::vector<std::string>{
-                                   "Some paragraph options are not supported: contextualSpacing"}));
+                                   "Some paragraph options are not supported: mirrorIndents"}));
+}
+TEST(Docx, ReadsShowsAndSavesContextualAndCharacterSpacing) {
+    auto parts = wordDocument(
+        "<w:p><w:pPr><w:pStyle w:val='ListParagraph'/></w:pPr><w:r><w:t>one</w:t></w:r></w:p>"
+        "<w:p><w:pPr><w:pStyle w:val='ListParagraph'/></w:pPr><w:r><w:t>two</w:t></w:r></w:p>"
+        "<w:p><w:pPr><w:contextualSpacing w:val='0'/></w:pPr><w:r><w:rPr><w:spacing "
+        "w:val='-10'/></w:rPr><w:t>three</w:t></w:r></w:p>");
+    auto &styles = parts["word/styles.xml"];
+    styles.insert(styles.rfind("</w:styles>"),
+                  "<w:style w:type='paragraph' w:styleId='ListParagraph'><w:name w:val='List "
+                  "Paragraph'/><w:pPr><w:spacing w:after='200'/><w:ind w:left='720'/>"
+                  "<w:contextualSpacing/></w:pPr><w:rPr><w:spacing w:val='40'/></w:rPr></w:style>");
+    const auto imported = parseDocx(opc::write(parts));
+    EXPECT_TRUE(imported.warnings.empty()) << imported.warnings.front();
+    auto check = [](const Document &d) {
+        ASSERT_EQ(d.paragraphs.size(), 3u);
+        EXPECT_TRUE(d.paragraphs[0].contextualSpacing);
+        EXPECT_EQ(d.paragraphs[0].direct & ContextualSpacingField, 0);
+        EXPECT_DOUBLE_EQ(d.paragraphs[0].runs[0].style.spacing, 2);
+        EXPECT_FALSE(d.paragraphs[2].contextualSpacing);
+        EXPECT_NE(d.paragraphs[2].direct & ContextualSpacingField, 0);
+        EXPECT_DOUBLE_EQ(d.paragraphs[2].runs[0].style.spacing, -0.5);
+        const auto style = resolveStyle(d.styles, "ListParagraph");
+        EXPECT_TRUE(style.paragraph.contextualSpacing);
+        EXPECT_DOUBLE_EQ(style.character.spacing, 2);
+    };
+    check(imported.document);
+    const auto saved = opc::read(serializeDocx(imported.document));
+    pugi::xml_document body, out;
+    ASSERT_TRUE(body.load_string(saved.at("word/document.xml").c_str()));
+    ASSERT_TRUE(out.load_string(saved.at("word/styles.xml").c_str()));
+    // Schema order: w:contextualSpacing after w:ind, w:spacing (in a run) before w:sz.
+    auto before = [](pugi::xml_node parent, const char *first, const char *second) {
+        int a = -1, b = -1, n = 0;
+        for (auto node : parent.children()) {
+            if (std::string_view(node.name()) == first) a = n;
+            if (std::string_view(node.name()) == second) b = n;
+            ++n;
+        }
+        return a >= 0 && b >= 0 && a < b;
+    };
+    const auto ppr = body.select_node("//w:body/w:p[3]/w:pPr").node();
+    EXPECT_STREQ(ppr.child("w:contextualSpacing").attribute("w:val").value(), "0");
+    EXPECT_TRUE(before(ppr, "w:ind", "w:contextualSpacing"));
+    EXPECT_TRUE(before(ppr, "w:contextualSpacing", "w:jc"));
+    EXPECT_FALSE(body.select_node("//w:body/w:p[1]/w:pPr/w:contextualSpacing"));
+    const auto rpr = body.select_node("//w:body/w:p[3]/w:r/w:rPr").node();
+    EXPECT_STREQ(rpr.child("w:spacing").attribute("w:val").value(), "-10");
+    EXPECT_TRUE(before(rpr, "w:spacing", "w:sz"));
+    const auto list = out.select_node("//w:style[@w:styleId='ListParagraph']").node();
+    EXPECT_STREQ(list.child("w:pPr").child("w:contextualSpacing").attribute("w:val").value(), "1");
+    EXPECT_TRUE(before(list.child("w:pPr"), "w:ind", "w:contextualSpacing"));
+    EXPECT_STREQ(list.child("w:rPr").child("w:spacing").attribute("w:val").value(), "40");
+    check(parseDocx(opc::write(saved)).document);
 }

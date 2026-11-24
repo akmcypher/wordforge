@@ -13,7 +13,8 @@ Condensed on 2026-11-23. The full earlier notes are kept verbatim in
     stamps, copy-on-write paragraphs, incremental word count, O(1) page positions,
     and PR #57's per-paragraph pagination keys and in-place checkpoints
 
-  Native format WFG17; the reader supports WFG1–17.
+  Native format WFG18; the reader supports WFG1–18. WFG18, from the contextual and
+  character spacing PR, is not in a release yet.
 - Last published release: **v0.6.12** (tag at a13c8d2, 2026-11-24).
   - Windows installers and ZIPs are checksum-verified.
   - Snap stable is `0.6.12-preview`, amd64 rev 78 / arm64 rev 77, promoted by verified
@@ -47,7 +48,7 @@ Condensed on 2026-11-23. The full earlier notes are kept verbatim in
    - numbering definitions
    - table styles and row splitting
    - theme fonts
-   - character spacing, language and OpenType controls
+   - language and OpenType controls (character spacing is done)
    - DOCX fidelity
    - accessibility
 3. Rerun the Word fidelity harness for widow/orphan and superscript/subscript once Word

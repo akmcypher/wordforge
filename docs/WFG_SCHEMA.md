@@ -1,5 +1,14 @@
 # Native WFG schema and migration
 
+**WFG18 (contextual and character spacing)** adds a boolean paragraph/style attribute
+`contextual` (Word's contextual spacing) and a run/style attribute `spacing`: points added
+after each character, -1584 to 1584. Omitted paragraph and run values are false and 0,
+and omitted style values inherit. Paragraph mask bit 10 (0x7ff in total) and character
+mask bit 9 (0x3ff in total) record explicit overrides. WFG1–17 keep their previous masks
+and reject the new attributes and bits. WFG18 is written only for a paragraph or run
+using either option, a direct bit, or an optional style value. It includes everything in
+WFG17.
+
 **WFG17 (superscript/subscript)** adds character attribute `baseline`: integer 0
 (normal), 1 (superscript), 2 (subscript). It applies to text/image/note runs and both
 style kinds. Omitted run values are normal; absent style values inherit. Character

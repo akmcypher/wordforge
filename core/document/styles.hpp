@@ -38,6 +38,7 @@ struct CharacterProperties {
     std::optional<double> size;
     std::optional<bool> bold, italic, underline, strike;
     std::optional<std::uint32_t> color, highlight;
+    std::optional<double> spacing;
     std::optional<ThemeColor> theme; // only with `color`, and only while it matches
     bool operator==(const CharacterProperties &) const = default;
 };
@@ -55,7 +56,7 @@ struct ParagraphProperties {
     std::optional<ListKind> list;
     std::optional<double> indentLeft, spaceBefore, spaceAfter, lineSpacing;
     std::optional<double> indentFirstLine, indentRight;
-    std::optional<bool> keepWithNext, keepLines, widowControl;
+    std::optional<bool> keepWithNext, keepLines, widowControl, contextualSpacing;
     bool operator==(const ParagraphProperties &) const = default;
 };
 
@@ -115,7 +116,8 @@ enum CharacterField : std::uint16_t {
     ColorField = 1 << 6,
     HighlightField = 1 << 7,
     BaselineField = 1 << 8,
-    AllCharacterFields = 0x1ff,
+    SpacingField = 1 << 9,
+    AllCharacterFields = 0x3ff,
 };
 enum ParagraphField : std::uint16_t {
     AlignmentField = 1 << 0,
@@ -128,7 +130,8 @@ enum ParagraphField : std::uint16_t {
     KeepWithNextField = 1 << 7,
     KeepLinesField = 1 << 8,
     WidowControlField = 1 << 9,
-    AllParagraphFields = 0x3ff,
+    ContextualSpacingField = 1 << 10,
+    AllParagraphFields = 0x7ff,
 };
 using CharacterMask = std::uint16_t;
 using ParagraphMask = std::uint16_t;

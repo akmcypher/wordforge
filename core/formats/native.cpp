@@ -130,6 +130,8 @@ void writeStyle(pugi::xml_node root, const ParagraphStyle &style) {
         node.append_attribute("keepLines") = *p.keepLines;
     if (p.widowControl)
         node.append_attribute("widow") = *p.widowControl;
+    if (p.contextualSpacing)
+        node.append_attribute("contextual") = *p.contextualSpacing;
     writeCharacterProperties(node, style.character);
 }
 void writeCharacterProperties(pugi::xml_node node, const CharacterProperties &c) {
@@ -153,6 +155,8 @@ void writeCharacterProperties(pugi::xml_node node, const CharacterProperties &c)
         node.append_attribute("highlight") = static_cast<unsigned long long>(*c.highlight);
     if (c.baseline)
         node.append_attribute("baseline") = static_cast<unsigned>(*c.baseline);
+    if (c.spacing)
+        node.append_attribute("spacing") = *c.spacing;
 }
 template <typename T> std::optional<T> whole(pugi::xml_node node, const char *key, double high) {
     if (!node.attribute(key))
@@ -185,6 +189,7 @@ CharacterProperties readCharacterProperties(pugi::xml_node node) {
     character.highlight = whole<std::uint32_t>(node, "highlight", 4294967295.0);
     if (auto baseline = whole<unsigned>(node, "baseline", 2))
         character.baseline = static_cast<TextBaseline>(*baseline);
+    character.spacing = real(node, "spacing", -1584, 1584);
     if (node.attribute("theme")) {
         if (!character.color)
             throw std::runtime_error("A style theme colour needs a colour");
@@ -194,7 +199,9 @@ CharacterProperties readCharacterProperties(pugi::xml_node node) {
 }
 // `indented`: WFG11, which adds first-line and right indents and justified alignment.
 // `themed`: WFG12, which adds Word theme colours.
-ParagraphStyle readStyle(pugi::xml_node node, bool indented, bool themed, bool tabbed, bool kept, bool widowed, bool baseline) {
+// `spaced`: WFG18, which adds contextual spacing and character spacing.
+ParagraphStyle readStyle(pugi::xml_node node, bool indented, bool themed, bool tabbed, bool kept,
+                         bool widowed, bool baseline, bool spaced) {
     if (indented)
         attributes(node, {"id",
                           "name",
@@ -218,7 +225,8 @@ ParagraphStyle readStyle(pugi::xml_node node, bool indented, bool themed, bool t
                           "highlight",
                           themed ? "theme" : "id",
                           tabbed ? "tabs" : "id", kept ? "keepNext" : "id",
-                          kept ? "keepLines" : "id", widowed ? "widow" : "id", baseline ? "baseline" : "id"});
+                          kept ? "keepLines" : "id", widowed ? "widow" : "id", baseline ? "baseline" : "id",
+                          spaced ? "contextual" : "id", spaced ? "spacing" : "id"});
     else
         attributes(node, {"id", "name", "basedOn", "next", "align", "list", "indent", "before",
                           "after", "line", "family", "size", "bold", "italic", "underline",
@@ -242,14 +250,16 @@ ParagraphStyle readStyle(pugi::xml_node node, bool indented, bool themed, bool t
     style.paragraph.keepWithNext = flag(node, "keepNext");
     style.paragraph.keepLines = flag(node, "keepLines");
     style.paragraph.widowControl = flag(node, "widow");
+    style.paragraph.contextualSpacing = flag(node, "contextual");
     if (node.attribute("tabs"))
         style.paragraph.tabs = readTabs(node);
     style.character = readCharacterProperties(node);
     return style;
 }
-NamedCharacterStyle readCharacterStyle(pugi::xml_node node, bool themed, bool baseline) {
+NamedCharacterStyle readCharacterStyle(pugi::xml_node node, bool themed, bool baseline, bool spaced) {
     attributes(node, {"id", "name", "basedOn", "family", "size", "bold", "italic", "underline",
-                      "strike", "color", "highlight", themed ? "theme" : "id", baseline ? "baseline" : "id"});
+                      "strike", "color", "highlight", themed ? "theme" : "id", baseline ? "baseline" : "id",
+                      spaced ? "spacing" : "id"});
     for (auto child : node.children())
         if (!indentation(child))
             throw std::runtime_error("Unexpected style content");
@@ -360,9 +370,25 @@ std::string serializeNative(const Document &document) {
         [](const ParagraphStyle &s) { return s.character.baseline.has_value(); }) ||
         std::any_of(document.styles.characterStyles.begin(), document.styles.characterStyles.end(),
         [](const NamedCharacterStyle &s) { return s.character.baseline.has_value(); });
+    // WFG18 only for contextual or character spacing, so other files stay readable by 0.6.12.
+    const bool spaced =
+        std::any_of(document.paragraphs.begin(), document.paragraphs.end(),
+                    [](const Paragraph &p) {
+                        return p.contextualSpacing || (p.direct & ContextualSpacingField) ||
+                               std::any_of(p.runs.begin(), p.runs.end(), [](const Run &r) {
+                                   return r.style.spacing != 0 || (r.direct & SpacingField);
+                               });
+                    }) ||
+        std::any_of(document.styles.paragraphStyles.begin(), document.styles.paragraphStyles.end(),
+                    [](const ParagraphStyle &s) {
+                        return s.paragraph.contextualSpacing.has_value() ||
+                               s.character.spacing.has_value();
+                    }) ||
+        std::any_of(document.styles.characterStyles.begin(), document.styles.characterStyles.end(),
+                    [](const NamedCharacterStyle &s) { return s.character.spacing.has_value(); });
     const bool semantic = styled || banded || preserving || noted || reviewed || decorated ||
-                          themed || sectioned || tabbed || kept || widowed || baseline;
-    root.append_attribute("version") = baseline ? "17" : widowed ? "16" : kept                         ? "15"
+                          themed || sectioned || tabbed || kept || widowed || baseline || spaced;
+    root.append_attribute("version") = spaced ? "18" : baseline ? "17" : widowed ? "16" : kept                         ? "15"
                                        : tabbed                     ? "14"
                                        : sectioned                  ? "13"
                                        : themed                     ? "12"
@@ -543,6 +569,8 @@ std::string serializeNative(const Document &document) {
             paragraph.append_attribute("keepLines") = true;
         if (p.widowControl)
             paragraph.append_attribute("widow") = true;
+        if (p.contextualSpacing)
+            paragraph.append_attribute("contextual") = true;
         if (const auto &end = p.sectionBreak) {
             paragraph.append_attribute("section") = end->continuous ? "continuous" : "page";
             paragraph.append_attribute("sectionWidth") = end->page.width;
@@ -578,6 +606,8 @@ std::string serializeNative(const Document &document) {
                 run.append_attribute("strike") = true;
             if (r.style.baseline != TextBaseline::Normal)
                 run.append_attribute("baseline") = static_cast<unsigned>(r.style.baseline);
+            if (r.style.spacing)
+                run.append_attribute("spacing") = r.style.spacing;
             if (r.style.highlight)
                 run.append_attribute("highlight") =
                     static_cast<unsigned long long>(r.style.highlight);
@@ -645,11 +675,12 @@ Document parseNative(const std::string &input) {
         (version != "1" && version != "2" && version != "3" && version != "4" && version != "5" &&
          version != "6" && version != "7" && version != "8" && version != "9" && version != "10" &&
          version != "11" && version != "12" && version != "13" && version != "14" &&
-         version != "15" && version != "16" && version != "17"))
+         version != "15" && version != "16" && version != "17" && version != "18"))
         throw std::runtime_error("Unsupported native document version");
     // WFG7 is WFG6 plus character styles; WFG8 adds headers and footers.
     // WFG9 adds DOCX package parts kept from an imported file.
-    const bool v17 = version == "17";
+    const bool v18 = version == "18";
+    const bool v17 = version == "17" || v18;
     const bool v16 = version == "16" || v17;
     const bool v15 = version == "15" || v16;
     const bool v14 = version == "14" || v15;
@@ -800,11 +831,11 @@ Document parseNative(const std::string &input) {
             continue;
         }
         if (v6 && std::string_view(p.name()) == "style") {
-            document.styles.paragraphStyles.push_back(readStyle(p, v11, v12, v14, v15, v16, v17));
+            document.styles.paragraphStyles.push_back(readStyle(p, v11, v12, v14, v15, v16, v17, v18));
             continue;
         }
         if (v7 && std::string_view(p.name()) == "charStyle") {
-            document.styles.characterStyles.push_back(readCharacterStyle(p, v12, v17));
+            document.styles.characterStyles.push_back(readCharacterStyle(p, v12, v17, v18));
             continue;
         }
         if ((version == "5" || v6) && std::string_view(p.name()) == "table") {
@@ -917,7 +948,8 @@ Document parseNative(const std::string &input) {
                            v13 ? "sectionColumns" : "id",
                            v13 ? "sectionGap" : "id",
                            v14 ? "tabs" : "id", v15 ? "keepNext" : "id",
-                           v15 ? "keepLines" : "id", v16 ? "widow" : "id"});
+                           v15 ? "keepLines" : "id", v16 ? "widow" : "id",
+                           v18 ? "contextual" : "id"});
         else if (v6)
             attributes(p, {"align", "after", "list", "style", "direct", "indent", "before", "line",
                            "break", "id", "table", "row", "column"});
@@ -945,7 +977,7 @@ Document parseNative(const std::string &input) {
             if (p.attribute("style"))
                 paragraph.style = p.attribute("style").value();
             if (p.attribute("direct"))
-                paragraph.direct = mask(p, v16 ? AllParagraphFields : v15 ? 0x1ff : v14 ? 0x7f : 0x3f);
+                paragraph.direct = mask(p, v18 ? AllParagraphFields : v16 ? 0x3ff : v15 ? 0x1ff : v14 ? 0x7f : 0x3f);
         } else
             paragraph.style = presetStyleId(static_cast<ParagraphPreset>(static_cast<int>(preset)));
         if (p.attribute("tabs"))
@@ -959,6 +991,7 @@ Document parseNative(const std::string &input) {
         paragraph.keepWithNext = boolean(p, "keepNext");
         paragraph.keepLines = boolean(p, "keepLines");
         paragraph.widowControl = boolean(p, "widow");
+        paragraph.contextualSpacing = boolean(p, "contextual");
         if (p.attribute("section")) {
             const std::string_view kind = p.attribute("section").value();
             if (kind != "page" && kind != "continuous")
@@ -987,18 +1020,21 @@ Document parseNative(const std::string &input) {
             if (note)
                 attributes(r, {"id", "family", "size", "bold", "italic", "underline", "color",
                                "strike", "highlight", "direct", "cstyle", v10 ? "ins" : "id",
-                               v10 ? "del" : "id", v12 ? "theme" : "id", v12 ? "endnote" : "id", v17 ? "baseline" : "id"});
+                               v10 ? "del" : "id", v12 ? "theme" : "id", v12 ? "endnote" : "id", v17 ? "baseline" : "id",
+                               v18 ? "spacing" : "id"});
             else if (image)
                 attributes(r, {"resource", "width", "height", "description", "family", "size",
                                "bold", "italic", "underline", "color", "strike", "highlight",
                                v6 ? "direct" : "resource", v7 ? "cstyle" : "resource",
                                v10 ? "ins" : "resource", v10 ? "del" : "resource",
-                               v12 ? "theme" : "resource", v12 ? "link" : "resource", v17 ? "baseline" : "resource"});
+                               v12 ? "theme" : "resource", v12 ? "link" : "resource", v17 ? "baseline" : "resource",
+                               v18 ? "spacing" : "resource"});
             else
                 attributes(r, {"family", "size", "bold", "italic", "underline", "color", "strike",
                                "highlight", v6 ? "direct" : "family", v7 ? "cstyle" : "family",
                                v10 ? "ins" : "family", v10 ? "del" : "family",
-                               v12 ? "theme" : "family", v12 ? "link" : "family", v17 ? "baseline" : "family"});
+                               v12 ? "theme" : "family", v12 ? "link" : "family", v17 ? "baseline" : "family",
+                               v18 ? "spacing" : "family"});
             for (auto child : r.children())
                 if (image || note
                         ? !indentation(child)
@@ -1017,6 +1053,7 @@ Document parseNative(const std::string &input) {
             run.style.size = number(r, "size", 12, 1, 200);
             if (auto baseline = whole<unsigned>(r, "baseline", 2))
                 run.style.baseline = static_cast<TextBaseline>(*baseline);
+            run.style.spacing = number(r, "spacing", 0, -1584, 1584);
             run.style.bold = boolean(r, "bold");
             run.style.italic = boolean(r, "italic");
             run.style.underline = boolean(r, "underline");
@@ -1036,7 +1073,7 @@ Document parseNative(const std::string &input) {
                                       r.attribute("description").value()},
                                      run.style);
             if (v6 && r.attribute("direct"))
-                run.direct = mask(r, v17 ? AllCharacterFields : 0xff);
+                run.direct = mask(r, v18 ? AllCharacterFields : v17 ? 0x1ff : 0xff);
             if (r.attribute("link")) {
                 run.link = r.attribute("link").value();
                 validateLink(run.link);

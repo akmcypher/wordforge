@@ -32,6 +32,8 @@ void apply(CharacterStyle &target, const CharacterProperties &properties) {
         target.highlight = *properties.highlight;
     if (properties.baseline)
         target.baseline = *properties.baseline;
+    if (properties.spacing)
+        target.spacing = *properties.spacing;
 }
 
 void apply(ParagraphFormat &target, const ParagraphProperties &properties) {
@@ -59,6 +61,8 @@ void apply(ParagraphFormat &target, const ParagraphProperties &properties) {
         target.keepLines = *properties.keepLines;
     if (properties.widowControl)
         target.widowControl = *properties.widowControl;
+    if (properties.contextualSpacing)
+        target.contextualSpacing = *properties.contextualSpacing;
 }
 
 void checkText(const std::string &value, std::size_t limit, bool allowEmpty, const char *what) {
@@ -200,6 +204,7 @@ void fillUnset(CharacterProperties &target, const CharacterProperties &fallback)
     }
     fill(target.highlight, fallback.highlight);
     fill(target.baseline, fallback.baseline);
+    fill(target.spacing, fallback.spacing);
 }
 
 void fillUnset(ParagraphProperties &target, const ParagraphProperties &fallback) {
@@ -219,6 +224,7 @@ void fillUnset(ParagraphProperties &target, const ParagraphProperties &fallback)
     fill(target.keepWithNext, fallback.keepWithNext);
     fill(target.keepLines, fallback.keepLines);
     fill(target.widowControl, fallback.widowControl);
+    fill(target.contextualSpacing, fallback.contextualSpacing);
 }
 
 std::string uniqueStyleId(const StyleSheet &sheet, const std::string &name) {
@@ -337,6 +343,8 @@ CharacterMask differingFields(const CharacterStyle &a, const CharacterStyle &b) 
         mask |= HighlightField;
     if (a.baseline != b.baseline)
         mask |= BaselineField;
+    if (a.spacing != b.spacing)
+        mask |= SpacingField;
     return mask;
 }
 
@@ -363,6 +371,8 @@ ParagraphMask differingFields(const ParagraphFormat &a, const ParagraphFormat &b
         mask |= KeepLinesField;
     if (a.widowControl != b.widowControl)
         mask |= WidowControlField;
+    if (a.contextualSpacing != b.contextualSpacing)
+        mask |= ContextualSpacingField;
     return mask;
 }
 
@@ -387,6 +397,8 @@ void inheritFields(CharacterStyle &target, const CharacterStyle &source, Charact
         target.highlight = source.highlight;
     if (!(keep & BaselineField))
         target.baseline = source.baseline;
+    if (!(keep & SpacingField))
+        target.spacing = source.spacing;
 }
 
 void inheritFields(ParagraphFormat &target, const ParagraphFormat &source, ParagraphMask keep) {
@@ -413,6 +425,8 @@ void inheritFields(ParagraphFormat &target, const ParagraphFormat &source, Parag
         target.keepLines = source.keepLines;
     if (!(keep & WidowControlField))
         target.widowControl = source.widowControl;
+    if (!(keep & ContextualSpacingField))
+        target.contextualSpacing = source.contextualSpacing;
 }
 
 CharacterProperties propertiesFor(const CharacterStyle &base, const CharacterStyle &value) {
@@ -438,6 +452,8 @@ CharacterProperties propertiesFor(const CharacterStyle &base, const CharacterSty
         result.highlight = value.highlight;
     if (base.baseline != value.baseline)
         result.baseline = value.baseline;
+    if (base.spacing != value.spacing)
+        result.spacing = value.spacing;
     return result;
 }
 
@@ -467,6 +483,8 @@ ParagraphProperties propertiesFor(const ParagraphFormat &base, const ParagraphFo
         result.keepLines = value.keepLines;
     if (base.widowControl != value.widowControl)
         result.widowControl = value.widowControl;
+    if (base.contextualSpacing != value.contextualSpacing)
+        result.contextualSpacing = value.contextualSpacing;
     return result;
 }
 
