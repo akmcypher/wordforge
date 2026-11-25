@@ -8,13 +8,13 @@ per-feature support table.
 
 | Channel | Version | Source | Notes |
 |---|---|---|---|
-| GitHub release (Windows x64/ARM64) | 0.6.12 | a13c8d2 | Released 2026-11-24, checksums verified |
-| Snap stable (amd64 78 / arm64 77) | 0.6.12-preview | a13c8d2 | Promotion run 45263092624 |
+| GitHub release (Windows x64/ARM64) | 0.6.13 | 0baebd5 | Released 2026-11-24, checksums verified |
+| Snap stable (amd64 87 / arm64 86) | 0.6.13-preview | 0baebd5 | Promotion run 45589594999 |
 
-Both channels read WFG1–17. Previous release: 0.6.11 (df9bb14). Release notes:
-`docs/releases/v0.6.12.md`.
+Both channels read WFG1–18. Previous release: 0.6.12 (a13c8d2). Release notes:
+`docs/releases/v0.6.13.md`.
 
-## In 0.6.13 (since 0.6.12; prepared, not yet published)
+## In 0.6.13 (since 0.6.12)
 
 Release notes: `docs/releases/v0.6.13.md`. Version 0.6.13 / `0.6.13-preview`.
 

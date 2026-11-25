@@ -92,6 +92,10 @@ tables/images, broader desktop testing and recovery across upgrades remain open.
 
 ## Publication record
 
+* 2026-11-25 IST: stable updated to 0.6.13-preview, amd64 revision 87 / ARM64 86,
+  source 0baebd510a5501cf70ce4c937b9e46336a643280 (tag v0.6.13). Edge run 45430038003
+  passed strict-confinement checks. Promotion run 45589594999 verified both archives
+  before release and the public stable pointers afterward.
 * 2026-11-24 IST: Store listing updated through the Store API: title, summary and
   description from `snap.yaml.in` (the live summary had still been the 2026-11-15 one, as
   uploads don't overwrite a listing edited on the dashboard), and three current light-theme
