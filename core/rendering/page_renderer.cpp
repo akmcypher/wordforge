@@ -55,8 +55,10 @@ std::string pageKey(const Layout &layout, std::size_t page) {
         keyValue(key, cell.width);
         keyValue(key, cell.height);
         keyValue(key, cell.fill);
-        keyValue(key, cell.border.width);
-        keyValue(key, cell.border.color);
+        for (const auto &border : cell.borders) {
+            keyValue(key, border.width);
+            keyValue(key, border.color);
+        }
     }
     for (const auto *source : {&layout.lines, &layout.furniture})
     for (const auto &line : pageLines(*source, page)) {
@@ -194,15 +196,31 @@ std::size_t PageRenderer::synchronize(const Layout &layout) {
                 fill.setColor(cell.fill);
                 canvas->drawRect(SkRect::MakeXYWH(cell.x, cell.y, cell.width, cell.height), fill);
             }
+        // Each side on its own; a shared side is drawn alike by both cells. Lines reach past
+        // the corners by half their width so that sides meet like a rectangle's.
         for (const auto &cell : layout.cells)
-            if (cell.page == page && cell.border.width > 0) {
-                SkPaint border;
-                border.setAntiAlias(true);
-                border.setColor(cell.border.color);
-                border.setStyle(SkPaint::kStroke_Style);
-                border.setStrokeWidth(static_cast<float>(cell.border.width));
-                canvas->drawRect(SkRect::MakeXYWH(cell.x, cell.y, cell.width, cell.height), border);
-            }
+            if (cell.page == page)
+                for (int side = 0; side < 4; ++side) {
+                    const auto &line = cell.borders[side];
+                    if (line.width <= 0)
+                        continue;
+                    SkPaint border;
+                    border.setAntiAlias(true);
+                    border.setColor(line.color);
+                    border.setStyle(SkPaint::kStroke_Style);
+                    border.setStrokeWidth(static_cast<float>(line.width));
+                    border.setStrokeCap(SkPaint::kSquare_Cap);
+                    const auto left = static_cast<float>(cell.x),
+                               top = static_cast<float>(cell.y),
+                               right = static_cast<float>(cell.x + cell.width),
+                               bottom = static_cast<float>(cell.y + cell.height);
+                    switch (side) {
+                    case 0: canvas->drawLine(left, top, right, top, border); break;
+                    case 1: canvas->drawLine(right, top, right, bottom, border); break;
+                    case 2: canvas->drawLine(left, bottom, right, bottom, border); break;
+                    default: canvas->drawLine(left, top, left, bottom, border); break;
+                    }
+                }
         for (const auto &[notePage, noteY] : layout.noteSeparators)
             if (notePage == page) {
                 SkPaint rule;

@@ -1,4 +1,5 @@
 #include "core/formats/docx.hpp"
+#include "core/formats/native.hpp"
 #include "core/formats/zip_package.hpp"
 #include <algorithm>
 #include <filesystem>
@@ -419,7 +420,12 @@ TEST(Docx, RejectsBrokenPackagesAndReportsUnsupportedContent) {
                                  "main'><w:body><w:p><w:bookmarkStart w:id='1' "
                                  "w:name='chapter'/><w:r><w:t>kept</w:t></w:r><w:bookmarkEnd "
                                  "w:id='1'/></w:p></w:body></w:document>";
-    EXPECT_FALSE(parseDocx(opc::write(parts)).warnings.empty());
+    const auto bookmarked = parseDocx(opc::write(parts));
+    EXPECT_TRUE(bookmarked.warnings.empty());
+    ASSERT_EQ(bookmarked.document.bookmarks.size(), 1u);
+    EXPECT_EQ(bookmarked.document.bookmarks[0].name, "chapter");
+    ASSERT_TRUE(bookmarked.document.bookmarks[0].end);
+    EXPECT_EQ(bookmarked.document.bookmarks[0].end->offset, 4u);
 }
 TEST(Docx, InheritsDefaultTrueStylesAndNumberingWithCustomLabels) {
     auto parts = opc::read(serializeDocx(Document{}));
@@ -920,7 +926,10 @@ TEST(Docx, ImportsWordHeadersAndFootersWithComplexFields) {
             imported.warnings.begin(), imported.warnings.end(),
                            [&](const auto &warning) { return warning.find(text) != std::string::npos; });
     };
-    EXPECT_TRUE(warned("even-page"));
+    // Without Word's even-page switch in the settings, its even-page header isn't used.
+    EXPECT_FALSE(warned("even-page"));
+    EXPECT_FALSE(page.differentOddEven);
+    EXPECT_TRUE(page.evenHeader.empty());
     EXPECT_TRUE(warned("Pictures and tables in headers"));
     EXPECT_FALSE(warned("Section features"));
     EXPECT_NO_THROW(validateDocument(imported.document));
@@ -1119,7 +1128,9 @@ TEST(Docx, NamesDroppedPartsAndKeepsOnlyCompleteOnes) {
     const auto *settings = keptPart(imported.document, "word/settings.xml");
     ASSERT_NE(settings, nullptr);
     EXPECT_EQ(settings->data.find("footnotePr"), std::string::npos);
-    EXPECT_EQ(settings->data.find("evenAndOddHeaders"), std::string::npos);
+    // The even-page switch is kept, and rewritten on saving from the page settings.
+    EXPECT_NE(settings->data.find("evenAndOddHeaders"), std::string::npos);
+    EXPECT_TRUE(imported.document.page.differentOddEven);
     EXPECT_NE(settings->data.find("defaultTabStop"), std::string::npos);
     EXPECT_FALSE(keptPart(imported.document, "word/theme/theme1.xml"));
     std::string named;
@@ -1381,7 +1392,17 @@ TEST(Docx, TableBordersAndShadingBothWays) {
     const auto fromWord = parseDocx(opc::write(word));
     ASSERT_EQ(fromWord.document.tables.size(), 1u);
     const auto &table = fromWord.document.tables[0];
-    EXPECT_EQ(table.border, (TableBorder{1, 0xff000000}));
+    // Each side as Word draws it: the table's top line and inside lines, and the second
+    // cell's own top line. No sides are set elsewhere, so the table's default is none.
+    EXPECT_EQ(table.border.width, 0);
+    const TableBorder dashed{1, 0xff000000}, single{0.5, 0xff000000};
+    EXPECT_EQ(table.borderAt(0, 0, CellSide::Top), dashed);
+    EXPECT_EQ(table.borderAt(1, 0, CellSide::Top), dashed); // the merged cell's
+    EXPECT_EQ(table.borderAt(0, 1, CellSide::Top), single);
+    EXPECT_EQ(table.borderAt(0, 1, CellSide::Bottom), dashed);
+    EXPECT_EQ(table.borderAt(1, 1, CellSide::Top), dashed);
+    EXPECT_EQ(table.borderAt(1, 1, CellSide::Bottom).width, 0);
+    EXPECT_EQ(table.borderAt(0, 0, CellSide::Right).width, 0);
     ASSERT_EQ(table.shading.size(), 1u);
     EXPECT_EQ(table.shading[0], (CellShading{0, 0, 0xff00ff00}));
     auto warned = [&](const char *text) {
@@ -1390,7 +1411,7 @@ TEST(Docx, TableBordersAndShadingBothWays) {
                            [&](const auto &warning) { return warning.find(text) != std::string::npos; });
     };
     EXPECT_TRUE(warned("single lines"));
-    EXPECT_TRUE(warned("single cells"));
+    EXPECT_FALSE(warned("single cells"));
     EXPECT_FALSE(warned("shading"));
 }
 
@@ -2051,4 +2072,207 @@ TEST(Docx, WarnsOnlyForListOptionsThatAreApproximated) {
               (std::vector<std::string>{"Some list options are approximated: number style ordinal",
                                         "Some list options are approximated: number alignment",
                                         "Some list options are approximated: number spacing"}));
+}
+
+TEST(Bookmarks, WordRangesAndPlacesRoundTripWithWordNames) {
+    // A range inside one paragraph, a place, a range across paragraphs whose start and end
+    // sit between blocks, a repeated name and an unnamed start.
+    const auto imported = parseDocx(opc::write(wordDocument(
+        "<w:p><w:r><w:t xml:space='preserve'>The </w:t></w:r><w:bookmarkStart w:id='1' "
+        "w:name='_Toc1'/><w:r><w:t>heading</w:t></w:r><w:bookmarkEnd w:id='1'/>"
+        "<w:bookmarkStart w:id='2' w:name='_GoBack'/><w:bookmarkEnd w:id='2'/></w:p>"
+        "<w:bookmarkStart w:id='3' w:name='span'/>"
+        "<w:p><w:r><w:t>one</w:t></w:r></w:p><w:p><w:r><w:t>two</w:t></w:r></w:p>"
+        "<w:bookmarkEnd w:id='3'/>"
+        "<w:p><w:bookmarkStart w:id='4' w:name='span'/><w:r><w:t>x</w:t></w:r>"
+        "<w:bookmarkEnd w:id='4'/><w:bookmarkStart w:id='5'/><w:bookmarkEnd w:id='5'/></w:p>")));
+    const auto &document = imported.document;
+    ASSERT_EQ(document.bookmarks.size(), 3u);
+    auto position = [&](const Anchor &anchor) { return *document.resolve(anchor); };
+    EXPECT_EQ(document.bookmarks[0].name, "_Toc1");
+    EXPECT_EQ(position(document.bookmarks[0].anchor), (Position{0, 4}));
+    ASSERT_TRUE(document.bookmarks[0].end);
+    EXPECT_EQ(position(*document.bookmarks[0].end), (Position{0, 11}));
+    EXPECT_EQ(document.bookmarks[1].name, "_GoBack");
+    EXPECT_FALSE(document.bookmarks[1].end);
+    EXPECT_EQ(position(document.bookmarks[1].anchor), (Position{0, 11}));
+    EXPECT_EQ(document.bookmarks[2].name, "span");
+    EXPECT_EQ(position(document.bookmarks[2].anchor), (Position{1, 0}));
+    ASSERT_TRUE(document.bookmarks[2].end);
+    EXPECT_EQ(position(*document.bookmarks[2].end), (Position{2, 3}));
+    EXPECT_EQ(imported.warnings, (std::vector<std::string>{
+                                     "Bookmarks without a name or a place in the text were left out."}));
+
+    // Saved and read again: the same names, places and ranges.
+    const auto again = parseDocx(serializeDocx(document));
+    EXPECT_TRUE(again.warnings.empty());
+    ASSERT_EQ(again.document.bookmarks.size(), 3u);
+    for (std::size_t i = 0; i < 3; ++i) {
+        const auto &a = document.bookmarks[i], &b = again.document.bookmarks[i];
+        EXPECT_EQ(a.name, b.name);
+        EXPECT_EQ(position(a.anchor), *again.document.resolve(b.anchor));
+        ASSERT_EQ(a.end.has_value(), b.end.has_value());
+        if (a.end)
+            EXPECT_EQ(position(*a.end), *again.document.resolve(*b.end));
+    }
+
+    // Typing inside a range grows it; the range is kept in WFG19.
+    Editor editor;
+    editor.document = document;
+    editor.selection = {{0, 6}, {0, 6}};
+    editor.replace(u"--");
+    EXPECT_EQ(editor.document.resolve(*editor.document.bookmarks[0].end), (Position{0, 13}));
+    const auto native = serializeNative(editor.document);
+    EXPECT_NE(native.find("version=\"19\""), std::string::npos);
+    EXPECT_EQ(parseNative(native).bookmarks, editor.document.bookmarks);
+    // Going to a range selects it.
+    ASSERT_TRUE(editor.goToBookmark(editor.document.bookmarks[0].id));
+    EXPECT_EQ(editor.selection.anchor, (Position{0, 4}));
+    EXPECT_EQ(editor.selection.focus, (Position{0, 13}));
+}
+TEST(Bookmarks, NamesWordWouldRejectAreRenamedWithTheirLinks) {
+    Editor editor;
+    editor.replace(u"first\nsecond");
+    editor.addBookmark("my chapter");
+    editor.selection = {{0, 0}, {0, 0}};
+    editor.addBookmark("2nd");
+    editor.addBookmark("my_chapter");
+    // A link to the renamed bookmark follows it.
+    editor.selection = {{0, 0}, {0, 5}};
+    editor.setLink("#2nd");
+    const auto saved = serializeDocx(editor.document);
+    const auto parts = opc::read(saved);
+    const auto &xml = parts.at("word/document.xml");
+    EXPECT_NE(xml.find("w:name=\"my_chapter_2\""), std::string::npos);
+    EXPECT_NE(xml.find("w:name=\"B2nd\""), std::string::npos);
+    EXPECT_NE(xml.find("w:anchor=\"B2nd\""), std::string::npos);
+    const auto imported = parseDocx(saved);
+    ASSERT_EQ(imported.document.bookmarks.size(), 3u);
+    EXPECT_TRUE(imported.warnings.empty());
+    // Without ranges, the file keeps its earlier version.
+    EXPECT_EQ(serializeNative(editor.document).find("version=\"19\""), std::string::npos);
+}
+TEST(EvenPages, WordEvenPageHeadersAndTheSwitchRoundTrip) {
+    const std::string rels =
+        "<Relationship Id='rH' Type='http://schemas.openxmlformats.org/officeDocument/2006/"
+        "relationships/header' Target='header1.xml'/>"
+        "<Relationship Id='rE' Type='http://schemas.openxmlformats.org/officeDocument/2006/"
+        "relationships/header' Target='header2.xml'/>"
+        "<Relationship Id='rS' Type='http://schemas.openxmlformats.org/officeDocument/2006/"
+        "relationships/settings' Target='settings.xml'/>";
+    auto parts = wordDocument("<w:p><w:r><w:t>body</w:t></w:r></w:p><w:sectPr>"
+                              "<w:headerReference w:type='default' r:id='rH'/>"
+                              "<w:headerReference w:type='even' r:id='rE'/></w:sectPr>",
+                              rels);
+    const std::string ns =
+        " xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'";
+    parts["word/header1.xml"] = "<w:hdr" + ns + "><w:p><w:r><w:t>Odd</w:t></w:r></w:p></w:hdr>";
+    parts["word/header2.xml"] = "<w:hdr" + ns + "><w:p><w:r><w:t>Even</w:t></w:r></w:p></w:hdr>";
+    parts["word/settings.xml"] = "<w:settings" + ns +
+                                 "><w:zoom w:percent='100'/><w:evenAndOddHeaders/>"
+                                 "<w:defaultTabStop w:val='720'/></w:settings>";
+    auto &types = parts["[Content_Types].xml"];
+    types.insert(types.rfind("</Types>"),
+                 "<Override PartName='/word/settings.xml' ContentType='application/"
+                 "vnd.openxmlformats-officedocument.wordprocessingml.settings+xml'/>");
+    const auto imported = parseDocx(opc::write(parts));
+    EXPECT_TRUE(imported.warnings.empty());
+    const auto &page = imported.document.page;
+    EXPECT_TRUE(page.differentOddEven);
+    EXPECT_EQ(page.header.left, u"Odd");
+    EXPECT_EQ(page.evenHeader.left, u"Even");
+    EXPECT_TRUE(page.evenFooter.empty());
+    EXPECT_EQ(page.band(true, 0), &page.header);
+    EXPECT_EQ(page.band(true, 1), &page.evenHeader);
+    EXPECT_EQ(page.band(false, 1), &page.evenFooter);
+
+    auto saved = opc::read(serializeDocx(imported.document));
+    EXPECT_NE(saved.at("word/document.xml").find("w:type=\"even\""), std::string::npos);
+    EXPECT_NE(saved.at("word/settings.xml").find("evenAndOddHeaders"), std::string::npos);
+    const auto again = parseDocx(opc::write(saved));
+    EXPECT_EQ(again.document.page.evenHeader.left, u"Even");
+    EXPECT_TRUE(again.document.page.differentOddEven);
+
+    // Turning the switch off removes it from the kept settings.
+    Editor editor;
+    editor.document = imported.document;
+    auto off = editor.sectionPage();
+    off.differentOddEven = false;
+    editor.setPage(off);
+    saved = opc::read(serializeDocx(editor.document));
+    EXPECT_EQ(saved.at("word/settings.xml").find("evenAndOddHeaders"), std::string::npos);
+    EXPECT_EQ(saved.at("word/document.xml").find("w:type=\"even\""), std::string::npos);
+    EXPECT_NE(saved.at("word/settings.xml").find("defaultTabStop"), std::string::npos);
+
+    // A new document with even-page headers gets its own settings part; WFG19 keeps them.
+    Document fresh;
+    fresh.page.differentOddEven = true;
+    fresh.page.evenFooter.center = u"{PAGE}";
+    saved = opc::read(serializeDocx(fresh));
+    ASSERT_TRUE(saved.contains("word/settings.xml"));
+    EXPECT_NE(saved.at("word/settings.xml").find("evenAndOddHeaders"), std::string::npos);
+    EXPECT_EQ(parseDocx(opc::write(saved)).document.page.evenFooter.center, u"{PAGE}");
+    const auto native = serializeNative(fresh);
+    EXPECT_NE(native.find("version=\"19\""), std::string::npos);
+    EXPECT_EQ(parseNative(native).page, fresh.page);
+    EXPECT_EQ(serializeNative(Document{}).find("version=\"19\""), std::string::npos);
+}
+
+TEST(CellBorders, WordCellAndStyleBordersShowSideBySideAndRoundTrip) {
+    // A style with a top and bottom rule and a line under its header row, plus a cell
+    // with its own thick left side.
+    auto parts = wordDocument(
+        "<w:tbl><w:tblPr><w:tblStyle w:val='Rules'/><w:tblLook w:firstRow='1'/></w:tblPr>"
+        "<w:tblGrid><w:gridCol w:w='2000'/><w:gridCol w:w='2000'/></w:tblGrid>"
+        "<w:tr><w:tc><w:p><w:r><w:t>h1</w:t></w:r></w:p></w:tc>"
+        "<w:tc><w:p><w:r><w:t>h2</w:t></w:r></w:p></w:tc></w:tr>"
+        "<w:tr><w:tc><w:p><w:r><w:t>a</w:t></w:r></w:p></w:tc>"
+        "<w:tc><w:tcPr><w:tcBorders><w:left w:val='single' w:sz='24' w:color='FF0000'/>"
+        "</w:tcBorders></w:tcPr><w:p><w:r><w:t>b</w:t></w:r></w:p></w:tc></w:tr>"
+        "<w:tr><w:tc><w:p><w:r><w:t>c</w:t></w:r></w:p></w:tc>"
+        "<w:tc><w:p><w:r><w:t>d</w:t></w:r></w:p></w:tc></w:tr></w:tbl><w:p/>");
+    auto &styles = parts["word/styles.xml"];
+    styles.insert(styles.rfind("</w:styles>"),
+                  "<w:style w:type='table' w:styleId='Rules'><w:name w:val='Rules'/>"
+                  "<w:tblPr><w:tblBorders><w:top w:val='single' w:sz='12' w:color='000000'/>"
+                  "<w:bottom w:val='single' w:sz='12' w:color='000000'/></w:tblBorders></w:tblPr>"
+                  "<w:tblStylePr w:type='firstRow'><w:tcPr><w:tcBorders><w:bottom w:val='single' "
+                  "w:sz='4' w:color='000000'/></w:tcBorders></w:tcPr></w:tblStylePr></w:style>");
+    const auto imported = parseDocx(opc::write(parts));
+    EXPECT_TRUE(imported.warnings.empty());
+    ASSERT_EQ(imported.document.tables.size(), 1u);
+    const auto &table = imported.document.tables[0];
+    const TableBorder rule{1.5, 0xff000000}, thin{0.5, 0xff000000}, red{3, 0xffff0000};
+    EXPECT_EQ(table.border.width, 0); // most sides have no line
+    for (std::size_t c = 0; c < 2; ++c) {
+        EXPECT_EQ(table.borderAt(0, c, CellSide::Top), rule);
+        EXPECT_EQ(table.borderAt(0, c, CellSide::Bottom), thin);
+        EXPECT_EQ(table.borderAt(1, c, CellSide::Top), thin); // the same line, shared
+        EXPECT_EQ(table.borderAt(1, c, CellSide::Bottom).width, 0);
+        EXPECT_EQ(table.borderAt(2, c, CellSide::Bottom), rule);
+    }
+    EXPECT_EQ(table.borderAt(1, 1, CellSide::Left), red);
+    EXPECT_EQ(table.borderAt(1, 0, CellSide::Right), red); // shared with its neighbour
+    EXPECT_EQ(table.borderAt(0, 0, CellSide::Right).width, 0);
+
+    // Saved: the table has no lines, each cell's own sides are tcBorders; read again alike.
+    const auto saved = serializeDocx(imported.document);
+    const auto again = parseDocx(saved);
+    EXPECT_TRUE(again.warnings.empty());
+    ASSERT_EQ(again.document.tables.size(), 1u);
+    for (std::size_t r = 0; r < 3; ++r)
+        for (std::size_t c = 0; c < 2; ++c)
+            for (int side = 0; side < 4; ++side)
+                EXPECT_EQ(again.document.tables[0].borderAt(r, c, static_cast<CellSide>(side)),
+                          table.borderAt(r, c, static_cast<CellSide>(side)))
+                    << r << "," << c << "," << side;
+    pugi::xml_document body;
+    ASSERT_TRUE(body.load_string(opc::read(saved).at("word/document.xml").c_str()));
+    // Cells with sides of their own: both header cells, the red one, both last-row cells.
+    EXPECT_EQ(body.select_nodes("//w:tcBorders").size(), 5u);
+
+    // WFG19 keeps them.
+    const auto native = serializeNative(imported.document);
+    EXPECT_NE(opc::read(native).at("document.xml").find("version=\"19\""), std::string::npos);
+    EXPECT_EQ(parseNative(native).tables, imported.document.tables);
 }

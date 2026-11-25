@@ -3,6 +3,7 @@
 #include <cmath>
 #include <map>
 #include <stdexcept>
+#include <tuple>
 #include <unordered_set>
 namespace wf {
 const CellMerge *Table::mergeAt(std::size_t row, std::size_t column) const {
@@ -52,6 +53,48 @@ std::uint32_t Table::fillAt(std::size_t row, std::size_t column) const {
             return shade.color;
     return 0;
 }
+namespace {
+auto borderOrder(const CellBorder &item) {
+    return std::tuple(item.row, item.column, static_cast<int>(item.side));
+}
+} // namespace
+const TableBorder *Table::ownBorder(std::size_t row, std::size_t column, CellSide side) const {
+    const auto key = std::tuple(row, column, static_cast<int>(side));
+    const auto found = std::lower_bound(
+        cellBorders.begin(), cellBorders.end(), key,
+        [](const CellBorder &item, const auto &wanted) { return borderOrder(item) < wanted; });
+    return found != cellBorders.end() && borderOrder(*found) == key ? &found->border : nullptr;
+}
+TableBorder Table::borderAt(std::size_t row, std::size_t column, CellSide side) const {
+    std::size_t rows = 1, columns = 1;
+    if (const auto *merge = mergeAt(row, column)) {
+        row = merge->row, column = merge->column;
+        rows = merge->rows, columns = merge->columns;
+    }
+    const auto *own = ownBorder(row, column, side);
+    auto result = own ? *own : border;
+    // The neighbouring cell across this side, if there is one.
+    std::optional<std::pair<std::size_t, std::size_t>> next;
+    if (side == CellSide::Top && row)
+        next = {row - 1, column};
+    else if (side == CellSide::Bottom && row + rows < this->rows)
+        next = {row + rows, column};
+    else if (side == CellSide::Left && column)
+        next = {row, column - 1};
+    else if (side == CellSide::Right && column + columns < this->columns)
+        next = {row, column + columns};
+    if (!next)
+        return result;
+    auto [r, c] = *next;
+    if (const auto *merge = mergeAt(r, c))
+        r = merge->row, c = merge->column;
+    const auto opposite = static_cast<CellSide>((static_cast<int>(side) + 2) % 4);
+    const auto *theirs = ownBorder(r, c, opposite);
+    if (!own && !theirs)
+        return result;
+    const auto other = theirs ? *theirs : border;
+    return other.width > result.width ? other : result;
+}
 void validateTables(const Document &document) {
     std::map<std::uint64_t, std::vector<std::size_t>> members;
     for (std::size_t i = 0; i < document.paragraphs.size(); ++i)
@@ -68,6 +111,17 @@ void validateTables(const Document &document) {
         if (!std::isfinite(table.border.width) || table.border.width < 0 ||
             table.border.width > 6 || (table.border.color >> 24) != 0xff)
             throw std::invalid_argument("Invalid table border");
+        if (table.cellBorders.size() > 4 * table.rows * table.columns)
+            throw std::invalid_argument("Too many table cell borders");
+        for (std::size_t i = 0; i < table.cellBorders.size(); ++i) {
+            const auto &item = table.cellBorders[i];
+            if (item.row >= table.rows || item.column >= table.columns ||
+                static_cast<unsigned>(item.side) > 3 || !std::isfinite(item.border.width) ||
+                item.border.width < 0 || item.border.width > 6 ||
+                (item.border.color >> 24) != 0xff ||
+                (i && !(borderOrder(table.cellBorders[i - 1]) < borderOrder(item))))
+                throw std::invalid_argument("Invalid, repeated or unordered table cell border");
+        }
         if (table.shading.size() > table.rows * table.columns)
             throw std::invalid_argument("Too many shaded table cells");
         std::vector<bool> shaded(table.rows * table.columns, false);
@@ -222,6 +276,20 @@ void reshape(Editor &editor, bool row, bool insert, bool before) {
         shading.push_back(shade);
     }
     table.shading = std::move(shading);
+    // So do cell borders.
+    std::vector<CellBorder> cellBorders;
+    for (auto item : table.cellBorders) {
+        auto &at = row ? item.row : item.column;
+        if (insert) {
+            if (at >= pivot)
+                ++at;
+        } else if (at == pivot)
+            continue;
+        else if (at > pivot)
+            --at;
+        cellBorders.push_back(item);
+    }
+    table.cellBorders = std::move(cellBorders);
     if (!row && !table.widths.empty()) {
         if (insert)
             table.widths.insert(table.widths.begin() + static_cast<std::ptrdiff_t>(pivot),
@@ -443,6 +511,11 @@ void Editor::mergeCells() {
             return merged.contains(shade.row, shade.column) &&
                    (shade.row != r0 || shade.column != c0);
         });
+        // and its own borders.
+        std::erase_if(table.cellBorders, [&](const CellBorder &item) {
+            return merged.contains(item.row, item.column) &&
+                   (item.row != r0 || item.column != c0);
+        });
         // Content moves into the top-left cell, as in Word; covered cells keep one empty
         // paragraph.
         auto hasContent = [](const std::vector<Paragraph> &cell) {
@@ -520,9 +593,10 @@ void Editor::setTableBorder(TableBorder border) {
             throw std::invalid_argument("Place the caret in a table first");
         if (!std::isfinite(border.width) || border.width < 0 || border.width > 6)
             throw std::invalid_argument("Border width must be between 0 and 6 pt");
-        auto &target = grid(e.document, cell->tableId).table->border;
-        target = border;
-        target.color |= 0xff000000;
+        auto &table = *grid(e.document, cell->tableId).table;
+        table.border = border;
+        table.border.color |= 0xff000000;
+        table.cellBorders.clear(); // the whole table looks as chosen
     });
 }
 void Editor::shadeCells(std::uint32_t color) {

@@ -250,8 +250,9 @@ void validateDocument(const Document &document, const Document *validated) {
     }
     for (const auto &paragraph : document.paragraphs)
         if (const auto &end = paragraph.sectionBreak) {
-            if (paragraph.cell || !end->page.header.empty() || !end->page.footer.empty() ||
-                end->page.differentFirstPage)
+            PageStyle bands, none;
+            bands.setBands(end->page);
+            if (paragraph.cell || !(bands == none))
                 throw std::invalid_argument("Invalid section break");
             validatePage(end->page);
         }
@@ -260,6 +261,12 @@ void validateDocument(const Document &document, const Document *validated) {
         if (!bookmark.id || bookmark.id >= document.nextId || !ids.insert(bookmark.id).second ||
             !names.insert(bookmark.name).second)
             throw std::invalid_argument("Invalid, duplicate or dangling bookmark");
+        if (bookmark.end) {
+            const auto start = document.resolve(bookmark.anchor),
+                       end = document.resolve(*bookmark.end);
+            if (!start || !end || *end < *start)
+                throw std::invalid_argument("Bookmark range is dangling or reversed");
+        }
     }
     for (std::size_t index = 0; index < paragraphs.size(); ++index) {
         if (index == prefix)
@@ -296,7 +303,7 @@ void validatePage(const PageStyle &page) {
         !std::isfinite(page.columnGap) || page.columnGap < 0 || page.columnGap > 144 ||
         (page.width - 2 * page.margin - (page.columns - 1) * page.columnGap) / page.columns < 36)
         throw std::invalid_argument("Invalid page geometry");
-    for (const auto *band : {&page.header, &page.footer})
+    for (const auto *band : {&page.header, &page.footer, &page.evenHeader, &page.evenFooter})
         for (const auto *text : {&band->left, &band->center, &band->right}) {
             if (text->size() > 500)
                 throw std::invalid_argument("Header or footer text is too long");
@@ -319,13 +326,26 @@ std::u16string bandText(const std::u16string &text, std::size_t number, std::siz
     }
     return result;
 }
+void PageStyle::setBands(const PageStyle &from) {
+    header = from.header;
+    footer = from.footer;
+    evenHeader = from.evenHeader;
+    evenFooter = from.evenFooter;
+    differentFirstPage = from.differentFirstPage;
+    differentOddEven = from.differentOddEven;
+}
+const PageBand *PageStyle::band(bool top, std::size_t number) const {
+    if (number == 0 && differentFirstPage)
+        return nullptr;
+    if (differentOddEven && number % 2 == 1)
+        return top ? &evenHeader : &evenFooter;
+    return top ? &header : &footer;
+}
 PageStyle sectionPage(const Document &document, std::size_t index) {
     for (auto i = index; i < document.paragraphs.size(); ++i)
         if (const auto &end = document.paragraphs[i].sectionBreak) {
             auto page = end->page;
-            page.header = document.page.header;
-            page.footer = document.page.footer;
-            page.differentFirstPage = document.page.differentFirstPage;
+            page.setBands(document.page);
             return page;
         }
     return document.page;
@@ -337,8 +357,7 @@ void Editor::setPage(PageStyle page) {
     validatePage(page);
     checkpoint();
     auto geometry = page;
-    geometry.header = geometry.footer = {};
-    geometry.differentFirstPage = false;
+    geometry.setBands({});
     bool own = false;
     for (auto i = selection.focus.paragraph; i < document.paragraphs.size(); ++i)
         if (document.paragraphs[i].sectionBreak) {
@@ -348,11 +367,9 @@ void Editor::setPage(PageStyle page) {
             own = true;
             break;
         }
-    if (own) {
-        document.page.header = page.header;
-        document.page.footer = page.footer;
-        document.page.differentFirstPage = page.differentFirstPage;
-    } else
+    if (own)
+        document.page.setBands(page);
+    else
         document.page = page;
     document.revision = ++serial_;
 }
@@ -363,8 +380,7 @@ void Editor::insertSectionBreak(bool continuous) {
         if (e.document.paragraphs[at.paragraph].cell)
             throw std::invalid_argument("Section breaks cannot go inside a table");
         auto page = e.sectionPage();
-        page.header = page.footer = {};
-        page.differentFirstPage = false;
+        page.setBands({});
         e.replace(u"\n"); // the break ends the first part; the next section starts after it
         const auto ending = at.paragraph;
         e.document.paragraphs.edit(ending).sectionBreak = SectionBreak{page, continuous};

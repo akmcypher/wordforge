@@ -1,5 +1,22 @@
 # Native WFG schema and migration
 
+**WFG19 (not yet released; even-page headers, bookmark ranges, cell borders)** adds:
+- **Even-page headers and footers:** the root attribute `differentOddEven` (boolean) and
+  `<evenHeader>`/`<evenFooter>` elements with the `left`/`center`/`right` attributes of
+  `<header>`. With the switch on, even pages (2, 4, ...) show them instead of the header
+  and footer.
+- **Bookmark ranges:** a `bookmark` may carry `endParagraph`, `endOffset` and `endAffinity`
+  (all three); without them it is a place, as before. The end must not come before the
+  start.
+- **Cell borders:** `<cellBorder row column side width color>` children of `table`, with
+  `side` one of `top`, `right`, `bottom`, `left`, `width` 0–6 points (0: no line) and an
+  opaque ARGB `color`. At most one per cell side; on a merged cell, set on its top-left
+  cell. A shared side shows the wider of the two cells' lines, each the cell's own or the
+  table's border.
+
+WFG19 is written only for documents that use one of these; others keep their earlier
+version. It includes everything in WFG18. WFG1–18 reject the new attributes and elements.
+
 **WFG18 (contextual and character spacing)** adds a boolean paragraph/style attribute
 `contextual` (Word's contextual spacing) and a run/style attribute `spacing`: points added
 after each character, -1584 to 1584. Omitted paragraph and run values are false and 0,
@@ -50,7 +67,7 @@ previous version-selection rules and their old defaults.
 
 WFG15 includes WFG14 tab stops and uses the combined paragraph mask 0x1ff.
 WFG14 permits bits 0–6 (0x7f); earlier style formats permit bits 0–5 (0x3f).
-The integrated reader accepts WFG1–17. Mixed tabs/pagination documents use WFG15;
+The integrated reader accepts WFG1–19. Mixed tabs/pagination documents use WFG15;
 tabs-only documents retain WFG14. Regression tests cover combined properties,
 explicit clears, older readers and version-specific mask rejection.
 

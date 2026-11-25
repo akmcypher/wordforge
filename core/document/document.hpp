@@ -125,11 +125,21 @@ struct CellMerge {
     }
     bool operator==(const CellMerge &) const = default;
 };
-// The lines around and between a table's cells, all alike. Width 0: no borders.
+// The lines around and between a table's cells, unless a cell sets its own. Width 0: no
+// borders.
 struct TableBorder {
     double width = 0.5; // points, at most 6
     std::uint32_t color = 0xff805a3b; // opaque ARGB
     bool operator==(const TableBorder &) const = default;
+};
+enum class CellSide : std::uint8_t { Top, Right, Bottom, Left };
+// One side of a cell drawn its own way instead of with the table's border (width 0: no
+// line), as Word's cell borders are. For a merged cell, set on its top-left cell.
+struct CellBorder {
+    std::size_t row = 0, column = 0;
+    CellSide side = CellSide::Top;
+    TableBorder border;
+    bool operator==(const CellBorder &) const = default;
 };
 // A cell's background colour (for a merged cell, set on its top-left cell).
 struct CellShading {
@@ -146,7 +156,15 @@ struct Table {
     std::vector<double> widths;
     std::vector<CellMerge> merges;
     TableBorder border;
+    // At most one per cell side, in order of row, column and side.
+    std::vector<CellBorder> cellBorders;
     std::vector<CellShading> shading;
+    // The cell's own border on `side`, if it sets one.
+    const TableBorder *ownBorder(std::size_t row, std::size_t column, CellSide) const;
+    // The line drawn on `side` of the cell at (row, column) (for a merged cell, its top-left
+    // cell): of the cell's border there and its neighbour's on the shared side (each its
+    // own, or else the table's), the wider, as in Word.
+    TableBorder borderAt(std::size_t row, std::size_t column, CellSide) const;
     // The merge covering (row, column), if any.
     const CellMerge *mergeAt(std::size_t row, std::size_t column) const;
     bool operator==(const Table &) const = default;
@@ -171,8 +189,19 @@ struct PageStyle {
     std::size_t columns = 1;
     double columnGap = 36;
     PageBand header, footer;
+    PageBand evenHeader, evenFooter; // used on even pages when differentOddEven
     bool differentFirstPage = false; // no header or footer on the first page
+    bool differentOddEven = false;   // Word's "Different odd and even pages"
     bool operator==(const PageStyle &) const = default;
+    // Copies the header and footer settings (bands and switches) from `from`.
+    void setBands(const PageStyle &from);
+    // The header (or footer) of page `number` (0-based); null on a first page without one.
+    const PageBand *band(bool header, std::size_t number) const;
+    // Whether any page shows a header or footer.
+    bool anyBand() const {
+        return !header.empty() || !footer.empty() ||
+               (differentOddEven && (!evenHeader.empty() || !evenFooter.empty()));
+    }
 };
 // The band's text on page `number` (1-based) of `count`, fields substituted.
 std::u16string bandText(const std::u16string &, std::size_t number, std::size_t count);
@@ -406,10 +435,13 @@ struct Anchor {
     Affinity affinity = Affinity::After;
     bool operator==(const Anchor &) const = default;
 };
+// A named place in the text, or (with `end`) a named range, as Word's bookmarks are. A
+// range grows when text is typed at its edges, like a comment's.
 struct Bookmark {
     std::uint64_t id = 0;
     std::string name;
-    Anchor anchor;
+    Anchor anchor;              // the place, or the range's start
+    std::optional<Anchor> end;  // the range's end; none for a place
     bool operator==(const Bookmark &) const = default;
 };
 void validateBookmarkName(const std::string &);
@@ -499,7 +531,8 @@ struct Document {
     std::uint64_t allocateId();
     Anchor anchorAt(Position, Affinity = Affinity::After) const;
     std::optional<Position> resolve(const Anchor &) const;
-    // Positions of every anchor (bookmarks, then each comment's start and end).
+    // Positions of every anchor (bookmarks with their ends, then each comment's start and
+    // end, then each field's).
     std::vector<Position> bookmarkPositions() const;
     std::vector<Anchor *> anchors();
     std::vector<const Anchor *> anchors() const;

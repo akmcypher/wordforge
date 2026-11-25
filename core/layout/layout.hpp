@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include "core/typography/shaper.hpp"
 #include <unordered_map>
 namespace wf {
@@ -17,7 +18,8 @@ struct CellRectangle {
     double x, y, width, height;
     std::size_t page, firstParagraph, lastParagraph;
     std::uint32_t fill = 0; // background, 0 for none
-    TableBorder border;
+    // The lines on each side, indexed by CellSide (top, right, bottom, left).
+    std::array<TableBorder, 4> borders;
 };
 struct Layout {
     std::vector<Line> lines;

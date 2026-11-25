@@ -14,6 +14,20 @@ per-feature support table.
 Both channels read WFG1–18. Previous release: 0.6.12 (a13c8d2). Release notes:
 `docs/releases/v0.6.13.md`.
 
+## Since 0.6.13 (not yet released)
+
+- **Bookmarks, even-page headers and cell borders:**
+  - Word bookmarks are read and saved as places or named ranges. Saving a document with
+    bookmarks as DOCX no longer fails.
+  - Even-page headers and footers are shown with Word's "different odd and even pages"
+    switch, and can be edited in the Header and footer dialog.
+  - Each side of a table cell can have its own line, from the cell, the table and the
+    style's regions.
+  - All 114 Word documents in the corpus now open without the import-limitations dialog,
+    up from 88.
+  - Native format WFG19 (not yet released) is written only for documents using these.
+  - Evidence: `docs/evidence/2026-11-26-bookmarks-even-headers-cell-borders.md`.
+
 ## In 0.6.13 (since 0.6.12)
 
 Release notes: `docs/releases/v0.6.13.md`. Version 0.6.13 / `0.6.13-preview`.
@@ -97,6 +111,7 @@ Release notes: `docs/releases/v0.6.13.md`. Version 0.6.13 / `0.6.13-preview`.
 
 - Background pagination, renderer and model copy costs per edit (rest of M2).
 - Numbering through styles, row splitting, theme fonts, language and OpenType controls.
+- Border styles other than single lines, diagonal cell borders and first-page header text.
 - Fuller DOCX fidelity (formatting revisions, unknown body content is omitted with
   a warning, notes and comments are plain text).
 - Balanced columns and per-section headers.

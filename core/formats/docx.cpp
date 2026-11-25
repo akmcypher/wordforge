@@ -683,23 +683,24 @@ std::string relationshipKind(const std::string &type) {
 }
 // Keeps the package parts Wordforge does not edit: document properties, theme, settings,
 // font table, web settings and custom XML, with the parts they reference.
-// Word settings XML with its Track Changes switch set to `on`; unchanged bytes when it
-// already is. The switch goes before the settings that follow it in the schema.
-std::string withTrackRevisions(const std::string &data, bool on) {
+// Word settings XML with the switch `name` (trackRevisions, evenAndOddHeaders) set to
+// `on`; unchanged bytes when it already is. The switch goes before the settings that
+// follow it in the schema.
+std::string withSetting(const std::string &data, const std::string &name, bool on) {
     pugi::xml_document settings;
     if (!settings.load_buffer(data.data(), data.size()))
         return data;
     auto root = settings.document_element();
     std::vector<pugi::xml_node> existing;
     for (auto node : root.children())
-        if (is(node, "trackRevisions"))
+        if (is(node, name.c_str()))
             existing.push_back(node);
     if (on == !existing.empty())
         return data;
     for (auto node : existing)
         root.remove_child(node);
     if (on) {
-        static const std::set<std::string> later{"doNotTrackMoves",
+        static const std::vector<std::string> order{"trackRevisions", "doNotTrackMoves",
                                                  "doNotTrackFormatting",
                                                  "documentProtection",
                                                  "autoFormatOverride",
@@ -765,6 +766,8 @@ std::string withTrackRevisions(const std::string &data, bool on) {
                                                  "doNotEmbedSmartTags",
                                                  "decimalSymbol",
                                                  "listSeparator"};
+        const auto at = std::find(order.begin(), order.end(), name);
+        const std::set<std::string> later(at == order.end() ? order.end() : at + 1, order.end());
         const std::string rootName = root.name();
         const auto colon = rootName.find(':');
         const auto prefix =
@@ -779,11 +782,11 @@ std::string withTrackRevisions(const std::string &data, bool on) {
                 break;
             }
         }
-        const auto name = prefix + "trackRevisions";
+        const auto element = prefix + name;
         if (before)
-            root.insert_child_before(name.c_str(), before);
+            root.insert_child_before(element.c_str(), before);
         else
-            root.append_child(name.c_str());
+            root.append_child(element.c_str());
     }
     std::ostringstream output;
     settings.save(output, "", pugi::format_raw, pugi::encoding_utf8);
@@ -877,7 +880,8 @@ std::shared_ptr<const PreservedPackage> preservePackage(const opc::Parts &parts,
     roots(main, false, {"theme", "settings", "fontTable", "webSettings", "customXml"});
     if (tooLarge)
         warn(warnings, "Some document parts (theme, fonts or custom data) are too large to keep.");
-    // Settings name footnote separators and even-page headers that are not kept.
+    // Settings name footnote separators that are not kept. (The even-page header switch is
+    // rewritten on export from the document's page settings.)
     for (auto &part : package->parts) {
         if (part.contentType !=
             "application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml")
@@ -885,7 +889,7 @@ std::shared_ptr<const PreservedPackage> preservePackage(const opc::Parts &parts,
         auto settings = xml(part.data);
         std::vector<pugi::xml_node> removed;
         for (auto node : settings.document_element().children())
-            if (is(node, "footnotePr") || is(node, "endnotePr") || is(node, "evenAndOddHeaders"))
+            if (is(node, "footnotePr") || is(node, "endnotePr"))
                 removed.push_back(node);
         if (!removed.empty()) {
             for (auto node : removed)
@@ -1113,6 +1117,40 @@ std::string attrIn(pugi::xml_node node, const char *name, const char *uri) {
             return item.value();
     return {};
 }
+// Bookmark names Word accepts: letters, digits and underscores, starting with a letter or
+// an underscore, at most 40 characters, each unique. Names that already are pass unchanged.
+std::map<std::string, std::string> wordBookmarkNames(const std::vector<Bookmark> &bookmarks) {
+    std::map<std::string, std::string> result;
+    std::set<std::u16string> used;
+    auto valid = [](char16_t c) {
+        return c == u'_' || (c >= u'0' && c <= u'9') || (c >= u'a' && c <= u'z') ||
+               (c >= u'A' && c <= u'Z') || c >= 0x80;
+    };
+    std::vector<std::pair<std::string, std::u16string>> pending;
+    for (const auto &bookmark : bookmarks) {
+        auto name = utf16(bookmark.name);
+        for (auto &c : name)
+            if (!valid(c) || (c >= 0xd800 && c <= 0xdfff))
+                c = u'_';
+        if (name.empty() || (name[0] >= u'0' && name[0] <= u'9'))
+            name.insert(0, u"B");
+        if (name.size() > 40)
+            name.resize(40);
+        if (name == utf16(bookmark.name) && used.insert(name).second)
+            result[bookmark.name] = bookmark.name;
+        else
+            pending.emplace_back(bookmark.name, name);
+    }
+    for (auto &[original, name] : pending) {
+        auto candidate = name;
+        for (int n = 2; !used.insert(candidate).second; ++n) {
+            const auto suffix = utf16("_" + std::to_string(n));
+            candidate = name.substr(0, 40 - suffix.size()) + suffix;
+        }
+        result[original] = utf8(candidate);
+    }
+    return result;
+}
 } // namespace
 DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPicture) {
     auto parts = opc::read(bytes);
@@ -1261,6 +1299,12 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         bool separated = false;
     };
     std::vector<OpenField> openFields;
+    // Bookmarks: their range marks join commentMarks under keys that start with "\1b".
+    // Names by key, in the order their starts appear. Starts between paragraphs wait for
+    // the next paragraph.
+    std::vector<std::pair<std::string, std::string>> bookmarkNames;
+    std::vector<std::string> pendingBookmarks;
+    auto bookmarkKey = [](pugi::xml_node node) { return "\1b" + attr(node, "id"); };
     std::map<std::string, std::string> fieldInstructions;
     std::size_t fieldCount = 0;
     if (!body)
@@ -1268,6 +1312,25 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
     DocxImport result;
     auto &warnings = result.warnings;
     auto &document = result.document;
+    // A bookmark mark between paragraphs (in the body, a table, a row or a cell): a start
+    // goes to the next paragraph's start, an end to the end of the paragraph before it.
+    auto blockBookmark = [&](pugi::xml_node node) {
+        if (is(node, "bookmarkStart")) {
+            bookmarkNames.emplace_back(bookmarkKey(node), attr(node, "name"));
+            pendingBookmarks.push_back(bookmarkKey(node));
+        } else if (is(node, "bookmarkEnd")) {
+            const auto key = bookmarkKey(node);
+            const auto pending = std::find(pendingBookmarks.begin(), pendingBookmarks.end(), key);
+            if (pending != pendingBookmarks.end()) // nothing between: a place, not a range
+                return true;
+            if (!document.paragraphs.empty()) {
+                const auto &last = document.paragraphs.back();
+                commentMarks.push_back({key, false, last.id, last.text().size()});
+            }
+        } else
+            return false;
+        return true;
+    };
     // Tracked changes: one Revision per author and date; the marks of the w:ins / w:del
     // being read.
     std::map<std::pair<std::string, std::string>, std::uint64_t> revisionIds;
@@ -1853,6 +1916,9 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             paragraph.indentFirstLine =
                 std::clamp(paragraph.indentFirstLine, -paragraph.indentLeft, 360.0);
         std::vector<CommentMark> marks; // offsets in this paragraph before line-break splits
+        for (auto &key : pendingBookmarks)
+            marks.push_back({std::move(key), true, 0, 0});
+        pendingBookmarks.clear();
         std::function<void(pugi::xml_node, unsigned)> readRuns = [&](pugi::xml_node parent,
                                                                      unsigned depth) {
             if (depth > 64)
@@ -1861,7 +1927,12 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                 if (run.type() != pugi::node_element || is(run, "pPr"))
                     continue;
                 if (is(run, "bookmarkStart") || is(run, "bookmarkEnd")) {
-                    warn(warnings, "DOCX bookmarks are not imported yet.");
+                    std::size_t offset = 0;
+                    for (const auto &existing : paragraph.runs)
+                        offset += existing.text().size();
+                    if (is(run, "bookmarkStart"))
+                        bookmarkNames.emplace_back(bookmarkKey(run), attr(run, "name"));
+                    marks.push_back({bookmarkKey(run), is(run, "bookmarkStart"), 0, offset});
                     continue;
                 }
                 if (is(run, "commentRangeStart") || is(run, "commentRangeEnd")) {
@@ -2073,11 +2144,9 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         if (const auto section = child(properties, "sectPr"); section && !cell) {
             SectionBreak end;
             end.page = document.page;
-            end.page.header = end.page.footer = {};
-            end.page.differentFirstPage = false;
+            end.page.setBands({});
             readGeometry(section, end.page);
-            end.page.header = end.page.footer = {};
-            end.page.differentFirstPage = false;
+            end.page.setBands({});
             document.paragraphs.edit(document.paragraphs.size() - 1).sectionBreak = end;
             breakParagraphs.push_back(document.paragraphs.size() - 1);
             sectionStarts.push_back(val(child(section, "type")));
@@ -2125,7 +2194,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                             for (auto inner : row.children())
                                 if (is(inner, "tc"))
                                     readCell(inner, cell, depth + 1);
-                } else
+                } else if (!blockBookmark(item))
                     warn(warnings, "Unsupported table content was omitted: " + local(item.name()));
             }
         };
@@ -2137,7 +2206,6 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             std::uint32_t color;
         };
         std::vector<Fill> fills;
-        bool cellBorders = false;
         // Spans: (row, column, columns, vMerge state: 0 none, 1 restart, 2 continue).
         struct Span {
             std::size_t row, column, columns;
@@ -2148,14 +2216,15 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             if (row.type() != pugi::node_element || is(row, "tblPr") || is(row, "tblGrid"))
                 continue;
             if (!is(row, "tr")) {
-                warn(warnings, "Unsupported table content was omitted: " + local(row.name()));
+                if (!blockBookmark(row))
+                    warn(warnings, "Unsupported table content was omitted: " + local(row.name()));
                 continue;
             }
             std::vector<pugi::xml_node> cells;
             for (auto cell : row.children()) {
                 if (!is(cell, "tc")) {
                     if (cell.type() == pugi::node_element && !is(cell, "trPr") &&
-                        !is(cell, "tblPrEx"))
+                        !is(cell, "tblPrEx") && !blockBookmark(cell))
                         warn(warnings,
                              "Unsupported table content was omitted: " + local(cell.name()));
                     continue;
@@ -2171,8 +2240,6 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                         }
                     }
                 }
-                if (child(properties, "tcBorders"))
-                    cellBorders = true;
                 const auto span = val(child(properties, "gridSpan"));
                 const auto count = span.empty() ? 1.0 : std::clamp(number(span), 1.0, 64.0);
                 const auto vMerge = child(properties, "vMerge");
@@ -2199,8 +2266,6 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                         readCell(cell, std::nullopt, 0);
             return;
         }
-        if (cellBorders)
-            warn(warnings, "Borders set on single cells are shown like the table's borders.");
         // Two tables in a row need a body paragraph between them.
         if (!document.paragraphs.empty() && document.paragraphs.back().cell)
             document.paragraphs.push_back(emptyParagraph(std::nullopt));
@@ -2301,7 +2366,6 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                     if (is(part, "tblStylePr") && attr(part, "type") == type)
                         into.push_back(part);
         };
-        bool styleCellBorders = false;
         auto partsFor = [&](std::size_t r, std::size_t c) {
             std::vector<pugi::xml_node> parts(styleChain);
             conditional(parts, "wholeTable");
@@ -2331,9 +2395,6 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                 conditional(parts, "swCell");
             if (bottom && right)
                 conditional(parts, "seCell");
-            for (auto part : parts)
-                if (child(child(part, "tcPr"), "tcBorders"))
-                    styleCellBorders = true;
             return parts;
         };
         // Cell fills from the style, under the cell's own.
@@ -2364,48 +2425,132 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                 if (fill)
                     created.shading.push_back({r, c, fill});
             }
-        if (styleCellBorders)
-            warn(warnings, "Table style borders on some cells are shown like the table's borders.");
-        // Borders: one width and colour for the whole table, from its own border settings or
-        // else its style's; a table whose style sets none has none, like in Word.
-        pugi::xml_node tableBorders = child(child(table, "tblPr"), "tblBorders");
-        if (!tableBorders) {
-            for (auto node : styleChain)
-                if (const auto found = child(child(node, "tblPr"), "tblBorders"))
-                    tableBorders = found;
-            if (!tableBorders && !styleChain.empty())
-                created.border.width = 0;
-        }
-        if (const auto borders = tableBorders) {
-            bool any = false, none = true, plain = true;
-            for (auto side : borders.children()) {
-                if (side.type() != pugi::node_element)
-                    continue;
-                any = true;
-                const auto kind = val(side);
-                if (kind == "nil" || kind == "none")
-                    continue;
-                if (none) {
-                    const auto size = attr(side, "sz");
-                    created.border.width =
-                        size.empty() ? 0.5 : std::clamp(number(size) / 8, 0.25, 6.0);
-                    const auto shade = attr(side, "color");
-                    if (shade.empty() || shade == "auto")
-                        created.border.color = 0xff000000;
-                    else
-                        try {
-                            created.border.color = color(shade);
-                        } catch (const std::runtime_error &) {
-                        }
-                }
-                none = false;
-                plain = plain && kind == "single";
+        // Borders, side by side for each cell, as Word layers them: the style's table
+        // borders, the table's own, the style's parts for the cell's region (whole table,
+        // bands, first and last rows and columns, corners), then the cell's own. The most
+        // common line becomes the table's border; other sides are the cells' own.
+        bool plain = true, anyBorder = false;
+        auto readSide = [&](pugi::xml_node side) {
+            const auto kind = val(side);
+            TableBorder border; // default colour for "none", so that all nones compare equal
+            if (kind == "nil" || kind == "none") {
+                border.width = 0;
+                return border;
             }
-            if (any && none)
-                created.border.width = 0;
-            if (!plain)
-                warn(warnings, "Table border styles are shown as single lines of one width.");
+            plain = plain && kind == "single";
+            const auto size = attr(side, "sz");
+            border.width = size.empty() ? 0.5 : std::clamp(number(size) / 8, 0.25, 6.0);
+            const auto shade = attr(side, "color");
+            border.color = 0xff000000;
+            if (!shade.empty() && shade != "auto")
+                try {
+                    border.color = color(shade);
+                } catch (const std::runtime_error &) {
+                }
+            return border;
+        };
+        using Sides = std::array<std::optional<TableBorder>, 4>;
+        std::vector<Sides> sides(rows.size() * columns);
+        // Applies a w:tblBorders or w:tcBorders to the cell box (r, c, height, width) as part
+        // of a region: its outer sides take the region's, inner ones the inside lines.
+        enum class Region { Table, Rows, Columns, Cell };
+        auto layer = [&](pugi::xml_node borders, Region region, std::size_t r, std::size_t c,
+                         std::size_t height, std::size_t width) {
+            if (!borders)
+                return;
+            const bool first = r == 0, last = r + height == rows.size(), left = c == 0,
+                       right = c + width == columns;
+            const bool rowsOuter = region == Region::Rows || region == Region::Cell;
+            const bool columnsOuter = region == Region::Columns || region == Region::Cell;
+            const std::tuple<CellSide, bool, const char *, const char *> each[] = {
+                {CellSide::Top, first || rowsOuter, "top", nullptr},
+                {CellSide::Bottom, last || rowsOuter, "bottom", nullptr},
+                {CellSide::Left, left || columnsOuter, "left", "start"},
+                {CellSide::Right, right || columnsOuter, "right", "end"},
+            };
+            auto &cell = sides[r * columns + c];
+            for (auto [side, outer, name, alias] : each) {
+                const bool across = side == CellSide::Top || side == CellSide::Bottom;
+                auto node = child(borders, outer ? name : across ? "insideH" : "insideV");
+                if (!node && outer && alias)
+                    node = child(borders, alias);
+                if (node) {
+                    cell[static_cast<int>(side)] = readSide(node);
+                    anyBorder = true;
+                }
+            }
+            if (child(borders, "tl2br") || child(borders, "tr2bl"))
+                warn(warnings, "Diagonal cell borders are not shown.");
+        };
+        auto regionOf = [](pugi::xml_node part) {
+            const auto type = attr(part, "type");
+            if (!is(part, "tblStylePr") || type == "wholeTable")
+                return Region::Table;
+            if (type == "firstRow" || type == "lastRow" || type == "band1Horz" ||
+                type == "band2Horz")
+                return Region::Rows;
+            if (type == "firstCol" || type == "lastCol" || type == "band1Vert" ||
+                type == "band2Vert")
+                return Region::Columns;
+            return Region::Cell;
+        };
+        for (std::size_t r = 0; r < rows.size(); ++r)
+            for (std::size_t c = 0; c < columns; ++c) {
+                std::size_t height = 1, width = 1;
+                if (const auto *merge = created.mergeAt(r, c)) {
+                    if (merge->row != r || merge->column != c)
+                        continue;
+                    height = merge->rows, width = merge->columns;
+                }
+                for (auto node : styleChain)
+                    layer(child(child(node, "tblPr"), "tblBorders"), Region::Table, r, c, height,
+                          width);
+                layer(child(child(table, "tblPr"), "tblBorders"), Region::Table, r, c, height,
+                      width);
+                for (auto part : partsFor(r, c))
+                    layer(child(child(part, "tcPr"), "tcBorders"), regionOf(part), r, c, height,
+                          width);
+                if (c < rows[r].size() && rows[r][c])
+                    layer(child(child(rows[r][c], "tcPr"), "tcBorders"), Region::Cell, r, c,
+                          height, width);
+            }
+        // A table without a style or any borders keeps Wordforge's default lines.
+        if (anyBorder || !styleChain.empty()) {
+            TableBorder none;
+            none.width = 0;
+            std::vector<std::pair<TableBorder, std::size_t>> counts;
+            for (std::size_t i = 0; i < sides.size(); ++i)
+                for (const auto &side : sides[i]) {
+                    if (const auto *merge = created.mergeAt(i / columns, i % columns);
+                        merge && (merge->row != i / columns || merge->column != i % columns))
+                        continue; // covered by a merged cell
+                    const auto value = side.value_or(none);
+                    auto found = std::find_if(counts.begin(), counts.end(),
+                                              [&](const auto &item) { return item.first == value; });
+                    if (found == counts.end())
+                        counts.emplace_back(value, 1);
+                    else
+                        ++found->second;
+                }
+            const auto common = std::max_element(
+                counts.begin(), counts.end(),
+                [](const auto &a, const auto &b) { return a.second < b.second; });
+            created.border = common == counts.end() ? none : common->first;
+            for (std::size_t r = 0; r < rows.size(); ++r)
+                for (std::size_t c = 0; c < columns; ++c) {
+                    if (const auto *merge = created.mergeAt(r, c);
+                        merge && (merge->row != r || merge->column != c))
+                        continue;
+                    for (int side = 0; side < 4; ++side) {
+                        const auto value = sides[r * columns + c][side].value_or(none);
+                        if (value != created.border)
+                            created.cellBorders.push_back(
+                                {r, c, static_cast<CellSide>(side), value});
+                    }
+                }
         }
+        if (!plain)
+            warn(warnings, "Table border styles are shown as single lines.");
         // Column widths from the grid, when it matches.
         std::vector<double> widths;
         for (auto column : child(table, "tblGrid").children())
@@ -2553,8 +2698,9 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                 continue;
             const auto type = attr(reference, "type");
             const auto id = attrIn(reference, "id", relationshipsNs);
-            if (type == "even") {
-                warn(warnings, "Separate even-page headers and footers are not preserved.");
+            if (type == "even") { // shown when the settings ask for even-page headers
+                (header ? document.page.evenHeader : document.page.evenFooter) =
+                    readBand(id, header);
                 continue;
             }
             if (type == "first") {
@@ -2585,6 +2731,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             readTable(node);
             continue;
         }
+        if (blockBookmark(node))
+            continue;
         if (!is(node, "p")) {
             warn(warnings, "Unsupported document content was omitted: " + local(node.name()));
             continue;
@@ -2605,6 +2753,12 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         document.paragraphs.push_back(emptyParagraph(std::nullopt));
     if (document.paragraphs.empty())
         document.paragraphs.emplace_back(document.allocateId());
+    // Bookmarks that start after the last paragraph mark the document's end.
+    for (auto &key : pendingBookmarks) {
+        const auto &last = document.paragraphs.back();
+        commentMarks.push_back({std::move(key), true, last.id, last.text().size()});
+    }
+    pendingBookmarks.clear();
     // Indents that leave less than 54 pt to write in (a narrow table column, say) would not
     // lay out: shrink them in proportion.
     {
@@ -2677,6 +2831,17 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
     adoptStyles(document); // DOCX values arrive resolved; mark those differing from styles direct
     if (simplifiedNotes)
         warn(warnings, "Footnotes are kept as one paragraph of plain text each.");
+    // A mark's anchor with its offset on a grapheme boundary.
+    auto snap = [&](Anchor anchor) {
+        for (const auto &p : document.paragraphs)
+            if (p.id == anchor.paragraphId) {
+                const auto boundaries = p.boundaries();
+                const auto found =
+                    std::lower_bound(boundaries.begin(), boundaries.end(), anchor.offset);
+                anchor.offset = found == boundaries.end() ? boundaries.back() : *found;
+            }
+        return anchor;
+    };
     if (!commentTexts.empty()) {
         std::map<std::string, std::pair<std::optional<Anchor>, std::optional<Anchor>>> ranges;
         for (const auto &mark : commentMarks) {
@@ -2686,17 +2851,6 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                 slot = Anchor{mark.paragraph, mark.offset,
                               mark.start ? Affinity::Before : Affinity::After};
         }
-        // Offsets on grapheme boundaries.
-        auto snap = [&](Anchor anchor) {
-            for (const auto &p : document.paragraphs)
-                if (p.id == anchor.paragraphId) {
-                    const auto boundaries = p.boundaries();
-                    const auto found =
-                        std::lower_bound(boundaries.begin(), boundaries.end(), anchor.offset);
-                    anchor.offset = found == boundaries.end() ? boundaries.back() : *found;
-                }
-            return anchor;
-        };
         bool unanchored = false;
         for (const auto &[id, comment] : commentTexts) {
             const auto found = ranges.find(id);
@@ -2735,16 +2889,6 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                     slot = Anchor{mark.paragraph, mark.offset,
                                   mark.start ? Affinity::Before : Affinity::After};
             }
-        auto snap = [&](Anchor anchor) {
-            for (const auto &p : document.paragraphs)
-                if (p.id == anchor.paragraphId) {
-                    const auto boundaries = p.boundaries();
-                    const auto found =
-                        std::lower_bound(boundaries.begin(), boundaries.end(), anchor.offset);
-                    anchor.offset = found == boundaries.end() ? boundaries.back() : *found;
-                }
-            return anchor;
-        };
         bool dropped = false;
         for (std::size_t n = 1; n <= fieldCount; ++n) {
             const auto key = "\1f" + std::to_string(n);
@@ -2778,6 +2922,54 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
         }
         if (dropped)
             warn(warnings, "Some fields were kept as plain text.");
+    }
+    // Bookmarks from their marks: a range, or a place where start and end meet. Word's names
+    // are unique; a repeated or unusable name, or one without a start, is left out.
+    if (!bookmarkNames.empty()) {
+        std::map<std::string, std::pair<std::optional<Anchor>, std::optional<Anchor>>> ranges;
+        for (const auto &mark : commentMarks)
+            if (mark.id.starts_with("\1b")) {
+                auto &range = ranges[mark.id];
+                auto &slot = mark.start ? range.first : range.second;
+                if (!slot)
+                    slot = Anchor{mark.paragraph, mark.offset,
+                                  mark.start ? Affinity::Before : Affinity::After};
+            }
+        std::set<std::string> names, keys;
+        bool dropped = false;
+        for (const auto &[key, name] : bookmarkNames) {
+            const auto found = ranges.find(key);
+            bool usable = keys.insert(key).second && found != ranges.end() &&
+                          found->second.first && names.insert(name).second &&
+                          document.bookmarks.size() < 100000;
+            try {
+                validateBookmarkName(name);
+            } catch (const std::exception &) {
+                usable = false;
+            }
+            if (!usable) {
+                dropped = true;
+                continue;
+            }
+            auto start = snap(*found->second.first);
+            std::optional<Anchor> end;
+            if (found->second.second)
+                end = snap(*found->second.second);
+            const auto from = document.resolve(start);
+            const auto to = end ? document.resolve(*end) : from;
+            if (!from || !to) {
+                dropped = true;
+                continue;
+            }
+            Bookmark bookmark{document.allocateId(), name, start, std::nullopt};
+            if (*from < *to)
+                bookmark.end = end; // a range; otherwise a place
+            else
+                bookmark.anchor.affinity = Affinity::After;
+            document.bookmarks.push_back(std::move(bookmark));
+        }
+        if (dropped)
+            warn(warnings, "Bookmarks without a name or a place in the text were left out.");
     }
     for (std::size_t i = 0; i + 1 < document.paragraphs.size(); ++i) {
         const auto &p = document.paragraphs[i], &next = document.paragraphs[i + 1];
@@ -2851,17 +3043,19 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                             document.trackChanges = attr(node, "val") != "false" &&
                                                     attr(node, "val") != "0" &&
                                                     attr(node, "val") != "off";
+                        else if (is(node, "evenAndOddHeaders"))
+                            document.page.differentOddEven = enabled(node);
                         else if (is(node, "defaultTabStop") && twips(attr(node, "val")) != 720)
                             warn(warnings, "The custom default tab interval is preserved, but "
                                            "Wordforge displays automatic tabs every 36 points.");
             }
+    // Word ignores even-page headers unless the settings ask for them.
+    if (!document.page.differentOddEven)
+        document.page.evenHeader = document.page.evenFooter = {};
     validateDocument(document);
     return result;
 }
 std::string serializeDocx(const Document &document) {
-    if (!document.bookmarks.empty())
-        throw std::runtime_error(
-            "DOCX bookmark export is not implemented yet; save as .wfg to preserve bookmarks");
     validateDocument(document);
     pugi::xml_document content;
     auto root = content.append_child("w:document");
@@ -2934,6 +3128,19 @@ std::string serializeDocx(const Document &document) {
         std::size_t id; // a comment's number, or a field's index in `exportedFields`
         bool field = false;
         bool empty = false; // a field with no result: written whole at its start
+        bool bookmark = false; // id: the bookmark's index in document.bookmarks
+    };
+    const auto bookmarkNames = wordBookmarkNames(document.bookmarks);
+    // A table or cell border side: a single line, or nil for none.
+    auto writeBorder = [](pugi::xml_node border, const TableBorder &line) {
+        if (line.width <= 0) {
+            set(border, "val", std::string("nil"));
+            return;
+        }
+        set(border, "val", std::string("single"));
+        // Eighths of a point; Word accepts 2 to 96.
+        set(border, "sz", std::clamp(std::round(line.width * 8), 2.0, 96.0));
+        set(border, "color", hex(line.color));
     };
     std::vector<const Field *> exportedFields; // in nesting order: outer before inner
     std::vector<pugi::xml_node> fieldParents;  // where each field's begin was written
@@ -2981,14 +3188,28 @@ std::string serializeDocx(const Document &document) {
             if (!empty)
                 markers[end.paragraph].push_back({end.offset, true, id, true});
         }
-        // At one offset: field ends (inner first), comment starts, field starts (outer
-        // first), comment ends.
+        // Bookmarks: a place is written as a start and an end together.
+        for (std::size_t n = 0; n < document.bookmarks.size(); ++n) {
+            const auto &bookmark = document.bookmarks[n];
+            const auto start = document.resolve(bookmark.anchor);
+            const auto end = bookmark.end ? document.resolve(*bookmark.end) : start;
+            if (!start || !end || !written(start->paragraph) || !written(end->paragraph))
+                continue;
+            const bool place = *start == *end;
+            markers[start->paragraph].push_back({start->offset, false, n, false, place, true});
+            if (!place)
+                markers[end->paragraph].push_back({end->offset, true, n, false, false, true});
+        }
+        // At one offset: field ends (inner first), bookmark ends, comment starts, bookmark
+        // starts, field starts (outer first), comment ends.
         for (auto &[index, list] : markers)
             std::stable_sort(list.begin(), list.end(), [](const Marker &a, const Marker &b) {
                 if (a.offset != b.offset)
                     return a.offset < b.offset;
                 auto phase = [](const Marker &m) {
-                    return m.field ? (m.end ? 0 : 2) : (m.end ? 3 : 1);
+                    return m.field      ? (m.end ? 0 : 4)
+                           : m.bookmark ? (m.end ? 1 : 3)
+                                        : (m.end ? 5 : 2);
                 };
                 if (phase(a) != phase(b))
                     return phase(a) < phase(b);
@@ -3001,12 +3222,18 @@ std::string serializeDocx(const Document &document) {
     bool wroteSection = false;
     auto writeSection = [&](pugi::xml_node section, const PageStyle &page, bool continuous,
                             bool references) {
-        if (references && (!document.page.header.empty() || !document.page.footer.empty())) {
+        if (references && document.page.anyBand()) {
             for (const bool header : {true, false}) {
                 auto node = element(section, header ? "headerReference" : "footerReference");
                 set(node, "type", std::string("default"));
                 node.append_attribute("r:id") = header ? "header" : "footer";
             }
+            if (document.page.differentOddEven)
+                for (const bool header : {true, false}) {
+                    auto node = element(section, header ? "headerReference" : "footerReference");
+                    set(node, "type", std::string("even"));
+                    node.append_attribute("r:id") = header ? "headerEven" : "footerEven";
+                }
             if (document.page.differentFirstPage)
                 for (const bool header : {true, false}) {
                     auto node = element(section, header ? "headerReference" : "footerReference");
@@ -3058,17 +3285,8 @@ std::string serializeDocx(const Document &document) {
                 set(tableWidth, "w", width);
                 set(tableWidth, "type", std::string("dxa"));
                 auto borders = element(properties, "tblBorders");
-                for (const auto *side : {"top", "left", "bottom", "right", "insideH", "insideV"}) {
-                    auto border = element(borders, side);
-                    if (table.border.width <= 0) {
-                        set(border, "val", std::string("nil"));
-                        continue;
-                    }
-                    set(border, "val", std::string("single"));
-                    // Eighths of a point; Word accepts 2 to 96.
-                    set(border, "sz", std::clamp(std::round(table.border.width * 8), 2.0, 96.0));
-                    set(border, "color", hex(table.border.color));
-                }
+                for (const auto *side : {"top", "left", "bottom", "right", "insideH", "insideV"})
+                    writeBorder(element(borders, side), table.border);
                 set(element(properties, "tblLayout"), "type", std::string("fixed"));
                 auto margins = element(properties, "tblCellMar");
                 for (const auto *side : {"top", "left", "bottom", "right"}) {
@@ -3103,6 +3321,20 @@ std::string serializeDocx(const Document &document) {
                         auto vertical = element(properties, "vMerge");
                         if (anchor)
                             set(vertical, "val", std::string("restart"));
+                    }
+                    // The cell's own sides (a merged cell's, on each of its parts).
+                    const auto ownRow = merge ? merge->row : cell.row,
+                               ownColumn = merge ? merge->column : cell.column;
+                    pugi::xml_node cellBorders;
+                    static constexpr const char *sideNames[] = {"top", "right", "bottom", "left"};
+                    for (int side : {0, 3, 2, 1}) { // the schema's order: top, left, bottom, right
+                        const auto *own =
+                            table.ownBorder(ownRow, ownColumn, static_cast<CellSide>(side));
+                        if (!own)
+                            continue;
+                        if (!cellBorders)
+                            cellBorders = element(properties, "tcBorders");
+                        writeBorder(element(cellBorders, sideNames[side]), *own);
                     }
                     if (const auto fill = merge ? table.fillAt(merge->row, merge->column)
                                                 : table.fillAt(cell.row, cell.column)) {
@@ -3231,6 +3463,17 @@ std::string serializeDocx(const Document &document) {
                         fieldChar("end");
                     continue;
                 }
+                if (marker.bookmark) {
+                    if (!marker.end) {
+                        auto start = element(p, "bookmarkStart");
+                        set(start, "id", static_cast<double>(marker.id));
+                        set(start, "name",
+                            bookmarkNames.at(document.bookmarks[marker.id].name));
+                    }
+                    if (marker.end || marker.empty)
+                        set(element(p, "bookmarkEnd"), "id", static_cast<double>(marker.id));
+                    continue;
+                }
                 set(element(p, marker.end ? "commentRangeEnd" : "commentRangeStart"), "id",
                     static_cast<double>(marker.id));
                 if (marker.end)
@@ -3249,8 +3492,11 @@ std::string serializeDocx(const Document &document) {
                 if (!hyperlink || p.last_child() != hyperlink || hyperlinkTarget != run.link) {
                     hyperlink = element(p, "hyperlink");
                     hyperlinkTarget = run.link;
-                    if (run.link[0] == '#')
-                        set(hyperlink, "anchor", run.link.substr(1));
+                    if (run.link[0] == '#') {
+                        const auto found = bookmarkNames.find(run.link.substr(1));
+                        set(hyperlink, "anchor",
+                            found == bookmarkNames.end() ? run.link.substr(1) : found->second);
+                    }
                     else {
                         auto &id = linkIds[run.link];
                         if (id.empty())
@@ -3381,20 +3627,26 @@ std::string serializeDocx(const Document &document) {
     auto section = element(body, "sectPr");
     // Header and footer references come first in sectPr.
     std::vector<std::pair<std::string, std::string>> bandParts; // name, XML
-    if (!document.page.header.empty() || !document.page.footer.empty()) {
+    if (document.page.anyBand()) {
         const double textWidth = document.page.width - 2 * document.page.margin;
-        auto reference = [&](bool header, bool first, const PageBand &band) {
-            const auto name = std::string(header ? "header" : "footer") + (first ? "First" : "");
+        auto reference = [&](bool header, const char *type, const PageBand &band) {
+            const std::string kind = type;
+            const auto name = std::string(header ? "header" : "footer") +
+                              (kind == "first" ? "First" : kind == "even" ? "Even" : "");
             auto node = element(section, header ? "headerReference" : "footerReference");
-            set(node, "type", std::string(first ? "first" : "default"));
+            set(node, "type", kind);
             node.append_attribute("r:id") = name.c_str();
             bandParts.emplace_back(name, bandPart(header, band, textWidth));
         };
-        reference(true, false, document.page.header);
-        reference(false, false, document.page.footer);
+        reference(true, "default", document.page.header);
+        reference(false, "default", document.page.footer);
+        if (document.page.differentOddEven) {
+            reference(true, "even", document.page.evenHeader);
+            reference(false, "even", document.page.evenFooter);
+        }
         if (document.page.differentFirstPage) {
-            reference(true, true, {});
-            reference(false, true, {});
+            reference(true, "first", {});
+            reference(false, "first", {});
         }
     }
     writeSection(section, document.page, previousContinuous, false);
@@ -3723,11 +3975,14 @@ std::string serializeDocx(const Document &document) {
                         return part.contentType == "application/vnd.openxmlformats-"
                                                    "officedocument.wordprocessingml.settings+xml";
                     });
-    if (document.trackChanges && !keptSettings) {
+    if ((document.trackChanges || document.page.differentOddEven) && !keptSettings) {
         pugi::xml_document settings, types, relationships;
         auto root = settings.append_child("w:settings");
         root.append_attribute("xmlns:w") = wordNs;
-        element(root, "trackRevisions");
+        if (document.trackChanges)
+            element(root, "trackRevisions");
+        if (document.page.differentOddEven)
+            element(root, "evenAndOddHeaders");
         types.load_string(parts.at("[Content_Types].xml").c_str());
         relationships.load_string(parts.at("word/_rels/document.xml.rels").c_str());
         auto entry = types.document_element().append_child("Override");
@@ -3756,7 +4011,10 @@ std::string serializeDocx(const Document &document) {
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml";
             if (!parts
                      .emplace(part.path, settings
-                                             ? withTrackRevisions(part.data, document.trackChanges)
+                                             ? withSetting(withSetting(part.data, "trackRevisions",
+                                                                       document.trackChanges),
+                                                           "evenAndOddHeaders",
+                                                           document.page.differentOddEven)
                                                   : part.data)
                      .second)
                 throw std::runtime_error("A kept document part collides with generated content");

@@ -15,9 +15,9 @@ Condensed on 2026-11-23. The full earlier notes are kept verbatim in
     stamps, copy-on-write paragraphs, incremental word count, O(1) page positions,
     and PR #57's per-paragraph pagination keys and in-place checkpoints
 
-  Native format WFG18; the reader supports WFG1–18. WFG18 (contextual and character
-  spacing, list levels and definitions) shipped in 0.6.13, so further format changes
-  need WFG19.
+  Native format WFG19; the reader supports WFG1–19. WFG19 (bookmark ranges, even-page
+  headers and footers, cell borders) isn't in a release yet; add further format changes
+  to it until it ships. WFG18 shipped in 0.6.13.
 - Last published release: **v0.6.13** (tag at 0baebd5, 2026-11-24).
   - Windows installers and ZIPs are checksum-verified.
   - Snap stable is `0.6.13-preview`, amd64 rev 87 / arm64 rev 86, promoted by verified
@@ -53,7 +53,8 @@ Condensed on 2026-11-23. The full earlier notes are kept verbatim in
    - table styles and row splitting
    - theme fonts
    - language and OpenType controls (character spacing is done)
-   - DOCX fidelity
+   - DOCX fidelity: all 114 documents of the Word corpus now open without warnings, so
+     the next step is a larger, more varied corpus and checking saved files in Word
    - accessibility
 3. Rerun the Word fidelity harness for widow/orphan and superscript/subscript once Word
    COM works.

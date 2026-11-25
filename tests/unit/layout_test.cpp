@@ -689,6 +689,35 @@ TEST(Layout, HeadersAndFootersRepeatInTheMarginsWithPageNumbers) {
     editor.setPage(page);
     EXPECT_TRUE(engine.compose(editor.document).furniture.empty());
 }
+TEST(Layout, EvenPagesShowTheirOwnHeaderAndFooter) {
+    auto editor = threePages();
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    auto page = editor.document.page;
+    page.header = {u"Odd", u"", u""};
+    page.evenHeader = {u"", u"", u"Even"};
+    page.evenFooter = {u"", u"{PAGE}", u""};
+    editor.setPage(page);
+    // Without the switch, every page shows the header alone.
+    auto layout = engine.compose(editor.document);
+    ASSERT_EQ(layout.furniture.size(), 3u);
+    page.differentOddEven = true;
+    editor.setPage(page);
+    layout = engine.compose(editor.document);
+    // Pages 1 and 3: the header; page 2: the even-page header and footer.
+    ASSERT_EQ(layout.furniture.size(), 4u);
+    EXPECT_EQ(layout.furniture[0].page, 0u);
+    EXPECT_EQ(layout.furniture[1].page, 1u);
+    EXPECT_NEAR(layout.furniture[1].x + layout.furniture[1].shaped.width,
+                page.width - page.margin, 0.01);
+    EXPECT_EQ(layout.furniture[2].page, 1u);
+    EXPECT_GT(layout.furniture[2].baseline, page.height - page.margin);
+    EXPECT_EQ(layout.furniture[3].page, 2u);
+    // An empty odd header with even-page text still draws the even pages.
+    page.header = {};
+    editor.setPage(page);
+    EXPECT_EQ(engine.compose(editor.document).furniture.size(), 2u);
+}
 TEST(Layout, HeaderTextIsValidated) {
     PageStyle page;
     page.footer.center = u"a\nb";
@@ -841,7 +870,8 @@ TEST(Layout, CellsCarryTheirFillAndTableBorder) {
     EXPECT_EQ(layout.cells[0].fill, 0xffffeeccu);
     EXPECT_EQ(layout.cells[1].fill, 0u);
     for (const auto &cell : layout.cells)
-        EXPECT_EQ(cell.border, (TableBorder{2, 0xff336699}));
+        for (const auto &border : cell.borders)
+            EXPECT_EQ(border, (TableBorder{2, 0xff336699}));
 }
 TEST(Layout, FirstLineHangingAndRightIndentsAndJustifiedLines) {
     Shaper shaper(systemFontFiles());
@@ -1069,4 +1099,42 @@ TEST(Lists, LayoutShowsEachLevelsLabel) {
     EXPECT_EQ(layout.lines[0].markerText, u"Step 1:");
     EXPECT_EQ(layout.lines[1].markerText, u"1.1");
     EXPECT_EQ(layout.lines[2].markerText, u"Step 2:");
+}
+TEST(CellBorders, EditingMovesThemWithTheirCellsAndTheTableBorderReplacesThem) {
+    Editor e;
+    e.insertTable(2, 2);
+    auto &table = e.document.tables[0];
+    table.cellBorders.push_back({1, 1, CellSide::Left, {2, 0xffff0000}});
+    validateDocument(e.document);
+    e.selection = {{0, 0}, {0, 0}}; // first cell
+    e.tableRow(true, true);         // a row above: the border moves down with its cell
+    ASSERT_EQ(e.document.tables[0].cellBorders.size(), 1u);
+    EXPECT_EQ(e.document.tables[0].cellBorders[0].row, 2u);
+    e.tableColumn(false); // the first column goes; the border's cell moves left
+    ASSERT_EQ(e.document.tables[0].cellBorders.size(), 1u);
+    EXPECT_EQ(e.document.tables[0].cellBorders[0].column, 0u);
+    // A layout draws each side.
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    const auto layout = engine.compose(e.document);
+    bool found = false;
+    for (const auto &cell : layout.cells)
+        if (cell.borders[static_cast<int>(CellSide::Left)] == TableBorder{2, 0xffff0000})
+            found = true;
+    EXPECT_TRUE(found);
+    e.undo();
+    EXPECT_EQ(e.document.tables[0].cellBorders[0].column, 1u);
+    // Choosing the table's border applies it to every side.
+    e.setTableBorder({1, 0xff000000});
+    EXPECT_TRUE(e.document.tables[0].cellBorders.empty());
+    // Repeated, unordered or out-of-range sides are rejected.
+    auto bad = e.document;
+    bad.tables[0].cellBorders = {{9, 0, CellSide::Top, {}}};
+    EXPECT_THROW(validateDocument(bad), std::invalid_argument);
+    bad.tables[0].cellBorders = {{0, 0, CellSide::Top, {}}, {0, 0, CellSide::Top, {}}};
+    EXPECT_THROW(validateDocument(bad), std::invalid_argument);
+    bad.tables[0].cellBorders = {{0, 0, CellSide::Bottom, {}}, {0, 0, CellSide::Top, {}}};
+    EXPECT_THROW(validateDocument(bad), std::invalid_argument); // out of order
+    bad.tables[0].cellBorders = {{0, 0, CellSide::Top, {}}, {0, 0, CellSide::Bottom, {}}};
+    EXPECT_NO_THROW(validateDocument(bad));
 }

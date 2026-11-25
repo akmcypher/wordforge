@@ -391,9 +391,19 @@ std::string serializeNative(const Document &document) {
         !document.lists.empty() ||
         std::any_of(document.paragraphs.begin(), document.paragraphs.end(),
                     [](const Paragraph &p) { return p.listId || p.listLevel; });
+    // WFG19 only for even-page headers and footers, bookmark ranges or cell borders, so
+    // other files stay readable by 0.6.13.
+    const bool paired =
+        document.page.differentOddEven || !document.page.evenHeader.empty() ||
+        !document.page.evenFooter.empty() ||
+        std::any_of(document.bookmarks.begin(), document.bookmarks.end(),
+                    [](const Bookmark &b) { return b.end.has_value(); }) ||
+        std::any_of(document.tables.begin(), document.tables.end(),
+                    [](const Table &t) { return !t.cellBorders.empty(); });
     const bool semantic = styled || banded || preserving || noted || reviewed || decorated ||
-                          themed || sectioned || tabbed || kept || widowed || baseline || spaced;
-    root.append_attribute("version") = spaced ? "18" : baseline ? "17" : widowed ? "16" : kept                         ? "15"
+                          themed || sectioned || tabbed || kept || widowed || baseline || spaced ||
+                          paired;
+    root.append_attribute("version") = paired ? "19" : spaced ? "18" : baseline ? "17" : widowed ? "16" : kept                         ? "15"
                                        : tabbed                     ? "14"
                                        : sectioned                  ? "13"
                                        : themed                     ? "12"
@@ -428,6 +438,8 @@ std::string serializeNative(const Document &document) {
     }
     if (document.page.differentFirstPage)
         root.append_attribute("differentFirstPage") = "true";
+    if (document.page.differentOddEven)
+        root.append_attribute("differentOddEven") = "true";
     if (document.trackChanges)
         root.append_attribute("trackChanges") = "true";
     for (const auto &revision : document.revisions) {
@@ -438,7 +450,9 @@ std::string serializeNative(const Document &document) {
             node.append_attribute("date") = revision.date.c_str();
     }
     for (auto [name, band] :
-         {std::pair{"header", &document.page.header}, std::pair{"footer", &document.page.footer}}) {
+         {std::pair{"header", &document.page.header}, std::pair{"footer", &document.page.footer},
+          std::pair{"evenHeader", &document.page.evenHeader},
+          std::pair{"evenFooter", &document.page.evenFooter}}) {
         if (band->empty())
             continue;
         auto node = root.append_child(name);
@@ -542,6 +556,15 @@ std::string serializeNative(const Document &document) {
             item.append_attribute("column") = static_cast<unsigned long long>(merge.column);
             item.append_attribute("rows") = static_cast<unsigned long long>(merge.rows);
             item.append_attribute("columns") = static_cast<unsigned long long>(merge.columns);
+        }
+        static constexpr const char *sides[] = {"top", "right", "bottom", "left"};
+        for (const auto &border : table.cellBorders) {
+            auto item = node.append_child("cellBorder");
+            item.append_attribute("row") = static_cast<unsigned long long>(border.row);
+            item.append_attribute("column") = static_cast<unsigned long long>(border.column);
+            item.append_attribute("side") = sides[static_cast<int>(border.side)];
+            item.append_attribute("width") = border.border.width;
+            item.append_attribute("color") = static_cast<unsigned long long>(border.border.color);
         }
     }
     for (const auto &p : document.paragraphs) {
@@ -653,6 +676,12 @@ std::string serializeNative(const Document &document) {
         node.append_attribute("offset") = static_cast<unsigned long long>(bookmark.anchor.offset);
         node.append_attribute("affinity") =
             bookmark.anchor.affinity == Affinity::Before ? "before" : "after";
+        if (const auto &end = bookmark.end) {
+            node.append_attribute("endParagraph") = static_cast<unsigned long long>(end->paragraphId);
+            node.append_attribute("endOffset") = static_cast<unsigned long long>(end->offset);
+            node.append_attribute("endAffinity") =
+                end->affinity == Affinity::Before ? "before" : "after";
+        }
     }
     std::ostringstream output;
     xml.save(output, "  ", pugi::format_default, pugi::encoding_utf8);
@@ -694,11 +723,13 @@ Document parseNative(const std::string &input) {
         (version != "1" && version != "2" && version != "3" && version != "4" && version != "5" &&
          version != "6" && version != "7" && version != "8" && version != "9" && version != "10" &&
          version != "11" && version != "12" && version != "13" && version != "14" &&
-         version != "15" && version != "16" && version != "17" && version != "18"))
+         version != "15" && version != "16" && version != "17" && version != "18" &&
+         version != "19"))
         throw std::runtime_error("Unsupported native document version");
     // WFG7 is WFG6 plus character styles; WFG8 adds headers and footers.
     // WFG9 adds DOCX package parts kept from an imported file.
-    const bool v18 = version == "18";
+    const bool v19 = version == "19";
+    const bool v18 = version == "18" || v19;
     const bool v17 = version == "17" || v18;
     const bool v16 = version == "16" || v17;
     const bool v15 = version == "15" || v16;
@@ -715,6 +746,9 @@ Document parseNative(const std::string &input) {
         throw std::runtime_error("WFG4/5 require ZIP transport; legacy versions require XML");
     if (version == "1")
         attributes(root, {"version", "width", "height", "margin"});
+    else if (v19)
+        attributes(root, {"version", "width", "height", "margin", "nextId", "differentFirstPage",
+                          "trackChanges", "columns", "columnGap", "differentOddEven"});
     else if (v13)
         attributes(root, {"version", "width", "height", "margin", "nextId", "differentFirstPage",
                           "trackChanges", "columns", "columnGap"});
@@ -737,6 +771,8 @@ Document parseNative(const std::string &input) {
     pageGeometry(document.page);
     if (v8)
         document.page.differentFirstPage = boolean(root, "differentFirstPage");
+    if (v19)
+        document.page.differentOddEven = boolean(root, "differentOddEven");
     if (v10)
         document.trackChanges = boolean(root, "trackChanges");
     if (v13) {
@@ -833,14 +869,17 @@ Document parseNative(const std::string &input) {
                                                 p.attribute("target").value()});
             continue;
         }
-        if (v8 &&
-            (std::string_view(p.name()) == "header" || std::string_view(p.name()) == "footer")) {
+        const std::string_view bandName = p.name();
+        if ((v8 && (bandName == "header" || bandName == "footer")) ||
+            (v19 && (bandName == "evenHeader" || bandName == "evenFooter"))) {
             attributes(p, {"left", "center", "right"});
             for (auto nested : p.children())
                 if (!indentation(nested))
                     throw std::runtime_error("Unexpected header or footer content");
-            auto &band = std::string_view(p.name()) == "header" ? document.page.header
-                                                                : document.page.footer;
+            auto &band = bandName == "header"       ? document.page.header
+                         : bandName == "footer"     ? document.page.footer
+                         : bandName == "evenHeader" ? document.page.evenHeader
+                                                    : document.page.evenFooter;
             if (!band.empty())
                 throw std::runtime_error("Duplicate native header or footer");
             band = {utf16(p.attribute("left").value()), utf16(p.attribute("center").value()),
@@ -902,7 +941,23 @@ Document parseNative(const std::string &input) {
                 if (indentation(nested))
                     continue;
                 const std::string_view name = nested.name();
-                if (v11 && name == "shade") {
+                if (v19 && name == "cellBorder") {
+                    attributes(nested, {"row", "column", "side", "width", "color"});
+                    if (nested.first_child() || table.cellBorders.size() >= 40000 ||
+                        !nested.attribute("width") || !nested.attribute("color"))
+                        throw std::runtime_error("Invalid native table cell border");
+                    const std::string_view side = nested.attribute("side").value();
+                    const auto which = side == "top"      ? CellSide::Top
+                                       : side == "right"  ? CellSide::Right
+                                       : side == "bottom" ? CellSide::Bottom
+                                       : side == "left"
+                                           ? CellSide::Left
+                                           : throw std::runtime_error("Invalid cell border side");
+                    table.cellBorders.push_back(
+                        {index(nested, "row", true), index(nested, "column", true), which,
+                         {number(nested, "width", 0, 0, 6),
+                          static_cast<std::uint32_t>(number(nested, "color", 0, 0, 4294967295.0))}});
+                } else if (v11 && name == "shade") {
                     attributes(nested, {"row", "column", "color"});
                     if (nested.first_child() || table.shading.size() >= 10000)
                         throw std::runtime_error("Invalid native table shading");
@@ -952,7 +1007,11 @@ Document parseNative(const std::string &input) {
         }
         if ((version == "3" || version == "4" || version == "5" || v6) &&
             std::string_view(p.name()) == "bookmark") {
-            attributes(p, {"id", "name", "paragraph", "offset", "affinity"});
+            if (v19)
+                attributes(p, {"id", "name", "paragraph", "offset", "affinity", "endParagraph",
+                               "endOffset", "endAffinity"});
+            else
+                attributes(p, {"id", "name", "paragraph", "offset", "affinity"});
             for (auto nested : p.children())
                 if (!indentation(nested))
                     throw std::runtime_error("Unexpected bookmark content");
@@ -967,6 +1026,18 @@ Document parseNative(const std::string &input) {
                  p.attribute("name").value(),
                  {identifier(p, "paragraph"), static_cast<std::size_t>(offset),
                   affinity == "before" ? Affinity::Before : Affinity::After}});
+            if (p.attribute("endParagraph") || p.attribute("endOffset") ||
+                p.attribute("endAffinity")) {
+                const auto endOffset = identifier(p, "endOffset", true);
+                if (endOffset > std::numeric_limits<std::size_t>::max())
+                    throw std::runtime_error("Bookmark offset exceeds native index size");
+                const std::string_view endAffinity = p.attribute("endAffinity").value();
+                if (endAffinity != "before" && endAffinity != "after")
+                    throw std::runtime_error("Invalid bookmark affinity");
+                document.bookmarks.back().end =
+                    Anchor{identifier(p, "endParagraph"), static_cast<std::size_t>(endOffset),
+                           endAffinity == "before" ? Affinity::Before : Affinity::After};
+            }
             continue;
         }
         if (std::string_view(p.name()) != "p")

@@ -310,7 +310,8 @@ void cellShadingDialog(PageView *view, QWidget *parent) {
     if (dialog.exec() == QDialog::Accepted && dialog.selectedColor().isValid())
         view->shadeCells(dialog.selectedColor().rgb());
 }
-// Header and footer: left/centre/right text for each, page number fields, first page option.
+// Header and footer: left/centre/right text for each (and for even pages), page number
+// fields, first page and odd/even options.
 void headerFooterDialog(PageView *view, QWidget *parent) {
     QDialog dialog(parent);
     dialog.setWindowTitle("Header and footer");
@@ -321,15 +322,28 @@ void headerFooterDialog(PageView *view, QWidget *parent) {
     for (int column = 0; column < 3; ++column)
         layout->addWidget(new QLabel(columns[column]), 0, column + 1);
     std::vector<QLineEdit *> edits;
+    std::vector<QWidget *> evenRows; // enabled with different odd and even pages
     QLineEdit *focused = nullptr;
     int row = 1;
-    for (auto [name, band] : {std::pair{"Header", &page.header}, std::pair{"Footer", &page.footer}}) {
-        layout->addWidget(new QLabel(name), row, 0);
+    struct BandRow {
+        const char *label, *id;
+        PageBand *band;
+    };
+    for (auto [name, id, band] : {BandRow{"Header", "header", &page.header},
+                                  BandRow{"Footer", "footer", &page.footer},
+                                  BandRow{"Even-page header", "evenHeader", &page.evenHeader},
+                                  BandRow{"Even-page footer", "evenFooter", &page.evenFooter}}) {
+        auto *label = new QLabel(name);
+        layout->addWidget(label, row, 0);
+        if (band == &page.evenHeader || band == &page.evenFooter)
+            evenRows.push_back(label);
         const std::u16string *texts[] = {&band->left, &band->center, &band->right};
         for (int column = 0; column < 3; ++column) {
             auto *edit = new QLineEdit(QString::fromStdU16String(*texts[column]));
-            edit->setObjectName(QString(name).toLower() + columns[column]);
+            edit->setObjectName(QString(id) + columns[column]);
             edit->setAccessibleName(QString(name) + " " + QString(columns[column]).toLower());
+            if (band == &page.evenHeader || band == &page.evenFooter)
+                evenRows.push_back(edit);
             edit->setMaxLength(500);
             edit->setMinimumWidth(150);
             layout->addWidget(edit, row, column + 1);
@@ -364,15 +378,29 @@ void headerFooterDialog(PageView *view, QWidget *parent) {
     first->setObjectName("differentFirstPage");
     first->setChecked(page.differentFirstPage);
     layout->addWidget(first, row++, 1, 1, 3);
+    auto *oddEven = new QCheckBox("Different headers and footers on even pages");
+    oddEven->setObjectName("differentOddEven");
+    oddEven->setChecked(page.differentOddEven);
+    layout->addWidget(oddEven, row++, 1, 1, 3);
+    auto showEven = [evenRows](bool on) {
+        for (auto *widget : evenRows)
+            widget->setEnabled(on);
+    };
+    showEven(page.differentOddEven);
+    QObject::connect(oddEven, &QCheckBox::toggled, &dialog, showEven);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     layout->addWidget(buttons, row, 0, 1, 4);
     if (dialog.exec() != QDialog::Accepted)
         return;
-    std::u16string *targets[] = {&page.header.left, &page.header.center, &page.header.right,
-                                 &page.footer.left, &page.footer.center, &page.footer.right};
-    for (std::size_t i = 0; i < 6; ++i) {
+    std::u16string *targets[] = {&page.header.left,     &page.header.center,
+                                 &page.header.right,    &page.footer.left,
+                                 &page.footer.center,   &page.footer.right,
+                                 &page.evenHeader.left, &page.evenHeader.center,
+                                 &page.evenHeader.right, &page.evenFooter.left,
+                                 &page.evenFooter.center, &page.evenFooter.right};
+    for (std::size_t i = 0; i < 12; ++i) {
         auto text = edits[i]->text().toStdU16String();
         for (auto &character : text)
             if (character < 0x20 || character == 0x7f || character == 0xfffc)
@@ -380,6 +408,7 @@ void headerFooterDialog(PageView *view, QWidget *parent) {
         *targets[i] = text.find_first_not_of(u' ') == std::u16string::npos ? u"" : text;
     }
     page.differentFirstPage = first->isChecked();
+    page.differentOddEven = oddEven->isChecked();
     if (page != view->sectionPage())
         view->setPage(page);
 }

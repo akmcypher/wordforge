@@ -34,8 +34,11 @@ std::optional<Position> Document::resolve(const Anchor &anchor) const {
 }
 std::vector<Anchor *> Document::anchors() {
     std::vector<Anchor *> result;
-    for (auto &bookmark : bookmarks)
+    for (auto &bookmark : bookmarks) {
         result.push_back(&bookmark.anchor);
+        if (bookmark.end)
+            result.push_back(&*bookmark.end);
+    }
     for (auto &comment : comments) {
         result.push_back(&comment.start);
         result.push_back(&comment.end);
@@ -48,8 +51,11 @@ std::vector<Anchor *> Document::anchors() {
 }
 std::vector<const Anchor *> Document::anchors() const {
     std::vector<const Anchor *> result;
-    for (const auto &bookmark : bookmarks)
+    for (const auto &bookmark : bookmarks) {
         result.push_back(&bookmark.anchor);
+        if (bookmark.end)
+            result.push_back(&*bookmark.end);
+    }
     for (const auto &comment : comments) {
         result.push_back(&comment.start);
         result.push_back(&comment.end);
@@ -145,7 +151,8 @@ bool Editor::goToBookmark(std::uint64_t id) {
     for (const auto &bookmark : document.bookmarks)
         if (bookmark.id == id) {
             if (auto position = document.resolve(bookmark.anchor)) {
-                selection = {*position, *position};
+                const auto end = bookmark.end ? document.resolve(*bookmark.end) : position;
+                selection = {*position, end ? *end : *position};
                 typingStyle = document.styleAt(*position);
                 return true;
             }

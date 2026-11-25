@@ -570,15 +570,12 @@ class DesktopTest : public QObject {
         QVERIFY(dialogWorked);
         QTemporaryDir directory;
         window.saveFile(directory.path() + "/bookmarks.wfg");
-        const auto savedTitle = window.windowTitle();
-        QFile protectedDocx(directory.path() + "/preserve.docx");
-        QVERIFY(protectedDocx.open(QIODevice::WriteOnly));
-        protectedDocx.write("original bytes");
-        protectedDocx.close();
-        QVERIFY_THROWS_EXCEPTION(std::exception, window.saveFile(protectedDocx.fileName()));
-        QCOMPARE(window.windowTitle(), savedTitle);
-        QVERIFY(protectedDocx.open(QIODevice::ReadOnly));
-        QCOMPARE(protectedDocx.readAll(), QByteArray("original bytes"));
+        // Word documents keep bookmarks too, with their names.
+        window.saveFile(directory.path() + "/bookmarks.docx");
+        wf::MainWindow word;
+        word.openFile(directory.path() + "/bookmarks.docx");
+        QCOMPARE(word.pageView()->document().bookmarks.size(), std::size_t(2));
+        QCOMPARE(word.pageView()->document().bookmarks[1].name, std::string("dialog_created"));
         wf::MainWindow restored;
         restored.openFile(directory.path() + "/bookmarks.wfg");
         QCOMPARE(restored.pageView()->document().bookmarks.size(), std::size_t(2));
@@ -1236,6 +1233,62 @@ class DesktopTest : public QObject {
         window.findChild<QAction *>("undoAction")->trigger();
         QVERIFY(view->document().page.header.empty());
         QVERIFY(view->document().page.footer.empty());
+    }
+    void headerFooterDialogSetsEvenPageBands() {
+        wf::MainWindow window;
+        window.show();
+        auto *view = window.pageView();
+        view->setDocument({});
+        auto *action = window.findChild<QAction *>("headerFooterAction");
+        QVERIFY(action);
+        bool edited = false, disabledFirst = false;
+        QTimer::singleShot(0, &window, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            if (!dialog)
+                return;
+            auto *even = dialog->findChild<QLineEdit *>("evenHeaderRight");
+            auto *oddEven = dialog->findChild<QCheckBox *>("differentOddEven");
+            if (even && oddEven) {
+                disabledFirst = !even->isEnabled(); // until the switch is on
+                oddEven->setChecked(true);
+                even->setText("Chapter");
+                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+                edited = even->isEnabled();
+            } else
+                dialog->reject();
+        });
+        action->trigger();
+        QVERIFY(disabledFirst);
+        QVERIFY(edited);
+        const auto &page = view->document().page;
+        QVERIFY(page.differentOddEven);
+        QCOMPARE(QString::fromStdU16String(page.evenHeader.right), QString("Chapter"));
+    }
+    void bookmarksDialogHidesWordsHiddenBookmarks() {
+        wf::MainWindow window;
+        auto *view = window.pageView();
+        view->insertText("text");
+        QVERIFY(view->addBookmark("_Toc1"));
+        QVERIFY(view->addBookmark("visible"));
+        auto *action = window.findChild<QAction *>("bookmarksAction");
+        QVERIFY(action);
+        int before = -1, after = -1;
+        QTimer::singleShot(0, &window, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            if (!dialog)
+                return;
+            auto *list = dialog->findChild<QListWidget *>("bookmarksList");
+            auto *hidden = dialog->findChild<QCheckBox *>("hiddenBookmarks");
+            if (list && hidden) {
+                before = list->count();
+                hidden->setChecked(true);
+                after = list->count();
+            }
+            dialog->accept();
+        });
+        action->trigger();
+        QCOMPARE(before, 1);
+        QCOMPARE(after, 2);
     }
     void tableDialogEditingStructureAndFileWorkflow() {
         wf::MainWindow window;

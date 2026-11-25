@@ -1,5 +1,6 @@
 #include "apps/desktop/bookmarks_dialog.hpp"
 #include "apps/desktop/page_view.hpp"
+#include <QCheckBox>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QHBoxLayout>
@@ -27,6 +28,11 @@ void showBookmarksDialog(PageView *view, QWidget *parent) {
     list->setObjectName("bookmarksList");
     list->setAccessibleName("Document bookmarks");
     layout->addWidget(list);
+    // Word's own bookmarks (for tables of contents, cross-references and the last edit)
+    // have names starting with an underscore; Word hides them unless asked, as here.
+    auto *hidden = new QCheckBox("Hidden bookmarks");
+    hidden->setObjectName("hiddenBookmarks");
+    layout->addWidget(hidden);
     auto *row = new QHBoxLayout;
     layout->addLayout(row);
     auto *add = new QPushButton("Add");
@@ -45,6 +51,8 @@ void showBookmarksDialog(PageView *view, QWidget *parent) {
     auto refresh = [&](std::uint64_t selected = 0) {
         list->clear();
         for (const auto &bookmark : view->document().bookmarks) {
+            if (bookmark.name.starts_with('_') && !hidden->isChecked() && bookmark.id != selected)
+                continue;
             auto *item = new QListWidgetItem(QString::fromStdString(bookmark.name), list);
             item->setData(Qt::UserRole, QVariant::fromValue(static_cast<qulonglong>(bookmark.id)));
         }
@@ -82,6 +90,10 @@ void showBookmarksDialog(PageView *view, QWidget *parent) {
             view->removeBookmark(item->data(Qt::UserRole).toULongLong());
             refresh();
         }
+    });
+    QObject::connect(hidden, &QCheckBox::toggled, &dialog, [&] {
+        const auto *item = list->currentItem();
+        refresh(item ? item->data(Qt::UserRole).toULongLong() : 0);
     });
     refresh();
     dialog.exec();

@@ -134,6 +134,10 @@ std::uint64_t tableKey(const Table &table) {
     for (const auto &shade : table.shading)
         key.add(static_cast<std::uint64_t>(shade.row)).add(static_cast<std::uint64_t>(shade.column))
             .add(static_cast<std::uint64_t>(shade.color));
+    for (const auto &item : table.cellBorders)
+        key.add(static_cast<std::uint64_t>(item.row)).add(static_cast<std::uint64_t>(item.column))
+            .add(static_cast<std::uint64_t>(item.side)).add(item.border.width)
+            .add(static_cast<std::uint64_t>(item.border.color));
     return key.value;
 }
 // Header and footer lines are marked so incremental composition can tell them apart from
@@ -231,8 +235,9 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
     // starts and its neighbours (text and character formatting through its revision).
     // Page styles carry the header and footer, so changing them recomposes everything.
     Key global;
-    global.add(noteStyle).add(document.page.differentFirstPage);
-    for (const auto *band : {&document.page.header, &document.page.footer})
+    global.add(noteStyle).add(document.page.differentFirstPage).add(document.page.differentOddEven);
+    for (const auto *band : {&document.page.header, &document.page.footer,
+                             &document.page.evenHeader, &document.page.evenFooter})
         global.add(band->left).add(band->center).add(band->right);
     // Pictures are drawn from their resources, so page stamps depend on them too.
     for (const auto &[id, resource] : document.images)
@@ -900,7 +905,11 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
                 result.cells.push_back({columnLeft() + edges[box.column], top,
                                         edges[box.column + box.columns] - edges[box.column], height,
                                         pageIndex, box.first, box.last,
-                                        table.fillAt(box.row, box.column), table.border});
+                                        table.fillAt(box.row, box.column),
+                                        {table.borderAt(box.row, box.column, CellSide::Top),
+                                         table.borderAt(box.row, box.column, CellSide::Right),
+                                         table.borderAt(box.row, box.column, CellSide::Bottom),
+                                         table.borderAt(box.row, box.column, CellSide::Left)}});
                 for (auto &line : box.lines) {
                     line.page = pageIndex;
                     line.box = result.cells.size() - 1;
@@ -1107,8 +1116,10 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
     bandStyle.color = 0xff5f6673;
     Key bandKey;
     bandKey.add(bandStyle).add(document.page.differentFirstPage)
+        .add(document.page.differentOddEven)
         .add(static_cast<std::uint64_t>(result.pageCount));
-    for (const auto *band : {&document.page.header, &document.page.footer})
+    for (const auto *band : {&document.page.header, &document.page.footer,
+                             &document.page.evenHeader, &document.page.evenFooter})
         bandKey.add(band->left).add(band->center).add(band->right);
     for (const auto &style : result.pageStyles)
         bandKey.geometry(style);
@@ -1116,14 +1127,14 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
     const bool bandsKept = incremental && bandKey.value == bandKey_;
     if (bandsKept)
         bands = std::move(oldBands);
-    else if (!document.page.header.empty() || !document.page.footer.empty()) {
+    else if (document.page.anyBand()) {
         for (std::size_t number = 0; number < result.pageCount; ++number) {
             const auto &page = result.pageStyles[number];
             const double width = page.width - 2 * page.margin;
-            if ((number == 0 && document.page.differentFirstPage) || page.margin < 24)
+            if (!document.page.band(true, number) || page.margin < 24)
                 continue;
             for (const bool top : {true, false}) {
-                const auto &band = top ? document.page.header : document.page.footer;
+                const auto &band = *document.page.band(top, number);
                 const std::u16string *texts[] = {&band.left, &band.center, &band.right};
                 for (int position = 0; position < 3; ++position) {
                     if (texts[position]->empty())
