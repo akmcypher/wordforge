@@ -6,32 +6,34 @@ Condensed on 2026-11-23. The full earlier notes are kept verbatim in
 
 ## Current state
 
-- `main` holds everything through PR #64 (release 0.6.13):
+- `main` holds everything through PR #67 (release 0.6.14):
   - features: sections/columns, tab stops and TOC dot leaders, keep-with-next and
     keep-lines, widow/orphan control, superscript/subscript, and in 0.6.13 Word table
     styles (PR #59), Word's style defaults kept (PR #61), contextual and character
-    spacing (PR #62), and list levels with Word numbering definitions (PR #63)
+    spacing (PR #62), and list levels with Word numbering definitions (PR #63), and in
+    0.6.14 Word bookmarks, even-page headers and footers, and cell borders (PR #66)
   - the long-document performance work of PRs #50–#54: incremental pagination, page
     stamps, copy-on-write paragraphs, incremental word count, O(1) page positions,
     and PR #57's per-paragraph pagination keys and in-place checkpoints
 
   Native format WFG19; the reader supports WFG1–19. WFG19 (bookmark ranges, even-page
-  headers and footers, cell borders) isn't in a release yet; add further format changes
-  to it until it ships. WFG18 shipped in 0.6.13.
-- Last published release: **v0.6.13** (tag at 0baebd5, 2026-11-24).
+  headers and footers, cell borders) shipped in 0.6.14, so further format changes need
+  WFG20.
+- Last published release: **v0.6.14** (tag at 38b5d00, 2026-11-27).
   - Windows installers and ZIPs are checksum-verified.
-  - Snap stable is `0.6.13-preview`, amd64 rev 87 / arm64 rev 86, promoted by verified
-    run 45589594999.
-  - Both channels read WFG1–18.
+  - Snap stable is `0.6.14-preview`, amd64 rev 91 / arm64 rev 90, promoted by verified
+    run 45882208032.
+  - Both channels read WFG1–19.
 - The Snap promotion's Store download can fail with TLS errors while the Store is
   throttling (HTTP 429). Rerun the failed job once the Store's info endpoint answers 200
   again; nothing is promoted until both archives verify.
 - PR #43 (0.6.9 publication evidence) is open on `codex/release-0.6.9-handoff`.
   Preserve it, and don't delete other branches or worktrees without asking.
-- Latest verification (2026-11-24):
-  - Main 0baebd5 (0.6.13) passed CI on PR #64, including both Windows installer builds and
+- Latest verification (2026-11-27):
+  - Main 38b5d00 (0.6.14) passed CI on PR #67, including both Windows installer builds and
     both strict-confinement Snap builds, and all six CTest suites locally on Windows ARM64.
-  - Ubuntu ran in CI only for 0.6.13. No new Word automation result exists for WFG16/17 features; the last
+  - Ubuntu ran in CI only for 0.6.14. The keystroke benchmark wasn't measured reliably
+    for 0.6.14 (the machine was busy); remeasure it against 0.6.13 before relying on it. No new Word automation result exists for WFG16/17 features; the last
   attempt stalled.
 
 ## Next work (in order)
