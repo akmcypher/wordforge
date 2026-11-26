@@ -14,7 +14,9 @@ per-feature support table.
 Both channels read WFG1–18. Previous release: 0.6.12 (a13c8d2). Release notes:
 `docs/releases/v0.6.13.md`.
 
-## Since 0.6.13 (not yet released)
+## In 0.6.14 (since 0.6.13; prepared, not yet published)
+
+Release notes: `docs/releases/v0.6.14.md`. Version 0.6.14 / `0.6.14-preview`.
 
 - **Bookmarks, even-page headers and cell borders:**
   - Word bookmarks are read and saved as places or named ranges. Saving a document with
@@ -25,7 +27,8 @@ Both channels read WFG1–18. Previous release: 0.6.12 (a13c8d2). Release notes:
     style's regions.
   - All 114 Word documents in the corpus now open without the import-limitations dialog,
     up from 88.
-  - Native format WFG19 (not yet released) is written only for documents using these.
+  - Native format WFG19 is written only for documents using these; it needs this newer
+    reader.
   - Evidence: `docs/evidence/2026-11-26-bookmarks-even-headers-cell-borders.md`.
 
 ## In 0.6.13 (since 0.6.12)

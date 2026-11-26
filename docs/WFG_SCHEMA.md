@@ -1,6 +1,6 @@
 # Native WFG schema and migration
 
-**WFG19 (not yet released; even-page headers, bookmark ranges, cell borders)** adds:
+**WFG19 (even-page headers, bookmark ranges, cell borders; 0.6.14)** adds:
 - **Even-page headers and footers:** the root attribute `differentOddEven` (boolean) and
   `<evenHeader>`/`<evenFooter>` elements with the `left`/`center`/`right` attributes of
   `<header>`. With the switch on, even pages (2, 4, ...) show them instead of the header
