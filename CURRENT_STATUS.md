@@ -14,14 +14,13 @@ per-feature support table.
 Both channels read WFG1–19. Previous release: 0.6.13 (0baebd5). Release notes:
 `docs/releases/v0.6.14.md`.
 
-## In 0.6.14 (since 0.6.13)
+## In 0.6.15 (since 0.6.14; prepared, not yet published)
 
-## Since 0.6.14 (on main, not released)
+Release notes: `docs/releases/v0.6.15.md`. Version 0.6.15 / `0.6.15-preview`.
 
 - **First-page headers and footers:** Word's "different first page" header and footer
   text is shown on the first page, kept when saving as DOCX, and can be edited in the
-  Header and footer dialog. It used to be dropped with a warning. Native format WFG20 is
-  written only for documents with first-page header or footer text.
+  Header and footer dialog. It used to be dropped with a warning.
 - **Dashed, dotted and double table borders:** drawn as such (they used to be single
   lines with a warning), kept in DOCX and native files (WFG20), and chosen in Table
   borders. Other Word styles (wavy, triple, 3-D...) still warn and are drawn as single
@@ -29,6 +28,11 @@ Both channels read WFG1–19. Previous release: 0.6.13 (0baebd5). Release notes:
 - **Diagonal cell borders:** Word's diagonal lines across a cell are drawn and kept in DOCX
   and native files (WFG20) instead of being dropped with a warning. They can't be set in
   Wordforge yet.
+- Native format WFG20 is written only for documents using these; it needs this newer
+  reader.
+- Evidence: `docs/evidence/2026-11-27-first-page-headers-border-styles.md`.
+
+## In 0.6.14 (since 0.6.13)
 
 Release notes: `docs/releases/v0.6.14.md`. Version 0.6.14 / `0.6.14-preview`.
 

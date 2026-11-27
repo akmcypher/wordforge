@@ -1,6 +1,6 @@
 # Native WFG schema and migration
 
-**WFG20 (first-page headers, border styles, diagonal borders; 0.6.15, not yet released)** adds:
+**WFG20 (first-page headers, border styles, diagonal borders; 0.6.15)** adds:
 - **First-page headers and footers:** `<firstHeader>` and `<firstFooter>` elements with
   the `left`/`center`/`right` attributes of `<header>`. With the root attribute
   `differentFirstPage` on, the document's first page shows them instead of the header and
