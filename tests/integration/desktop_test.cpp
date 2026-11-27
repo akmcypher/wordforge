@@ -273,18 +273,18 @@ class DesktopTest : public QObject {
         insert->trigger();
         QVERIFY(view->hasTableOfContents());
         const auto original = view->document().text();
-        const auto width = e.document.page.width - 2 * e.document.page.margin;
+        const auto width = e.document.page.contentWidth();
         for (std::size_t p = 0; p < 2; ++p) {
             const auto &paragraph = view->document().paragraphs[p];
             QCOMPARE(paragraph.tabs.size(), std::size_t(1));
             QCOMPARE(paragraph.tabs[0].alignment, wf::TabAlignment::Right);
             QCOMPARE(paragraph.tabs[0].leader, wf::TabLeader::Dots);
             QVERIFY(std::abs(view->layout().caret({p, paragraph.text().size()}).x -
-                             e.document.page.margin - width) < 0.1);
+                             e.document.page.marginLeft - width) < 0.1);
         }
         // Update picks up the page geometry; undo restores the previous stops.
         auto page = view->sectionPage();
-        page.margin += 18;
+        page.setMargins(page.marginTop + 18);
         view->setPage(page);
         auto *update = window.findChild<QAction *>("updateTableOfContentsAction");
         QVERIFY(update);
@@ -399,7 +399,8 @@ class DesktopTest : public QObject {
         auto *margins = window.findChild<QComboBox *>("panelMargins");
         QCOMPARE(margins->currentIndex(), 0);
         emit margins->activated(3);
-        QCOMPARE(view->document().page.margin, 36.0);
+        QVERIFY(view->document().page.uniformMargins());
+        QCOMPARE(view->document().page.marginTop, 36.0);
         QCOMPARE(margins->currentIndex(), 3);
         auto *orientation = window.findChild<QComboBox *>("panelOrientation");
         emit orientation->activated(1);
@@ -940,7 +941,7 @@ class DesktopTest : public QObject {
         wf::PageView view;
         view.insertText("keep me");
         wf::Document invalid;
-        invalid.page = {72, 72, 18};
+        invalid.page = wf::PageStyle::uniform(72, 72, 18);
         invalid.paragraphs.edit(0).runs = {{u"oversize", {}}};
         invalid.paragraphs.edit(0).runs[0].style.size = 200;
         invalid.paragraphs.edit(0).runs[0].direct = wf::SizeField; // valid model, impossible layout
@@ -952,7 +953,7 @@ class DesktopTest : public QObject {
     void rejectedFormattingIsAtomic() {
         wf::PageView view;
         wf::Document small;
-        small.page = {100, 100, 20};
+        small.page = wf::PageStyle::uniform(100, 100, 20);
         view.setDocument(small);
         view.insertText("keep");
         view.selectAll();
@@ -1277,6 +1278,44 @@ class DesktopTest : public QObject {
         QVERIFY(page.differentOddEven);
         QCOMPARE(QString::fromStdU16String(page.evenHeader.right), QString("Chapter"));
     }
+    void marginsDialogSetsEachSide() {
+        wf::MainWindow window;
+        window.show();
+        auto *view = window.pageView();
+        view->setDocument({});
+        auto *action = window.findChild<QAction *>("marginsCustomAction");
+        QVERIFY(action);
+        bool blocked = false, edited = false;
+        QTimer::singleShot(0, &window, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            if (!dialog)
+                return;
+            auto *left = dialog->findChild<QDoubleSpinBox *>("marginLeft");
+            auto *top = dialog->findChild<QDoubleSpinBox *>("marginTop");
+            auto *ok = dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok);
+            if (!left || !top) {
+                dialog->reject();
+                return;
+            }
+            left->setValue(20); // wider than the page: no room to write
+            blocked = !ok->isEnabled();
+            left->setValue(3.18);
+            top->setValue(2.54);
+            edited = ok->isEnabled();
+            ok->click();
+        });
+        action->trigger();
+        QVERIFY(blocked);
+        QVERIFY(edited);
+        const auto &page = view->document().page;
+        QVERIFY(std::abs(page.marginLeft - 3.18 * 72 / 2.54) < 0.01);
+        QVERIFY(std::abs(page.marginTop - 72) < 0.01);
+        QCOMPARE(page.marginRight, 56.7);
+        // Unequal margins match no preset in the format panel.
+        QCOMPARE(window.findChild<QComboBox *>("panelMargins")->currentIndex(), -1);
+        view->undo();
+        QVERIFY(view->document().page.uniformMargins());
+    }
     void headerFooterDialogSetsFirstPageBands() {
         wf::MainWindow window;
         window.show();
@@ -1364,7 +1403,7 @@ class DesktopTest : public QObject {
         QVERIFY(rowBelow->isEnabled());
         // A picture in a two-column cell is limited to the cell's writing width.
         const auto &page = view->document().page;
-        QCOMPARE(view->writingWidth(), (page.width - 2 * page.margin) / 2 - 8);
+        QCOMPARE(view->writingWidth(), (page.contentWidth()) / 2 - 8);
         view->insertText("Left");
         QTest::keyClick(view, Qt::Key_Tab);
         view->insertText("Right");

@@ -1745,11 +1745,12 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             page.height = twips(attr(size, "h")) / 20;
         }
         if (auto margin = child(section, "pgMar")) {
-            const auto top = twips(attr(margin, "top")) / 20;
-            page.margin = top;
-            for (auto side : {"left", "right", "bottom"})
-                if (twips(attr(margin, side)) / 20 != top)
-                    warn(warnings, "Unequal page margins are approximated by the top margin.");
+            // A negative top or bottom margin means "don't move for the header": the
+            // distance is the same.
+            page.marginTop = std::abs(twips(attr(margin, "top")) / 20);
+            page.marginBottom = std::abs(twips(attr(margin, "bottom")) / 20);
+            page.marginLeft = twips(attr(margin, "left")) / 20;
+            page.marginRight = twips(attr(margin, "right")) / 20;
         }
         page.columns = 1;
         page.columnGap = 36;
@@ -2734,7 +2735,10 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             readGeometry(node, page);
             document.page.width = page.width;
             document.page.height = page.height;
-            document.page.margin = page.margin;
+            document.page.marginTop = page.marginTop;
+            document.page.marginBottom = page.marginBottom;
+            document.page.marginLeft = page.marginLeft;
+            document.page.marginRight = page.marginRight;
             document.page.columns = page.columns;
             document.page.columnGap = page.columnGap;
             readBands(node);
@@ -2776,7 +2780,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
     // Indents that leave less than 54 pt to write in (a narrow table column, say) would not
     // lay out: shrink them in proportion.
     {
-        const double content = document.page.width - 2 * document.page.margin;
+        const double content = document.page.contentWidth();
         std::map<std::uint64_t, std::size_t> columns;
         for (const auto &table : document.tables)
             columns[table.id] = table.columns;
@@ -2803,7 +2807,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
     }
     // Pictures larger than their column or the page would not lay out: scale them down.
     if (!document.images.empty()) {
-        const double content = document.page.width - 2 * document.page.margin;
+        const double content = document.page.contentWidth();
         std::map<std::uint64_t, std::size_t> tableColumns;
         for (const auto &table : document.tables)
             tableColumns[table.id] = table.columns;
@@ -2815,7 +2819,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             double tallest = 0;
             for (const auto &run : paragraph.runs)
                 tallest = std::max(tallest, run.style.size);
-            const double maxHeight = (document.page.height - 2 * document.page.margin) /
+            const double maxHeight = document.page.contentHeight() /
                                          std::max(1.0, paragraph.lineSpacing) -
                                      tallest - 1;
             for (auto &run : paragraph.runs)
@@ -3268,10 +3272,13 @@ std::string serializeDocx(const Document &document) {
         if (page.width > page.height)
             set(size, "orient", std::string("landscape"));
         auto margin = element(section, "pgMar");
-        for (auto side : {"top", "bottom", "left", "right"})
-            set(margin, side, page.margin * 20);
-        for (auto side : {"header", "footer"}) // where Wordforge draws them: mid-margin
-            set(margin, side, page.margin * 10);
+        set(margin, "top", page.marginTop * 20);
+        set(margin, "bottom", page.marginBottom * 20);
+        set(margin, "left", page.marginLeft * 20);
+        set(margin, "right", page.marginRight * 20);
+        // where Wordforge draws them: halfway into the top and bottom margins
+        set(margin, "header", page.marginTop * 10);
+        set(margin, "footer", page.marginBottom * 10);
         if (page.columns > 1) {
             auto columns = element(section, "cols");
             set(columns, "num", static_cast<double>(page.columns));
@@ -3297,8 +3304,8 @@ std::string serializeDocx(const Document &document) {
                 const auto &table = *tables.at(cell.tableId);
                 tableNode = element(body, "tbl");
                 auto properties = element(tableNode, "tblPr");
-                const auto width = (document.page.width - 2 * document.page.margin) * 20;
-                edges = columnEdges(table, document.page.width - 2 * document.page.margin);
+                const auto width = (document.page.contentWidth()) * 20;
+                edges = columnEdges(table, document.page.contentWidth());
                 anchors.clear();
                 auto tableWidth = element(properties, "tblW");
                 set(tableWidth, "w", width);
@@ -3649,7 +3656,7 @@ std::string serializeDocx(const Document &document) {
     // Header and footer references come first in sectPr.
     std::vector<std::pair<std::string, std::string>> bandParts; // name, XML
     if (document.page.anyBand()) {
-        const double textWidth = document.page.width - 2 * document.page.margin;
+        const double textWidth = document.page.contentWidth();
         auto reference = [&](bool header, const char *type, const PageBand &band) {
             const std::string kind = type;
             const auto name = std::string(header ? "header" : "footer") +

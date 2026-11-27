@@ -61,7 +61,7 @@ void pictureSizeDialog(PageView *view, QWidget *parent) {
         spin->setSuffix(" pt");
     }
     width->setMaximum(view->writingWidth());
-    height->setMaximum(page.height - 2 * page.margin);
+    height->setMaximum(page.contentHeight());
     width->setValue(selected->width);
     height->setValue(selected->height);
     form->addRow("Width", width);

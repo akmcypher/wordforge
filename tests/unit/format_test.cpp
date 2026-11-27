@@ -138,7 +138,8 @@ TEST(NativeFormat, MigratesV1AndPersistsExactSparseV2Identifiers) {
     ASSERT_TRUE(file.good());
     auto legacy = parseNative(std::string((std::istreambuf_iterator<char>(file)), {}));
     EXPECT_EQ(legacy.text(), u"old नमस्ते\ntwo");
-    EXPECT_EQ(legacy.page.margin, 36);
+    EXPECT_TRUE(legacy.page.uniformMargins());
+    EXPECT_EQ(legacy.page.marginTop, 36);
     EXPECT_EQ(legacy.paragraphs[0].alignment, Alignment::Center);
     EXPECT_TRUE(legacy.paragraphs[0].runs[0].style.bold);
     EXPECT_EQ(legacy.paragraphs[1].list, ListKind::Decimal);
@@ -174,14 +175,15 @@ TEST(NativeFormat, RoundTripsUnicodeRunsAndPageGeometry) {
         s.size = 22;
     });
     e.align(Alignment::Center);
-    e.document.page = {612, 792, 36};
+    e.document.page = wf::PageStyle::uniform(612, 792, 36);
     const auto d = parseNative(serializeNative(e.document));
     EXPECT_EQ(d.text(), u"First\nनमस्ते & <text>");
     ASSERT_EQ(d.paragraphs.size(), 2u);
     EXPECT_EQ(d.paragraphs[1].alignment, Alignment::Center);
     EXPECT_TRUE(d.paragraphs[1].runs.front().style.bold);
     EXPECT_EQ(d.page.width, 612);
-    EXPECT_EQ(d.page.margin, 36);
+    EXPECT_TRUE(d.page.uniformMargins());
+    EXPECT_EQ(d.page.marginTop, 36);
 }
 TEST(NativeFormat, RejectsMalformedAndUnsafeGeometry) {
     EXPECT_THROW(parseNative("broken"), std::runtime_error);
@@ -762,4 +764,35 @@ TEST(PlainText, DecodesTheWorldsCommonEncodings) {
     }
     // Control characters other than tabs and line breaks are dropped.
     EXPECT_EQ(decodePlainText(std::string("a\0b\tc\fd", 7)).text, u"ab\tc\nd");
+}
+
+TEST(NativeFormat, UnequalMarginsNeedWfg21Only) {
+    Document document;
+    document.page.setMargins(72);
+    EXPECT_EQ(serializeNative(document).find("version=\"21\""), std::string::npos);
+    document.page.marginLeft = 90;
+    document.page.marginRight = 90;
+    const auto bytes = serializeNative(document);
+    EXPECT_NE(bytes.find("version=\"21\""), std::string::npos);
+    EXPECT_EQ(parseNative(bytes).page, document.page);
+    // WFG20 doesn't know separate margins.
+    auto older = bytes;
+    older.replace(older.find("version=\"21\""), 12, "version=\"20\"");
+    EXPECT_THROW(parseNative(older), std::runtime_error);
+
+    // A section with its own unequal margins also needs WFG21.
+    Editor e;
+    e.replace(u"one");
+    e.insertSectionBreak(false);
+    auto page = e.document.page;
+    page.marginBottom = 30;
+    e.setPage(page);
+    const auto sectioned = serializeNative(e.document);
+    EXPECT_NE(sectioned.find("version=\"21\""), std::string::npos);
+    const auto read = parseNative(sectioned);
+    ASSERT_EQ(read.paragraphs.size(), e.document.paragraphs.size());
+    for (std::size_t i = 0; i < read.paragraphs.size(); ++i)
+        EXPECT_EQ(read.paragraphs[i].sectionBreak.has_value(),
+                  e.document.paragraphs[i].sectionBreak.has_value());
+    EXPECT_EQ(read.page, e.document.page);
 }

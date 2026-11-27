@@ -53,7 +53,8 @@ void expectSame(const Layout &a, const Layout &b) {
 std::vector<double> pageContent(const Layout &layout, std::size_t page) {
     std::vector<double> content;
     const auto &style = layout.pageStyle(page);
-    content.insert(content.end(), {style.width, style.height, style.margin});
+    content.insert(content.end(), {style.width, style.height, style.marginTop, style.marginBottom,
+                                    style.marginLeft, style.marginRight});
     for (const auto *lines : {&layout.lines, &layout.furniture})
         for (const auto &line : *lines)
             if (line.page == page)

@@ -227,7 +227,7 @@ TEST(Tables, TabSkipsCoveredCells) {
 }
 TEST(Tables, ColumnWidthsFitThePageAndFollowColumnEdits) {
     auto e = grid3();
-    const double width = e.document.page.width - 2 * e.document.page.margin;
+    const double width = e.document.page.contentWidth();
     auto edges = columnEdges(e.document.tables[0], width);
     EXPECT_NEAR(edges[1], width / 3, 1e-9);
     EXPECT_EQ(edges.back(), width);

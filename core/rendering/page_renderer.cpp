@@ -44,7 +44,10 @@ std::string pageKey(const Layout &layout, std::size_t page) {
     std::string key;
     keyValue(key, layout.pageStyle(page).width);
     keyValue(key, layout.pageStyle(page).height);
-    keyValue(key, layout.pageStyle(page).margin);
+    keyValue(key, layout.pageStyle(page).marginTop);
+    keyValue(key, layout.pageStyle(page).marginBottom);
+    keyValue(key, layout.pageStyle(page).marginLeft);
+    keyValue(key, layout.pageStyle(page).marginRight);
     for (const auto &[notePage, noteY] : layout.noteSeparators)
         if (notePage == page)
             keyValue(key, noteY);
@@ -253,7 +256,7 @@ std::size_t PageRenderer::synchronize(const Layout &layout) {
                 rule.setAntiAlias(true);
                 rule.setColor(0xff8a8f99);
                 rule.setStrokeWidth(0.6f);
-                const auto left = static_cast<float>(layout.pageStyle(page).margin);
+                const auto left = static_cast<float>(layout.pageStyle(page).marginLeft);
                 canvas->drawLine(left, static_cast<float>(noteY), left + 120,
                                  static_cast<float>(noteY), rule);
             }

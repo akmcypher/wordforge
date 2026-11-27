@@ -24,7 +24,7 @@ TEST(Rendering, HeadersAndFootersArePaintedAndInvalidatePages) {
         return count;
     };
     renderer.synchronize(engine.compose(editor.document));
-    const double margin = editor.document.page.margin, height = editor.document.page.height;
+    const double margin = editor.document.page.marginTop, height = editor.document.page.height;
     EXPECT_EQ(inked(0, margin - 2), 0);
     EXPECT_EQ(inked(height - margin + 2, height), 0);
     auto page = editor.document.page;

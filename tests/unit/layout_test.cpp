@@ -17,7 +17,7 @@ Editor widowFixture(Shaper &shaper, std::size_t leading, std::size_t words, doub
     e.replace(text);
     e.selection = {{0, 0}, Position{e.document.paragraphs.size() - 1, e.document.paragraphs.back().text().size()}};
     e.formatParagraph([](auto &p) { p.spaceBefore = p.spaceAfter = 0; p.lineSpacing = 1; });
-    e.document.page = {line.width + 42, (line.ascent + line.descent) * slots + 40, 20};
+    e.document.page = wf::PageStyle::uniform(line.width + 42, (line.ascent + line.descent) * slots + 40, 20);
     e.selection = {{leading, 0}, {leading, 0}};
     return e;
 }
@@ -145,7 +145,7 @@ TEST(Widows, FootnotesReserveSpaceBelowEarlierColumns) {
         p.spaceBefore = p.spaceAfter = 0; p.lineSpacing = 1;
     });
     const double height = engine.compose(e.document).lines[0].height;
-    e.document.page = {320, height * 4.5 + 40, 20};
+    e.document.page = wf::PageStyle::uniform(320, height * 4.5 + 40, 20);
     e.document.page.columns = 2;
     e.selection = {{4, 4}, {4, 4}};
     e.insertFootnote(u"A note.");
@@ -205,7 +205,7 @@ TEST(Pagination, KeepsHeadingAndShortParagraphTogether) {
     e.formatParagraph([](auto &p) { p.spaceBefore = p.spaceAfter = 0; p.lineSpacing = 1; });
     const auto natural = engine.compose(e.document);
     const double height = natural.lines[0].height;
-    e.document.page = {300, height * 2.5 + 40, 20};
+    e.document.page = wf::PageStyle::uniform(300, height * 2.5 + 40, 20);
     e.selection = {{1, 0}, {1, 0}};
     e.formatParagraph([](auto &p) { p.keepWithNext = true; });
     const auto kept = engine.compose(e.document);
@@ -234,7 +234,7 @@ TEST(Pagination, KeepsUseColumnsAndExplicitBreaksWin) {
     e.formatParagraph([](auto &p) { p.spaceBefore = p.spaceAfter = 0; p.lineSpacing = 1; });
     const double height = engine.compose(e.document).lines[0].height;
     auto page = e.document.page;
-    page.width = 320; page.height = height * 2.5 + 40; page.margin = 20; page.columns = 2;
+    page.width = 320; page.height = height * 2.5 + 40; page.setMargins(20); page.columns = 2;
     e.setPage(page);
     e.selection = {{1, 0}, {1, 0}};
     e.formatParagraph([](auto &p) { p.keepWithNext = true; });
@@ -272,7 +272,7 @@ TEST(Pagination, FootnotesMoveWithTheKeptGroup) {
     e.selection = {{0, 0}, {4, 4}};
     e.formatParagraph([](auto &p) { p.spaceBefore = p.spaceAfter = 0; p.lineSpacing = 1; });
     const double height = engine.compose(e.document).lines[0].height;
-    e.document.page = {300, height * 5 + 40, 20};
+    e.document.page = wf::PageStyle::uniform(300, height * 5 + 40, 20);
     e.selection = {{4, 4}, {4, 4}};
     e.insertFootnote(u"A footnote.");
     e.selection = {{3, 0}, {3, 0}};
@@ -291,7 +291,7 @@ TEST(Pagination, OversizedKeepsSplitWithoutBlankPages) {
     e.selection = {{0, 0}, {8, 1}};
     e.formatParagraph([](auto &p) { p.spaceBefore = p.spaceAfter = 0; p.lineSpacing = 1; });
     const double height = engine.compose(e.document).lines[0].height;
-    e.document.page = {300, height * 3.5 + 40, 20};
+    e.document.page = wf::PageStyle::uniform(300, height * 3.5 + 40, 20);
     e.selection = {{1, 0}, {8, 1}};
     e.formatParagraph([](auto &p) { p.keepWithNext = p.keepLines = true; });
     const auto kept = engine.compose(e.document);
@@ -315,7 +315,7 @@ TEST(Pagination, ContinuousSectionPreflightsItsFirstKeptHeading) {
     e.selection = {{0, 0}, {3, 4}};
     e.formatParagraph([](auto &p) { p.spaceBefore = p.spaceAfter = 0; p.lineSpacing = 1; });
     const double height = engine.compose(e.document).lines[0].height;
-    e.document.page = {300, height * 3.5 + 40, 20};
+    e.document.page = wf::PageStyle::uniform(300, height * 3.5 + 40, 20);
     e.document.paragraphs.edit(1).sectionBreak = SectionBreak{e.document.page, true};
     e.selection = {{2, 0}, {2, 0}};
     e.formatParagraph([](auto &p) { p.keepWithNext = true; });
@@ -331,7 +331,7 @@ TEST(Pagination, KeptColumnNotesDoNotOverlapEarlierColumns) {
     e.selection = {{0, 0}, {5, 4}};
     e.formatParagraph([](auto &p) { p.spaceBefore = p.spaceAfter = 0; p.lineSpacing = 1; });
     const double height = engine.compose(e.document).lines[0].height;
-    e.document.page = {320, height * 4.5 + 40, 20};
+    e.document.page = wf::PageStyle::uniform(320, height * 4.5 + 40, 20);
     e.document.page.columns = 2;
     e.selection = {{5, 4}, {5, 4}};
     e.insertFootnote(u"A note.");
@@ -357,7 +357,7 @@ TEST(Pagination, OversizedChainStillHonoursIndividualKeepLines) {
         p.spaceBefore = p.spaceAfter = 0; p.lineSpacing = 1; p.keepWithNext = true;
     });
     const double height = engine.compose(e.document).lines[0].height;
-    e.document.page = {300, height * 3.5 + 40, 20};
+    e.document.page = wf::PageStyle::uniform(300, height * 3.5 + 40, 20);
     e.selection = {{1, 0}, {1, 0}};
     e.formatParagraph([](auto &p) { p.keepLines = true; });
     const auto kept = engine.compose(e.document);
@@ -389,7 +389,7 @@ TEST(Tabs, AlignmentsUseShapedFieldsAcrossFormattingAndIndents) {
             const double anchor = alignment == TabAlignment::Right ? end
                                   : alignment == TabAlignment::Center ? (begin + end) / 2
                                                                      : begin;
-            EXPECT_NEAR(anchor, e.document.page.margin + 240, 0.1);
+            EXPECT_NEAR(anchor, e.document.page.marginLeft + 240, 0.1);
         }
     }
 }
@@ -402,7 +402,7 @@ TEST(Tabs, AlignedMultiwordFieldMovesTogetherAfterUnbrokenPrefix) {
                        shaper.shape(field, 0, field.text().size()).width - 20;
     Editor e;
     e.document.page.width = width + 72;
-    e.document.page.margin = 36;
+    e.document.page.setMargins(36);
     e.replace(prefix.text() + u"\t" + field.text());
     e.formatParagraph([&](auto &p) { p.tabs = {{width, TabAlignment::Right}}; });
     LayoutEngine engine(shaper);
@@ -419,7 +419,7 @@ TEST(Tabs, RightAlignedFieldAndLeaderKeepCaretEdges) {
     Shaper shaper(systemFontFiles());
     LayoutEngine engine(shaper);
     const auto layout = engine.compose(editor.document);
-    EXPECT_NEAR(layout.caret({0, 11}).x, editor.document.page.margin + 240, 0.1);
+    EXPECT_NEAR(layout.caret({0, 11}).x, editor.document.page.marginLeft + 240, 0.1);
     EXPECT_GT(layout.caret({0, 8}).x, layout.caret({0, 7}).x);
     EXPECT_EQ(layout.hitTest(layout.caret({0, 8}).x, layout.lines[0].baseline - 2, 0).offset, 8);
 }
@@ -494,7 +494,7 @@ TEST(Layout, AppliesIndentSpacingAndExplicitPageBreaks) {
     e.formatParagraph([](auto &p) { p.pageBreakBefore = true; });
     auto layout = engine.compose(e.document);
     ASSERT_EQ(layout.lines.size(), 2u);
-    EXPECT_DOUBLE_EQ(layout.lines[0].x, e.document.page.margin + 36);
+    EXPECT_DOUBLE_EQ(layout.lines[0].x, e.document.page.marginLeft + 36);
     EXPECT_GT(layout.lines[0].height, layout.lines[1].height);
     EXPECT_EQ(layout.lines[1].page, 1u);
     EXPECT_EQ(layout.pageCount, 2u);
@@ -537,7 +537,7 @@ TEST(Layout, PaginatesWithinMarginsAndReusesUnchangedParagraphs) {
     Shaper s(systemFontFiles());
     LayoutEngine engine(s);
     Editor e;
-    e.document.page = {220, 140, 25};
+    e.document.page = wf::PageStyle::uniform(220, 140, 25);
     e.replace(u"Words wrap on a small page. This sentence needs several lines.\nSecond "
               u"paragraph.\nThird paragraph with more words that must wrap.");
     auto first = engine.compose(e.document);
@@ -558,7 +558,7 @@ TEST(Layout, WrapsLongTokensWithoutSplittingEmoji) {
     Shaper s(systemFontFiles());
     LayoutEngine engine(s);
     Editor e;
-    e.document.page = {100, 200, 20};
+    e.document.page = wf::PageStyle::uniform(100, 200, 20);
     e.replace(u"abcdefghijklmnopqrstuv👩‍💻xyz");
     auto l = engine.compose(e.document);
     ASSERT_GT(l.lines.size(), 1u);
@@ -601,7 +601,7 @@ TEST(Layout, TableCellsWrapHitTestAndPaginateAsWholeRows) {
     EXPECT_EQ(layout.hitTest(left.x + 1, left.y + 2, left.page).paragraph, 0);
     auto page = e.document.page;
     page.height = 200;
-    page.margin = 20;
+    page.setMargins(20);
     e.setPage(page);
     layout = engine.compose(e.document);
     EXPECT_GT(layout.pageCount, 1);
@@ -665,11 +665,11 @@ TEST(Layout, HeadersAndFootersRepeatInTheMarginsWithPageNumbers) {
         const double top = line.baseline - line.shaped.ascent;
         if (i % 3 < 2) { // header: left at the margin, right ending at the margin
             EXPECT_GT(top, 0);
-            EXPECT_LT(line.baseline, page.margin);
+            EXPECT_LT(line.baseline, page.marginTop);
             EXPECT_NEAR(i % 3 == 0 ? line.x : line.x + line.shaped.width,
-                        i % 3 == 0 ? page.margin : page.width - page.margin, 0.01);
+                        i % 3 == 0 ? page.marginLeft : page.width - page.marginRight, 0.01);
         } else { // footer, centred
-            EXPECT_GT(top, page.height - page.margin);
+            EXPECT_GT(top, page.height - page.marginBottom);
             EXPECT_LT(line.baseline, page.height);
             EXPECT_NEAR(line.x + line.shaped.width / 2, page.width / 2, 0.01);
         }
@@ -685,7 +685,7 @@ TEST(Layout, HeadersAndFootersRepeatInTheMarginsWithPageNumbers) {
     ASSERT_EQ(skipped.furniture.size(), 6u);
     EXPECT_EQ(skipped.furniture.front().page, 1u);
 
-    page.margin = 20; // no room
+    page.setMargins(20); // no room
     editor.setPage(page);
     EXPECT_TRUE(engine.compose(editor.document).furniture.empty());
 }
@@ -707,9 +707,9 @@ TEST(Layout, FirstPageShowsItsOwnHeaderAndFooter) {
     ASSERT_EQ(layout.furniture.size(), 4u);
     EXPECT_EQ(layout.furniture[0].page, 0u);
     EXPECT_NEAR(layout.furniture[0].x + layout.furniture[0].shaped.width,
-                page.width - page.margin, 0.01);
+                page.width - page.marginRight, 0.01);
     EXPECT_EQ(layout.furniture[1].page, 0u);
-    EXPECT_GT(layout.furniture[1].baseline, page.height - page.margin);
+    EXPECT_GT(layout.furniture[1].baseline, page.height - page.marginBottom);
     EXPECT_EQ(layout.furniture[2].page, 1u);
     EXPECT_EQ(layout.furniture[3].page, 2u);
 }
@@ -733,9 +733,9 @@ TEST(Layout, EvenPagesShowTheirOwnHeaderAndFooter) {
     EXPECT_EQ(layout.furniture[0].page, 0u);
     EXPECT_EQ(layout.furniture[1].page, 1u);
     EXPECT_NEAR(layout.furniture[1].x + layout.furniture[1].shaped.width,
-                page.width - page.margin, 0.01);
+                page.width - page.marginRight, 0.01);
     EXPECT_EQ(layout.furniture[2].page, 1u);
-    EXPECT_GT(layout.furniture[2].baseline, page.height - page.margin);
+    EXPECT_GT(layout.furniture[2].baseline, page.height - page.marginBottom);
     EXPECT_EQ(layout.furniture[3].page, 2u);
     // An empty odd header with even-page text still draws the even pages.
     page.header = {};
@@ -771,8 +771,8 @@ TEST(Layout, MergedCellsSpanTheirRowsAndColumnsWithCustomWidths) {
     const auto &merged = layout.cells[0];
     const auto &right = layout.cells[1]; // (0,2)
     const auto &below = layout.cells[3]; // (2,0)
-    const double width = e.document.page.width - 2 * e.document.page.margin;
-    EXPECT_NEAR(merged.x, e.document.page.margin, 1e-9);
+    const double width = e.document.page.contentWidth();
+    EXPECT_NEAR(merged.x, e.document.page.marginLeft, 1e-9);
     // Column 0 is 200 pt; columns 1 and 2 share the rest.
     EXPECT_NEAR(merged.width, 200 + (width - 200) / 2, 1e-6);
     EXPECT_NEAR(right.x, merged.x + merged.width, 1e-6);
@@ -840,7 +840,7 @@ TEST(Layout, FootnotesSitAtTheBottomOfTheirPageNumberedInOrder) {
     const auto layout = engine.compose(e.document);
     ASSERT_GT(layout.pageCount, 2u);
     const auto &page = e.document.page;
-    const double bottom = page.height - page.margin;
+    const double bottom = page.height - page.marginBottom;
     // Each page with notes has one rule; note lines sit between it and the bottom margin,
     // below every body line of that page.
     std::map<std::size_t, double> rule;
@@ -916,7 +916,7 @@ TEST(Layout, FirstLineHangingAndRightIndentsAndJustifiedLines) {
     });
     const auto layout = engine.compose(e.document);
     ASSERT_GT(layout.lines.size(), 3u);
-    const double margin = e.document.page.margin;
+    const double margin = e.document.page.marginLeft;
     const double right = e.document.page.width - margin - 72;
     EXPECT_DOUBLE_EQ(layout.lines[0].x, margin + 18);
     EXPECT_DOUBLE_EQ(layout.lines[1].x, margin + 36);
@@ -995,7 +995,7 @@ TEST(Layout, LongEndnotesContinueOnNewPages) {
     LayoutEngine engine(shaper);
     const auto layout = engine.compose(e.document);
     EXPECT_GE(layout.pageCount, 2u);
-    const double bottom = e.document.page.height - e.document.page.margin;
+    const double bottom = e.document.page.height - e.document.page.marginBottom;
     for (const auto &line : layout.furniture)
         EXPECT_LE(line.baseline - line.shaped.ascent + line.height, bottom + 0.5);
     EXPECT_EQ(layout.furniture.back().page, layout.pageCount - 1);
@@ -1023,19 +1023,19 @@ TEST(Layout, SectionsChangePageSizeAndColumnsFlowLeftToRight) {
     EXPECT_EQ(layout.pageStyle(1).columns, 2u);
     // Page 2 holds lines in both columns: the second starts at the column top, to the right.
     const auto &sheet = layout.pageStyle(1);
-    const double columnWidth = (sheet.width - 2 * sheet.margin - sheet.columnGap) / 2;
+    const double columnWidth = (sheet.contentWidth() - sheet.columnGap) / 2;
     double leftTop = 1e9, rightTop = 1e9, leftMaxX = 0;
     for (const auto &line : layout.lines) {
         if (line.page != 1)
             continue;
         const double top = line.baseline - line.shaped.ascent;
-        if (line.x < sheet.margin + columnWidth) {
+        if (line.x < sheet.marginLeft + columnWidth) {
             leftTop = std::min(leftTop, top);
             leftMaxX = std::max(leftMaxX, line.x + line.shaped.width);
         } else
             rightTop = std::min(rightTop, top);
     }
-    EXPECT_LE(leftMaxX, sheet.margin + columnWidth + 0.5);
+    EXPECT_LE(leftMaxX, sheet.marginLeft + columnWidth + 0.5);
     EXPECT_LT(rightTop, 1e9);
     EXPECT_NEAR(leftTop, rightTop, 0.5);
     // A continuous break keeps the next section on the same page, below the text.
@@ -1164,4 +1164,33 @@ TEST(CellBorders, EditingMovesThemWithTheirCellsAndTheTableBorderReplacesThem) {
     EXPECT_THROW(validateDocument(bad), std::invalid_argument); // out of order
     bad.tables[0].cellBorders = {{0, 0, CellSide::Top, {}}, {0, 0, CellSide::Bottom, {}}};
     EXPECT_NO_THROW(validateDocument(bad));
+}
+TEST(Layout, UnequalMarginsPlaceTextHeadersAndFooters) {
+    auto editor = threePages();
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    auto page = editor.document.page;
+    page.marginTop = 100;
+    page.marginBottom = 40;
+    page.marginLeft = 90;
+    page.marginRight = 30;
+    page.header = {u"", u"", u"Right"};
+    page.footer = {u"Left", u"", u""};
+    editor.setPage(page);
+    const auto layout = engine.compose(editor.document);
+    ASSERT_FALSE(layout.lines.empty());
+    EXPECT_DOUBLE_EQ(layout.lines[0].x, 90);
+    EXPECT_GT(layout.lines[0].baseline, 100);
+    EXPECT_LT(layout.lines[0].baseline - layout.lines[0].shaped.ascent, 100 + 1);
+    EXPECT_DOUBLE_EQ(layout.caret({0, 0}).x, 90);
+    ASSERT_EQ(layout.furniture.size(), 6u);
+    // The header ends at the right margin, halfway into the top margin; the footer starts
+    // at the left margin, halfway into the bottom margin.
+    const auto &header = layout.furniture[0];
+    EXPECT_NEAR(header.x + header.shaped.width, page.width - 30, 0.01);
+    EXPECT_NEAR(header.baseline - header.shaped.ascent + header.height / 2, 50, 0.01);
+    const auto &footer = layout.furniture[1];
+    EXPECT_DOUBLE_EQ(footer.x, 90);
+    EXPECT_NEAR(footer.baseline - footer.shaped.ascent + footer.height / 2, page.height - 20,
+                0.01);
 }

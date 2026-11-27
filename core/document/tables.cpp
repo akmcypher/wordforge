@@ -576,7 +576,7 @@ void Editor::setColumnWidth(double points) {
         auto &table = *grid(e.document, cell->tableId).table;
         if (table.columns == 1)
             throw std::invalid_argument("A single column always spans the page width");
-        const double width = e.document.page.width - 2 * e.document.page.margin;
+        const double width = e.document.page.contentWidth();
         const double most = width - minimumColumnWidth * (table.columns - 1);
         if (!std::isfinite(points) || points < minimumColumnWidth || points > most)
             throw std::invalid_argument("Column width must be between " +

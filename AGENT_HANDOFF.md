@@ -18,9 +18,12 @@ Condensed on 2026-11-23. The full earlier notes are kept verbatim in
     stamps, copy-on-write paragraphs, incremental word count, O(1) page positions,
     and PR #57's per-paragraph pagination keys and in-place checkpoints
 
-  Native format WFG20; the reader supports WFG1–20. WFG20 (first-page headers and
-  footers, dashed/dotted/double borders, diagonal cell borders) shipped in 0.6.15, so
-  further format changes need WFG21.
+  Native format WFG21; the reader supports WFG1–21. WFG20 shipped in 0.6.15. WFG21
+  (unequal page margins, PR for 0.6.16) isn't in a release yet; add further format
+  changes to it until it ships.
+- Since 0.6.15: `PageStyle` has `marginTop/Bottom/Left/Right` (no single `margin`); use
+  `contentWidth()`/`contentHeight()`, `setMargins()` and `PageStyle::uniform()`, never
+  brace-initialise a `PageStyle` with a third value.
 - Last published release: **v0.6.15** (tag at a452901, 2026-11-27).
   - Windows installers and ZIPs are checksum-verified.
   - Snap stable is `0.6.15-preview`, amd64 rev 99 / arm64 rev 98, promoted by verified

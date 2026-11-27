@@ -22,6 +22,7 @@
 #include <QLocale>
 #include <QWidget>
 #include <algorithm>
+#include <array>
 #include <cmath>
 namespace wf {
 namespace {
@@ -90,6 +91,67 @@ void insertTableDialog(PageView *view, QWidget *parent) {
     if (dialog.exec() == QDialog::Accepted)
         view->insertTable(static_cast<std::size_t>(rows->value()),
                           static_cast<std::size_t>(columns->value()));
+}
+// Page margins of the caret's section, each side on its own, in centimetres.
+void marginsDialog(PageView *view, QWidget *parent) {
+    auto page = view->sectionPage();
+    QDialog dialog(parent);
+    dialog.setWindowTitle("Margins");
+    dialog.setObjectName("marginsDialog");
+    auto *form = new QFormLayout(&dialog);
+    constexpr double pointsPerCm = 72 / 2.54;
+    std::array<QDoubleSpinBox *, 4> boxes{};
+    std::array<double, 4> shown{};
+    const std::array<std::pair<const char *, double PageStyle::*>, 4> sides{
+        {{"Top", &PageStyle::marginTop},
+         {"Bottom", &PageStyle::marginBottom},
+         {"Left", &PageStyle::marginLeft},
+         {"Right", &PageStyle::marginRight}}};
+    for (std::size_t n = 0; n < sides.size(); ++n) {
+        auto *box = boxes[n] = new QDoubleSpinBox;
+        box->setObjectName(QString("margin") + sides[n].first);
+        box->setAccessibleName(QString(sides[n].first) + " margin");
+        box->setSuffix(" cm");
+        box->setDecimals(2);
+        box->setSingleStep(0.25);
+        box->setRange(0, 1400 / pointsPerCm);
+        box->setValue(page.*sides[n].second / pointsPerCm);
+        form->addRow(sides[n].first, box);
+        shown[n] = box->value();
+    }
+    auto *problem = new QLabel;
+    problem->setObjectName("marginsProblem");
+    form->addRow(problem);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    form->addRow(buttons);
+    // Keep OK off while the margins leave too little room to write.
+    auto chosen = [&] {
+        auto candidate = page;
+        // A side left as shown keeps its exact value, not the rounded centimetres.
+        for (std::size_t n = 0; n < sides.size(); ++n)
+            if (boxes[n]->value() != shown[n])
+                candidate.*sides[n].second = boxes[n]->value() * pointsPerCm;
+        return candidate;
+    };
+    auto check = [&] {
+        const auto candidate = chosen();
+        bool valid = true;
+        try {
+            validatePage(candidate);
+        } catch (const std::invalid_argument &) {
+            valid = false;
+        }
+        problem->setText(valid ? QString() : "The margins leave too little room for text.");
+        buttons->button(QDialogButtonBox::Ok)->setEnabled(valid);
+    };
+    for (auto *box : boxes)
+        QObject::connect(box, &QDoubleSpinBox::valueChanged, &dialog, check);
+    check();
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    view->setPage(chosen());
 }
 // Comment text: one paragraph of plain text. `id` edits an existing comment.
 void commentDialog(PageView *view, QWidget *parent, std::optional<std::uint64_t> id) {
@@ -214,7 +276,7 @@ void columnWidthDialog(PageView *view, QWidget *parent) {
     const auto &document = view->document();
     const auto table = std::find_if(document.tables.begin(), document.tables.end(),
                                     [&](const auto &t) { return t.id == cell->tableId; });
-    const double width = document.page.width - 2 * document.page.margin;
+    const double width = document.page.contentWidth();
     const auto edges = columnEdges(*table, width);
     constexpr double pointsPerCm = 72 / 2.54;
     QDialog dialog(parent);
@@ -726,7 +788,9 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
                                    std::tuple{"marginsNormal", "Margins: normal (1 in)", 72.0},
                                    std::tuple{"marginsModerate", "Margins: moderate (0.75 in)", 54.0},
                                    std::tuple{"marginsNarrow", "Margins: narrow (0.5 in)", 36.0}})
-        create(id, text, "Page", page([value](auto &p) { p.margin = value; }));
+        create(id, text, "Page", page([value](auto &p) { p.setMargins(value); }));
+    create("marginsCustom", "Margins: custom…", "Page", [this, view] { marginsDialog(view, window_); })
+        ->setIconText("Custom margins");
     for (bool landscape : {false, true})
         create(landscape ? "landscape" : "portrait",
                landscape ? "Orientation: landscape" : "Orientation: portrait", "Page",
@@ -827,7 +891,7 @@ void Commands::sync() {
     const auto page = view_->sectionPage();
     get("decreaseIndent")->setEnabled(p.indentLeft > 0);
     get("increaseIndent")
-        ->setEnabled(page.width - 2 * page.margin - p.indentLeft -
+        ->setEnabled(page.contentWidth() - p.indentLeft -
                              std::max(0.0, p.indentFirstLine) - p.indentRight -
                              (p.list == ListKind::None ? 0 : 18) >=
                          54 &&

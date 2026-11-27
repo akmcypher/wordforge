@@ -346,7 +346,8 @@ FormatPanel::FormatPanel(PageView *view, Commands &commands, QWidget *parent)
                           {{"Default · 2 cm", "marginsDefault"},
                            {"Normal · 1 in", "marginsNormal"},
                            {"Moderate · 0.75 in", "marginsModerate"},
-                           {"Narrow · 0.5 in", "marginsNarrow"}});
+                           {"Narrow · 0.5 in", "marginsNarrow"},
+                           {"Custom…", "marginsCustom"}});
     auto *orientation = combo("panelOrientation", "Orientation",
                               {{"Portrait", "portrait"}, {"Landscape", "landscape"}});
     auto *paper = combo("panelPaper", "Paper size",
@@ -379,7 +380,7 @@ FormatPanel::FormatPanel(PageView *view, Commands &commands, QWidget *parent)
         const QList<double> marginValues{56.7, 72, 54, 36};
         int marginIndex = -1;
         for (int n = 0; n < marginValues.size(); ++n)
-            if (std::abs(page.margin - marginValues[n]) < 0.05)
+            if (page.uniformMargins() && std::abs(page.marginTop - marginValues[n]) < 0.05)
                 marginIndex = n;
         margins->setCurrentIndex(marginIndex);
         orientation->setCurrentIndex(page.width > page.height ? 1 : 0);

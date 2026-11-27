@@ -296,12 +296,15 @@ void validateParagraphFormat(const ParagraphFormat &value) {
         throw std::invalid_argument("Invalid paragraph formatting");
 }
 void validatePage(const PageStyle &page) {
-    if (!std::isfinite(page.width) || !std::isfinite(page.height) || !std::isfinite(page.margin) ||
-        page.width < 72 || page.width > 2880 || page.height < 72 || page.height > 2880 ||
-        page.margin < 0 || page.width - 2 * page.margin < 36 ||
-        page.height - 2 * page.margin < 36 || page.columns < 1 || page.columns > 6 ||
-        !std::isfinite(page.columnGap) || page.columnGap < 0 || page.columnGap > 144 ||
-        (page.width - 2 * page.margin - (page.columns - 1) * page.columnGap) / page.columns < 36)
+    for (const auto margin : {page.marginTop, page.marginBottom, page.marginLeft, page.marginRight})
+        if (!std::isfinite(margin) || margin < 0 || margin > 1400)
+            throw std::invalid_argument("Invalid page geometry");
+    if (!std::isfinite(page.width) || !std::isfinite(page.height) || page.width < 72 ||
+        page.width > 2880 || page.height < 72 || page.height > 2880 ||
+        page.contentWidth() < 36 || page.contentHeight() < 36 || page.columns < 1 ||
+        page.columns > 6 || !std::isfinite(page.columnGap) || page.columnGap < 0 ||
+        page.columnGap > 144 ||
+        (page.contentWidth() - (page.columns - 1) * page.columnGap) / page.columns < 36)
         throw std::invalid_argument("Invalid page geometry");
     for (const auto *band : {&page.header, &page.footer, &page.evenHeader, &page.evenFooter,
                              &page.firstHeader, &page.firstFooter})
@@ -1799,7 +1802,7 @@ TocEntries tocEntries(const Document &document, const Editor::PageOf &pageOf,
 void formatTocEntry(Editor &e, std::size_t paragraph, bool indented, bool numbered) {
     const auto page = sectionPage(e.document, paragraph);
     const double width =
-        (page.width - 2 * page.margin - (page.columns - 1) * page.columnGap) / page.columns;
+        (page.contentWidth() - (page.columns - 1) * page.columnGap) / page.columns;
     e.selection = {{paragraph, 0}, {paragraph, 0}};
     e.formatParagraph([&](ParagraphFormat &f) {
         f.indentLeft = indented ? 18 : 0;

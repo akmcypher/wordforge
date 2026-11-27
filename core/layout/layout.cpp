@@ -116,7 +116,8 @@ struct Key {
             .add(s.spacing);
     }
     Key &geometry(const PageStyle &page) {
-        return add(page.width).add(page.height).add(page.margin)
+        return add(page.width).add(page.height).add(page.marginTop).add(page.marginBottom)
+            .add(page.marginLeft).add(page.marginRight)
             .add(static_cast<std::uint64_t>(page.columns)).add(page.columnGap);
     }
 };
@@ -334,8 +335,8 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
     auto useSection = [&](const PageStyle &style) {
         validatePage(style);
         page = style;
-        width = page.width - 2 * page.margin;
-        availableHeight = page.height - 2 * page.margin;
+        width = page.contentWidth();
+        availableHeight = page.contentHeight();
         columnWidth = (width - static_cast<double>(page.columns - 1) * page.columnGap) /
                       static_cast<double>(page.columns);
         if (!std::isfinite(width) || !std::isfinite(availableHeight) || columnWidth < 36 ||
@@ -406,7 +407,7 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
     } else {
         checkpoints.assign(count + 1, Checkpoint{});
         result.pageStyles = {page};
-        state.y = state.sectionTop = state.sectionBottom = page.margin;
+        state.y = state.sectionTop = state.sectionBottom = page.marginTop;
     }
     auto &y = state.y;
     auto &pageIndex = state.pageIndex;
@@ -416,7 +417,7 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
     auto &sectionTop = state.sectionTop;
     auto &sectionBottom = state.sectionBottom;
     auto columnLeft = [&] {
-        return page.margin + static_cast<double>(column) * (columnWidth + page.columnGap);
+        return page.marginLeft + static_cast<double>(column) * (columnWidth + page.columnGap);
     };
     std::unordered_set<std::uint64_t> liveIds;
     validateTables(document);
@@ -626,7 +627,7 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
     auto fitsWritingArea = [&](double bodyHeight, double newNotes, double before = 0) {
         const double rule = newNotes > 0 && pageNotes.empty() ? noteGap : 0;
         return std::max(y + before + bodyHeight, sectionBottom) + notesHeight + newNotes + rule <=
-               page.height - page.margin;
+               page.height - page.marginBottom;
     };
     auto addNotes = [&](std::vector<NoteBlock> &blocks) {
         notesHeight += notesNeed(blocks);
@@ -636,14 +637,14 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
     auto flushNotes = [&] {
         if (pageNotes.empty())
             return;
-        const double top = page.height - page.margin - notesHeight;
+        const double top = page.height - page.marginBottom - notesHeight;
         result.noteSeparators.emplace_back(pageIndex, top + noteGap / 2);
         double cursor = top + noteGap;
         for (auto &block : pageNotes)
             for (auto &line : block.lines) {
                 line.page = pageIndex;
-                line.x += page.margin;
-                line.markerX += page.margin;
+                line.x += page.marginLeft;
+                line.markerX += page.marginLeft;
                 line.baseline = cursor + line.shaped.ascent;
                 cursor += line.height;
                 result.furniture.push_back(std::move(line));
@@ -655,7 +656,7 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
         flushNotes();
         ++pageIndex;
         result.pageStyles.push_back(page);
-        y = sectionTop = sectionBottom = page.margin;
+        y = sectionTop = sectionBottom = page.marginTop;
         column = 0;
     };
     // Where text that does not fit goes: the next column, else the next page.
@@ -778,7 +779,10 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
         if (index && document.paragraphs[index - 1].sectionBreak) {
             const auto &next = sectionAt(index);
             const bool sameSheet = next.width == page.width && next.height == page.height &&
-                                   next.margin == page.margin;
+                                   next.marginTop == page.marginTop &&
+                                   next.marginBottom == page.marginBottom &&
+                                   next.marginLeft == page.marginLeft &&
+                                   next.marginRight == page.marginRight;
             if (document.paragraphs[index - 1].sectionBreak->continuous && sameSheet) {
                 // Continues on this page below the previous section's text.
                 y = std::max(y, sectionBottom);
@@ -791,7 +795,7 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
                 useSection(next);
                 ++pageIndex;
                 result.pageStyles.push_back(page);
-                y = sectionTop = sectionBottom = page.margin;
+                y = sectionTop = sectionBottom = page.marginTop;
                 column = 0;
             }
         }
@@ -893,7 +897,7 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
                                                "shorten their content or split the cells"
                                              : "A table row is taller than the page; shorten its "
                                                "content or increase the page size");
-            if (y + groupHeight + notesHeight + notesNeed(groupNotes) > page.height - page.margin &&
+            if (y + groupHeight + notesHeight + notesNeed(groupNotes) > page.height - page.marginBottom &&
                 y > sectionTop)
                 advance();
             addNotes(groupNotes);
@@ -934,7 +938,7 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
         }
         if (index && paragraph.pageBreakBefore)
             newPage();
-        if ((y > page.margin || sectionBottom > page.margin) &&
+        if ((y > page.marginTop || sectionBottom > page.marginTop) &&
             (paragraph.keepWithNext || paragraph.keepLines)) {
             // Measure the minimum group before placing it. Explicit breaks and table
             // boundaries end a text group; oversized groups use ordinary line splitting.
@@ -1057,7 +1061,7 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
                     std::tie(bodyHeight, noteHeight) = pair;
             }
             if (!fits() && bodyHeight + noteHeight + (noteHeight > 0 ? noteGap : 0) <= availableHeight &&
-                (y > page.margin || sectionBottom > page.margin)) {
+                (y > page.marginTop || sectionBottom > page.marginTop)) {
                 advance();
                 if (!fits()) newPage();
                 segmentStart = n;
@@ -1066,7 +1070,7 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
                 throw std::runtime_error("A line is taller than the page writing area");
             auto blocks = notesIn(paragraph, firstNote, line.start, line.end);
             if (std::max(y + line.height, sectionBottom) + notesHeight + notesNeed(blocks) >
-                    page.height - page.margin && (y > page.margin || sectionBottom > page.margin)) {
+                    page.height - page.marginBottom && (y > page.marginTop || sectionBottom > page.marginTop)) {
                 advance();
                 segmentStart = n;
             }
@@ -1088,7 +1092,7 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
     // (footnotes keep their room at the bottom of each page).
     if (!endnoteIds.empty()) {
         y = std::max(y, sectionBottom); // below every column
-        if (y + 2 * noteGap + notesHeight > page.height - page.margin)
+        if (y + 2 * noteGap + notesHeight > page.height - page.marginBottom)
             newPage();
         else
             y += noteGap;
@@ -1096,11 +1100,11 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
         y += noteGap;
         for (std::size_t i = 0; i < endnoteIds.size(); ++i)
             for (auto line : noteBlock(endnoteIds[i], i + 1, true).lines) {
-                if (y + line.height + notesHeight > page.height - page.margin && y > page.margin)
+                if (y + line.height + notesHeight > page.height - page.marginBottom && y > page.marginTop)
                     newPage();
                 line.page = pageIndex;
-                line.x += page.margin;
-                line.markerX += page.margin;
+                line.x += page.marginLeft;
+                line.markerX += page.marginLeft;
                 line.baseline = y + line.shaped.ascent;
                 y += line.height;
                 result.furniture.push_back(std::move(line));
@@ -1134,10 +1138,12 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
     else if (document.page.anyBand()) {
         for (std::size_t number = 0; number < result.pageCount; ++number) {
             const auto &page = result.pageStyles[number];
-            const double width = page.width - 2 * page.margin;
-            if (!document.page.band(true, number) || page.margin < 24)
+            const double width = page.contentWidth();
+            if (!document.page.band(true, number))
                 continue;
             for (const bool top : {true, false}) {
+                if ((top ? page.marginTop : page.marginBottom) < 24)
+                    continue; // no room for the band in that margin
                 const auto &band = *document.page.band(top, number);
                 const std::u16string *texts[] = {&band.left, &band.center, &band.right};
                 for (int position = 0; position < 3; ++position) {
@@ -1153,10 +1159,11 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
                     line.shaped = shaper_.shape(label, 0, line.end);
                     line.height = line.shaped.ascent + line.shaped.descent;
                     const double remaining = std::max(0.0, width - line.shaped.width);
-                    line.x = page.margin + (position == 1   ? remaining / 2
+                    line.x = page.marginLeft + (position == 1   ? remaining / 2
                                             : position == 2 ? remaining
                                                             : 0);
-                    const double middle = top ? page.margin / 2 : page.height - page.margin / 2;
+                    const double middle =
+                        top ? page.marginTop / 2 : page.height - page.marginBottom / 2;
                     line.baseline = middle - line.height / 2 + line.shaped.ascent;
                     bands.push_back(std::move(line));
                 }
@@ -1258,7 +1265,7 @@ Layout::Caret Layout::caret(Position position) const {
             break;
     }
     if (!match)
-        return {page.margin, page.margin, 14, 0};
+        return {page.marginLeft, page.marginTop, 14, 0};
     double x = 0;
     for (auto [offset, caretX] : match->caretStops)
         if (offset == position.offset) {

@@ -1,5 +1,16 @@
 # Native WFG schema and migration
 
+**WFG21 (unequal page margins; not yet released)** adds:
+- **Page margins:** the root attributes `marginBottom`, `marginLeft` and `marginRight`
+  (points, 0–1400) beside `margin`, which is now the top margin. Each section break
+  likewise gains `sectionMarginBottom`, `sectionMarginLeft` and `sectionMarginRight`
+  beside `sectionMargin`. A missing side takes the top margin's value, so equal margins
+  are written as `margin` alone.
+
+WFG21 is written only for documents with unequal margins on the page or a section; others
+keep their earlier version and still open in 0.6.15. It includes everything in WFG20.
+WFG1–20 reject the new attributes.
+
 **WFG20 (first-page headers, border styles, diagonal borders; 0.6.15)** adds:
 - **First-page headers and footers:** `<firstHeader>` and `<firstFooter>` elements with
   the `left`/`center`/`right` attributes of `<header>`. With the root attribute

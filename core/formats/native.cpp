@@ -424,10 +424,16 @@ std::string serializeNative(const Document &document) {
                               static_cast<int>(c.side) > static_cast<int>(CellSide::Left);
                    });
         });
+    // WFG21 only for unequal page margins, so other files stay readable by 0.6.15.
+    const bool margined =
+        !document.page.uniformMargins() ||
+        std::any_of(document.paragraphs.begin(), document.paragraphs.end(), [](const Paragraph &p) {
+            return p.sectionBreak && !p.sectionBreak->page.uniformMargins();
+        });
     const bool semantic = styled || banded || preserving || noted || reviewed || decorated ||
                           themed || sectioned || tabbed || kept || widowed || baseline || spaced ||
-                          paired || titled;
-    root.append_attribute("version") = titled ? "20" : paired ? "19" : spaced ? "18" : baseline ? "17" : widowed ? "16" : kept                         ? "15"
+                          paired || titled || margined;
+    root.append_attribute("version") = margined ? "21" : titled ? "20" : paired ? "19" : spaced ? "18" : baseline ? "17" : widowed ? "16" : kept                         ? "15"
                                        : tabbed                     ? "14"
                                        : sectioned                  ? "13"
                                        : themed                     ? "12"
@@ -455,7 +461,13 @@ std::string serializeNative(const Document &document) {
     root.append_attribute("nextId") = static_cast<unsigned long long>(document.nextId);
     root.append_attribute("width") = document.page.width;
     root.append_attribute("height") = document.page.height;
-    root.append_attribute("margin") = document.page.margin;
+    // `margin` is the top margin and, when all four are equal, every margin.
+    root.append_attribute("margin") = document.page.marginTop;
+    if (!document.page.uniformMargins()) {
+        root.append_attribute("marginBottom") = document.page.marginBottom;
+        root.append_attribute("marginLeft") = document.page.marginLeft;
+        root.append_attribute("marginRight") = document.page.marginRight;
+    }
     if (document.page.columns != 1 || document.page.columnGap != 36) {
         root.append_attribute("columns") = static_cast<unsigned long long>(document.page.columns);
         root.append_attribute("columnGap") = document.page.columnGap;
@@ -650,7 +662,12 @@ std::string serializeNative(const Document &document) {
             paragraph.append_attribute("section") = end->continuous ? "continuous" : "page";
             paragraph.append_attribute("sectionWidth") = end->page.width;
             paragraph.append_attribute("sectionHeight") = end->page.height;
-            paragraph.append_attribute("sectionMargin") = end->page.margin;
+            paragraph.append_attribute("sectionMargin") = end->page.marginTop;
+            if (!end->page.uniformMargins()) {
+                paragraph.append_attribute("sectionMarginBottom") = end->page.marginBottom;
+                paragraph.append_attribute("sectionMarginLeft") = end->page.marginLeft;
+                paragraph.append_attribute("sectionMarginRight") = end->page.marginRight;
+            }
             paragraph.append_attribute("sectionColumns") =
                 static_cast<unsigned long long>(end->page.columns);
             paragraph.append_attribute("sectionGap") = end->page.columnGap;
@@ -757,12 +774,14 @@ Document parseNative(const std::string &input) {
          version != "6" && version != "7" && version != "8" && version != "9" && version != "10" &&
          version != "11" && version != "12" && version != "13" && version != "14" &&
          version != "15" && version != "16" && version != "17" && version != "18" &&
-         version != "19" && version != "20"))
+         version != "19" && version != "20" && version != "21"))
         throw std::runtime_error("Unsupported native document version");
     // WFG7 is WFG6 plus character styles; WFG8 adds headers and footers.
     // WFG9 adds DOCX package parts kept from an imported file.
     // WFG20 adds first-page headers and footers.
-    const bool v20 = version == "20";
+    // WFG21 adds unequal page margins.
+    const bool v21 = version == "21";
+    const bool v20 = version == "20" || v21;
     const bool v19 = version == "19" || v20;
     const bool v18 = version == "18" || v19;
     const bool v17 = version == "17" || v18;
@@ -781,6 +800,10 @@ Document parseNative(const std::string &input) {
         throw std::runtime_error("WFG4/5 require ZIP transport; legacy versions require XML");
     if (version == "1")
         attributes(root, {"version", "width", "height", "margin"});
+    else if (v21)
+        attributes(root, {"version", "width", "height", "margin", "nextId", "differentFirstPage",
+                          "trackChanges", "columns", "columnGap", "differentOddEven",
+                          "marginBottom", "marginLeft", "marginRight"});
     else if (v19)
         attributes(root, {"version", "width", "height", "margin", "nextId", "differentFirstPage",
                           "trackChanges", "columns", "columnGap", "differentOddEven"});
@@ -801,8 +824,14 @@ Document parseNative(const std::string &input) {
     if (v6)
         document.styles.paragraphStyles.clear();
     document.page = {number(root, "width", 595.28, 72, 2880),
-                     number(root, "height", 841.89, 72, 2880),
-                     number(root, "margin", 56.7, 0, 1400)};
+                     number(root, "height", 841.89, 72, 2880)};
+    document.page.setMargins(number(root, "margin", 56.7, 0, 1400));
+    if (v21) {
+        const auto top = document.page.marginTop;
+        document.page.marginBottom = number(root, "marginBottom", top, 0, 1400);
+        document.page.marginLeft = number(root, "marginLeft", top, 0, 1400);
+        document.page.marginRight = number(root, "marginRight", top, 0, 1400);
+    }
     pageGeometry(document.page);
     if (v8)
         document.page.differentFirstPage = boolean(root, "differentFirstPage");
@@ -1117,7 +1146,8 @@ Document parseNative(const std::string &input) {
                            v14 ? "tabs" : "id", v15 ? "keepNext" : "id",
                            v15 ? "keepLines" : "id", v16 ? "widow" : "id",
                            v18 ? "contextual" : "id", v18 ? "listId" : "id",
-                           v18 ? "level" : "id"});
+                           v18 ? "level" : "id", v21 ? "sectionMarginBottom" : "id",
+                           v21 ? "sectionMarginLeft" : "id", v21 ? "sectionMarginRight" : "id"});
         else if (v6)
             attributes(p, {"align", "after", "list", "style", "direct", "indent", "before", "line",
                            "break", "id", "table", "row", "column"});
@@ -1174,7 +1204,13 @@ Document parseNative(const std::string &input) {
             end.continuous = kind == "continuous";
             end.page.width = number(p, "sectionWidth", 595.28, 72, 2880);
             end.page.height = number(p, "sectionHeight", 841.89, 72, 2880);
-            end.page.margin = number(p, "sectionMargin", 56.7, 0, 1400);
+            end.page.setMargins(number(p, "sectionMargin", 56.7, 0, 1400));
+            if (v21) {
+                const auto top = end.page.marginTop;
+                end.page.marginBottom = number(p, "sectionMarginBottom", top, 0, 1400);
+                end.page.marginLeft = number(p, "sectionMarginLeft", top, 0, 1400);
+                end.page.marginRight = number(p, "sectionMarginRight", top, 0, 1400);
+            }
             const auto columns = number(p, "sectionColumns", 1, 1, 6);
             if (std::floor(columns) != columns)
                 throw std::runtime_error("Invalid column count");

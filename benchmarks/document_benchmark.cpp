@@ -39,9 +39,9 @@ int main(int argc, char **argv) {
         example.runs = {{u"An independent document engine measures this line.", {}}};
         example.spaceAfter = 2;
         auto line = shaper.shape(example, 0, example.text().size());
-        wf::PageStyle page{612, 792, 72};
+        wf::PageStyle page = wf::PageStyle::uniform(612, 792, 72);
         const auto perPage = static_cast<std::size_t>(
-            std::floor((page.height - 2 * page.margin + example.spaceAfter) /
+            std::floor((page.contentHeight() + example.spaceAfter) /
                        ((line.ascent + line.descent) * 1.15 + example.spaceAfter)));
         std::vector<int> sizes = {1, 100, 500, 1000};
         if (argc > 1)

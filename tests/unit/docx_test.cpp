@@ -235,7 +235,7 @@ TEST(Tabs, DocxRetainsAlignedStopsAndLeaders) {
 }
 TEST(Docx, ExportsRealRectangularTablesWithMultipleParagraphsAndImages) {
     Document document;
-    document.page = {612, 792, 36};
+    document.page = wf::PageStyle::uniform(612, 792, 36);
     document.tables = {{10, 2, 2}};
     document.paragraphs = {Paragraph{1}, Paragraph{2}, Paragraph{3}, Paragraph{4},
                            Paragraph{5}, Paragraph{6}, Paragraph{7}};
@@ -312,7 +312,8 @@ TEST(Docx, ImportsIndependentPythonDocxFixture) {
     EXPECT_TRUE(imported.document.paragraphs[0].runs[1].style.italic);
     EXPECT_EQ(imported.document.paragraphs[0].runs[0].style.family, "DejaVu Serif");
     EXPECT_EQ(imported.document.paragraphs[1].list, ListKind::Decimal);
-    EXPECT_EQ(imported.document.page.margin, 36);
+    EXPECT_TRUE(imported.document.page.uniformMargins());
+    EXPECT_EQ(imported.document.page.marginTop, 36);
 }
 TEST(Docx, RoundTripsUnicodeFormattingListsAndPageGeometry) {
     Editor editor;
@@ -335,7 +336,7 @@ TEST(Docx, RoundTripsUnicodeFormattingListsAndPageGeometry) {
         p.lineSpacing = 1.5;
     });
     editor.document.paragraphs.edit(1).pageBreakBefore = true;
-    editor.document.page = {612, 792, 36};
+    editor.document.page = wf::PageStyle::uniform(612, 792, 36);
     const auto bytes = serializeDocx(editor.document);
     EXPECT_EQ(bytes.substr(0, 2), "PK");
     const auto imported = parseDocx(bytes);
@@ -350,7 +351,8 @@ TEST(Docx, RoundTripsUnicodeFormattingListsAndPageGeometry) {
     listed.listId = 0;
     EXPECT_EQ(listed, static_cast<const ParagraphFormat &>(editor.document.paragraphs[1]));
     EXPECT_EQ(document.page.width, 612);
-    EXPECT_EQ(document.page.margin, 36);
+    EXPECT_TRUE(document.page.uniformMargins());
+    EXPECT_EQ(document.page.marginTop, 36);
 }
 TEST(Docx, ResolvesRelationshipsNamespacesAndInheritedStyles) {
     opc::Parts parts{
@@ -822,7 +824,7 @@ TEST(Docx, ImportsPicturesConvertingOtherFormatsAndFittingThePage) {
     const auto *picture = runs[1].image();
     ASSERT_NE(picture, nullptr);
     EXPECT_EQ(picture->description, "A photo");
-    const double content = plain.page.width - 2 * plain.page.margin;
+    const double content = plain.page.contentWidth();
     EXPECT_LE(picture->width, content);
     EXPECT_NEAR(picture->width / picture->height, 2.0, 0.01); // aspect ratio kept
     EXPECT_EQ(plain.images.at(picture->resourceId)->png, png);
@@ -2385,4 +2387,29 @@ TEST(CellBorders, WordCellAndStyleBordersShowSideBySideAndRoundTrip) {
     const auto native = serializeNative(imported.document);
     EXPECT_NE(opc::read(native).at("document.xml").find("version=\"19\""), std::string::npos);
     EXPECT_EQ(parseNative(native).tables, imported.document.tables);
+}
+
+TEST(PageMargins, WordUnequalMarginsRoundTrip) {
+    // Word 2003's default: 1 in top and bottom, 1.25 in left and right; a negative top
+    // margin keeps its distance.
+    const auto imported = parseDocx(opc::write(wordDocument(
+        "<w:p><w:r><w:t>body</w:t></w:r></w:p><w:sectPr><w:pgSz w:w='12240' w:h='15840'/>"
+        "<w:pgMar w:top='-1440' w:bottom='1080' w:left='1800' w:right='1700' w:header='720' "
+        "w:footer='720' w:gutter='0'/></w:sectPr>")));
+    EXPECT_TRUE(imported.warnings.empty());
+    const auto &page = imported.document.page;
+    EXPECT_DOUBLE_EQ(page.marginTop, 72);
+    EXPECT_DOUBLE_EQ(page.marginBottom, 54);
+    EXPECT_DOUBLE_EQ(page.marginLeft, 90);
+    EXPECT_DOUBLE_EQ(page.marginRight, 85);
+    EXPECT_DOUBLE_EQ(page.contentWidth(), 612 - 175);
+
+    const auto saved = opc::read(serializeDocx(imported.document));
+    const auto &xml = saved.at("word/document.xml");
+    EXPECT_NE(xml.find("w:top=\"1440\""), std::string::npos);
+    EXPECT_NE(xml.find("w:left=\"1800\""), std::string::npos);
+    EXPECT_NE(xml.find("w:right=\"1700\""), std::string::npos);
+    EXPECT_NE(xml.find("w:footer=\"540\""), std::string::npos);
+    const auto again = parseDocx(opc::write(saved)).document.page;
+    EXPECT_EQ(again, page);
 }

@@ -14,6 +14,16 @@ per-feature support table.
 Both channels read WFG1–20. Previous release: 0.6.14 (38b5d00). Release notes:
 `docs/releases/v0.6.15.md`.
 
+## Since 0.6.15 (on main, not yet released)
+
+- **Unequal page margins:** top, bottom, left and right margins are kept apart, for the
+  document and each section. Word files used to show every margin at the top margin's
+  value, with a warning; now their text area, headers and footers sit where Word puts
+  them, and DOCX export writes each side. Set them in Page setup → Margins: custom…
+  (centimetres); the presets still set all four. Headers and footers stay halfway into
+  the top and bottom margins, so Word's own header distance isn't kept.
+- Native format WFG21 is written only for documents with unequal margins.
+
 ## In 0.6.15 (since 0.6.14)
 
 Release notes: `docs/releases/v0.6.15.md`. Version 0.6.15 / `0.6.15-preview`.

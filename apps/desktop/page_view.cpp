@@ -295,7 +295,7 @@ bool PageView::insertPicture(const QString &path) {
         const auto &paragraph = document().paragraphs[selection().focus.paragraph];
         const auto maxWidth = writingWidth();
         const auto maxHeight =
-            (page.height - 2 * page.margin) / paragraph.lineSpacing - typingStyle().size;
+            page.contentHeight() / paragraph.lineSpacing - typingStyle().size;
         double width = pixels.width() * 0.75, height = pixels.height() * 0.75;
         const auto fit = std::min({1.0, 360.0 / width, maxWidth / width, maxHeight / height});
         width *= fit;
@@ -478,7 +478,7 @@ bool PageView::shadeCells(std::uint32_t color) {
 double PageView::writingWidth() const {
     const auto page = sectionPage();
     const auto &paragraph = document().paragraphs[selection().focus.paragraph];
-    double width = (page.width - 2 * page.margin -
+    double width = (page.contentWidth() -
                     static_cast<double>(page.columns - 1) * page.columnGap) /
                    static_cast<double>(page.columns);
     if (paragraph.cell) {
@@ -1002,12 +1002,12 @@ void PageView::keyPressEvent(QKeyEvent *event) {
         auto page = caret.page;
         double y = caret.y + direction * caret.height + caret.height / 2;
         const auto &sheet = layout_.pageStyle(page);
-        if (y < sheet.margin && page) {
+        if (y < sheet.marginTop && page) {
             --page;
-            y = layout_.pageStyle(page).height - layout_.pageStyle(page).margin - 1;
-        } else if (y > sheet.height - sheet.margin && page + 1 < layout_.pageCount) {
+            y = layout_.pageStyle(page).height - layout_.pageStyle(page).marginBottom - 1;
+        } else if (y > sheet.height - sheet.marginBottom && page + 1 < layout_.pageCount) {
             ++page;
-            y = layout_.pageStyle(page).margin;
+            y = layout_.pageStyle(page).marginTop;
         }
         moveCaret(layout_.hitTest(caret.x, y, page), extend);
         return;

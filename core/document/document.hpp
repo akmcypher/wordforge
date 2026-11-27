@@ -189,7 +189,21 @@ struct PageBand {
     bool operator==(const PageBand &) const = default;
 };
 struct PageStyle {
-    double width = 595.28, height = 841.89, margin = 56.7;
+    double width = 595.28, height = 841.89;
+    // Distances from the page edges to the text area. Headers and footers sit halfway into
+    // the top and bottom margins.
+    double marginTop = 56.7, marginBottom = 56.7, marginLeft = 56.7, marginRight = 56.7;
+    double contentWidth() const { return width - marginLeft - marginRight; }
+    double contentHeight() const { return height - marginTop - marginBottom; }
+    void setMargins(double value) { marginTop = marginBottom = marginLeft = marginRight = value; }
+    static PageStyle uniform(double width, double height, double margin) {
+        PageStyle page{width, height};
+        page.setMargins(margin);
+        return page;
+    }
+    bool uniformMargins() const {
+        return marginBottom == marginTop && marginLeft == marginTop && marginRight == marginTop;
+    }
     // Newspaper-style columns: text fills each column top to bottom, left to right.
     std::size_t columns = 1;
     double columnGap = 36;
