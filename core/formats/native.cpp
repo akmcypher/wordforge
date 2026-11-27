@@ -400,10 +400,12 @@ std::string serializeNative(const Document &document) {
                     [](const Bookmark &b) { return b.end.has_value(); }) ||
         std::any_of(document.tables.begin(), document.tables.end(),
                     [](const Table &t) { return !t.cellBorders.empty(); });
+    // WFG20 only for first-page headers and footers, so other files stay readable by 0.6.14.
+    const bool titled = !document.page.firstHeader.empty() || !document.page.firstFooter.empty();
     const bool semantic = styled || banded || preserving || noted || reviewed || decorated ||
                           themed || sectioned || tabbed || kept || widowed || baseline || spaced ||
-                          paired;
-    root.append_attribute("version") = paired ? "19" : spaced ? "18" : baseline ? "17" : widowed ? "16" : kept                         ? "15"
+                          paired || titled;
+    root.append_attribute("version") = titled ? "20" : paired ? "19" : spaced ? "18" : baseline ? "17" : widowed ? "16" : kept                         ? "15"
                                        : tabbed                     ? "14"
                                        : sectioned                  ? "13"
                                        : themed                     ? "12"
@@ -452,7 +454,9 @@ std::string serializeNative(const Document &document) {
     for (auto [name, band] :
          {std::pair{"header", &document.page.header}, std::pair{"footer", &document.page.footer},
           std::pair{"evenHeader", &document.page.evenHeader},
-          std::pair{"evenFooter", &document.page.evenFooter}}) {
+          std::pair{"evenFooter", &document.page.evenFooter},
+          std::pair{"firstHeader", &document.page.firstHeader},
+          std::pair{"firstFooter", &document.page.firstFooter}}) {
         if (band->empty())
             continue;
         auto node = root.append_child(name);
@@ -724,11 +728,13 @@ Document parseNative(const std::string &input) {
          version != "6" && version != "7" && version != "8" && version != "9" && version != "10" &&
          version != "11" && version != "12" && version != "13" && version != "14" &&
          version != "15" && version != "16" && version != "17" && version != "18" &&
-         version != "19"))
+         version != "19" && version != "20"))
         throw std::runtime_error("Unsupported native document version");
     // WFG7 is WFG6 plus character styles; WFG8 adds headers and footers.
     // WFG9 adds DOCX package parts kept from an imported file.
-    const bool v19 = version == "19";
+    // WFG20 adds first-page headers and footers.
+    const bool v20 = version == "20";
+    const bool v19 = version == "19" || v20;
     const bool v18 = version == "18" || v19;
     const bool v17 = version == "17" || v18;
     const bool v16 = version == "16" || v17;
@@ -871,7 +877,8 @@ Document parseNative(const std::string &input) {
         }
         const std::string_view bandName = p.name();
         if ((v8 && (bandName == "header" || bandName == "footer")) ||
-            (v19 && (bandName == "evenHeader" || bandName == "evenFooter"))) {
+            (v19 && (bandName == "evenHeader" || bandName == "evenFooter")) ||
+            (v20 && (bandName == "firstHeader" || bandName == "firstFooter"))) {
             attributes(p, {"left", "center", "right"});
             for (auto nested : p.children())
                 if (!indentation(nested))
@@ -879,7 +886,9 @@ Document parseNative(const std::string &input) {
             auto &band = bandName == "header"       ? document.page.header
                          : bandName == "footer"     ? document.page.footer
                          : bandName == "evenHeader" ? document.page.evenHeader
-                                                    : document.page.evenFooter;
+                         : bandName == "evenFooter" ? document.page.evenFooter
+                         : bandName == "firstHeader" ? document.page.firstHeader
+                                                     : document.page.firstFooter;
             if (!band.empty())
                 throw std::runtime_error("Duplicate native header or footer");
             band = {utf16(p.attribute("left").value()), utf16(p.attribute("center").value()),

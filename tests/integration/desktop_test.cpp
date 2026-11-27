@@ -1264,6 +1264,36 @@ class DesktopTest : public QObject {
         QVERIFY(page.differentOddEven);
         QCOMPARE(QString::fromStdU16String(page.evenHeader.right), QString("Chapter"));
     }
+    void headerFooterDialogSetsFirstPageBands() {
+        wf::MainWindow window;
+        window.show();
+        auto *view = window.pageView();
+        view->setDocument({});
+        auto *action = window.findChild<QAction *>("headerFooterAction");
+        QVERIFY(action);
+        bool edited = false, disabledFirst = false;
+        QTimer::singleShot(0, &window, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            if (!dialog)
+                return;
+            auto *title = dialog->findChild<QLineEdit *>("firstHeaderCentre");
+            auto *first = dialog->findChild<QCheckBox *>("differentFirstPage");
+            if (title && first) {
+                disabledFirst = !title->isEnabled(); // until the switch is on
+                first->setChecked(true);
+                title->setText("Cover");
+                edited = title->isEnabled();
+                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+            } else
+                dialog->reject();
+        });
+        action->trigger();
+        QVERIFY(disabledFirst);
+        QVERIFY(edited);
+        const auto &page = view->document().page;
+        QVERIFY(page.differentFirstPage);
+        QCOMPARE(QString::fromStdU16String(page.firstHeader.center), QString("Cover"));
+    }
     void bookmarksDialogHidesWordsHiddenBookmarks() {
         wf::MainWindow window;
         auto *view = window.pageView();

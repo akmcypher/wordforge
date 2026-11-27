@@ -303,7 +303,8 @@ void validatePage(const PageStyle &page) {
         !std::isfinite(page.columnGap) || page.columnGap < 0 || page.columnGap > 144 ||
         (page.width - 2 * page.margin - (page.columns - 1) * page.columnGap) / page.columns < 36)
         throw std::invalid_argument("Invalid page geometry");
-    for (const auto *band : {&page.header, &page.footer, &page.evenHeader, &page.evenFooter})
+    for (const auto *band : {&page.header, &page.footer, &page.evenHeader, &page.evenFooter,
+                             &page.firstHeader, &page.firstFooter})
         for (const auto *text : {&band->left, &band->center, &band->right}) {
             if (text->size() > 500)
                 throw std::invalid_argument("Header or footer text is too long");
@@ -331,12 +332,14 @@ void PageStyle::setBands(const PageStyle &from) {
     footer = from.footer;
     evenHeader = from.evenHeader;
     evenFooter = from.evenFooter;
+    firstHeader = from.firstHeader;
+    firstFooter = from.firstFooter;
     differentFirstPage = from.differentFirstPage;
     differentOddEven = from.differentOddEven;
 }
 const PageBand *PageStyle::band(bool top, std::size_t number) const {
     if (number == 0 && differentFirstPage)
-        return nullptr;
+        return top ? &firstHeader : &firstFooter;
     if (differentOddEven && number % 2 == 1)
         return top ? &evenHeader : &evenFooter;
     return top ? &header : &footer;

@@ -16,9 +16,9 @@ Condensed on 2026-11-23. The full earlier notes are kept verbatim in
     stamps, copy-on-write paragraphs, incremental word count, O(1) page positions,
     and PR #57's per-paragraph pagination keys and in-place checkpoints
 
-  Native format WFG19; the reader supports WFG1–19. WFG19 (bookmark ranges, even-page
-  headers and footers, cell borders) shipped in 0.6.14, so further format changes need
-  WFG20.
+  Native format WFG20; the reader supports WFG1–20. WFG19 (bookmark ranges, even-page
+  headers and footers, cell borders) shipped in 0.6.14. WFG20 (first-page headers and
+  footers) isn't in a release yet; add further format changes to it until it ships.
 - Last published release: **v0.6.14** (tag at 38b5d00, 2026-11-27).
   - Windows installers and ZIPs are checksum-verified.
   - Snap stable is `0.6.14-preview`, amd64 rev 91 / arm64 rev 90, promoted by verified
@@ -32,9 +32,11 @@ Condensed on 2026-11-23. The full earlier notes are kept verbatim in
 - Latest verification (2026-11-27):
   - Main 38b5d00 (0.6.14) passed CI on PR #67, including both Windows installer builds and
     both strict-confinement Snap builds, and all six CTest suites locally on Windows ARM64.
-  - Ubuntu ran in CI only for 0.6.14. The keystroke benchmark wasn't measured reliably
-    for 0.6.14 (the machine was busy); remeasure it against 0.6.13 before relying on it. No new Word automation result exists for WFG16/17 features; the last
-  attempt stalled.
+  - Ubuntu ran in CI only for 0.6.14.
+  - Keystroke benchmark remeasured 2026-11-27, three alternating runs each on a ~50% busy
+    machine: 0.6.14 median 2.74–3.16 ms (p95 3.5–4.2) against 0.6.13 3.13–3.74 ms
+    (p95 4.4–12.9). No regression.
+  - No new Word automation result exists for WFG16/17 features; the last attempt stalled.
 
 ## Next work (in order)
 

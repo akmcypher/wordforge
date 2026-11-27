@@ -236,8 +236,9 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
     // Page styles carry the header and footer, so changing them recomposes everything.
     Key global;
     global.add(noteStyle).add(document.page.differentFirstPage).add(document.page.differentOddEven);
-    for (const auto *band : {&document.page.header, &document.page.footer,
-                             &document.page.evenHeader, &document.page.evenFooter})
+    for (const auto *band :
+         {&document.page.header, &document.page.footer, &document.page.evenHeader,
+          &document.page.evenFooter, &document.page.firstHeader, &document.page.firstFooter})
         global.add(band->left).add(band->center).add(band->right);
     // Pictures are drawn from their resources, so page stamps depend on them too.
     for (const auto &[id, resource] : document.images)
@@ -1118,8 +1119,9 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
     bandKey.add(bandStyle).add(document.page.differentFirstPage)
         .add(document.page.differentOddEven)
         .add(static_cast<std::uint64_t>(result.pageCount));
-    for (const auto *band : {&document.page.header, &document.page.footer,
-                             &document.page.evenHeader, &document.page.evenFooter})
+    for (const auto *band :
+         {&document.page.header, &document.page.footer, &document.page.evenHeader,
+          &document.page.evenFooter, &document.page.firstHeader, &document.page.firstFooter})
         bandKey.add(band->left).add(band->center).add(band->right);
     for (const auto &style : result.pageStyles)
         bandKey.geometry(style);

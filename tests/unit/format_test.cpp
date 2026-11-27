@@ -309,6 +309,26 @@ TEST(NativeFormat, OmitsUnreferencedImageResourcesFromSavedDocuments) {
     EXPECT_EQ(parseNative(bookmarked).bookmarks, document.bookmarks);
 }
 
+TEST(NativeFormat, FirstPageHeadersNeedWfg20Only) {
+    Document document;
+    document.page.header = {u"Running", u"", u""};
+    document.page.differentFirstPage = true;
+    EXPECT_EQ(serializeNative(document).find("version=\"20\""), std::string::npos);
+    document.page.firstHeader = {u"", u"Title", u""};
+    document.page.firstFooter = {u"", u"", u"{PAGE}"};
+    const auto bytes = serializeNative(document);
+    EXPECT_NE(bytes.find("version=\"20\""), std::string::npos);
+    EXPECT_EQ(parseNative(bytes).page, document.page);
+    // WFG19 doesn't know first-page bands.
+    auto older = bytes;
+    older.replace(older.find("version=\"20\""), 12, "version=\"19\"");
+    EXPECT_THROW(parseNative(older), std::runtime_error);
+    auto twice = bytes;
+    const auto at = twice.find("<firstHeader");
+    twice.insert(at, twice.substr(at, twice.find("/>", at) + 2 - at));
+    EXPECT_THROW(parseNative(twice), std::runtime_error);
+}
+
 TEST(NativeFormat, HeadersAndFootersRoundTripInV8Only) {
     Document document;
     EXPECT_EQ(serializeNative(document).find("version=\"8\""), std::string::npos);

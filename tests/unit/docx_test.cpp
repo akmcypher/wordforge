@@ -2152,6 +2152,58 @@ TEST(Bookmarks, NamesWordWouldRejectAreRenamedWithTheirLinks) {
     // Without ranges, the file keeps its earlier version.
     EXPECT_EQ(serializeNative(editor.document).find("version=\"19\""), std::string::npos);
 }
+TEST(FirstPage, WordFirstPageHeadersRoundTrip) {
+    const std::string rels =
+        "<Relationship Id='rH' Type='http://schemas.openxmlformats.org/officeDocument/2006/"
+        "relationships/header' Target='header1.xml'/>"
+        "<Relationship Id='rF' Type='http://schemas.openxmlformats.org/officeDocument/2006/"
+        "relationships/header' Target='header2.xml'/>"
+        "<Relationship Id='rG' Type='http://schemas.openxmlformats.org/officeDocument/2006/"
+        "relationships/footer' Target='footer1.xml'/>";
+    auto section = [](bool titlePage) {
+        return std::string("<w:p><w:r><w:t>body</w:t></w:r></w:p><w:sectPr>"
+                           "<w:headerReference w:type='default' r:id='rH'/>"
+                           "<w:headerReference w:type='first' r:id='rF'/>"
+                           "<w:footerReference w:type='first' r:id='rG'/>") +
+               (titlePage ? "<w:titlePg/>" : "") + "</w:sectPr>";
+    };
+    const std::string ns =
+        " xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'";
+    auto parts = wordDocument(section(true), rels);
+    parts["word/header1.xml"] = "<w:hdr" + ns + "><w:p><w:r><w:t>Running</w:t></w:r></w:p></w:hdr>";
+    parts["word/header2.xml"] = "<w:hdr" + ns + "><w:p><w:r><w:t>Title</w:t></w:r></w:p></w:hdr>";
+    parts["word/footer1.xml"] = "<w:ftr" + ns +
+                                "><w:p><w:pPr><w:jc w:val='center'/></w:pPr><w:r><w:t>Cover"
+                                "</w:t></w:r></w:p></w:ftr>";
+    const auto imported = parseDocx(opc::write(parts));
+    EXPECT_TRUE(imported.warnings.empty());
+    const auto &page = imported.document.page;
+    EXPECT_TRUE(page.differentFirstPage);
+    EXPECT_EQ(page.header.left, u"Running");
+    EXPECT_EQ(page.firstHeader.left, u"Title");
+    EXPECT_EQ(page.firstFooter.center, u"Cover");
+    EXPECT_EQ(page.band(true, 0), &page.firstHeader);
+    EXPECT_EQ(page.band(false, 0), &page.firstFooter);
+    EXPECT_EQ(page.band(true, 1), &page.header);
+
+    const auto saved = opc::read(serializeDocx(imported.document));
+    EXPECT_NE(saved.at("word/headerFirst.xml").find("Title"), std::string::npos);
+    EXPECT_NE(saved.at("word/footerFirst.xml").find("Cover"), std::string::npos);
+    const auto again = parseDocx(opc::write(saved)).document.page;
+    EXPECT_EQ(again.firstHeader, page.firstHeader);
+    EXPECT_EQ(again.firstFooter, page.firstFooter);
+    EXPECT_TRUE(again.differentFirstPage);
+
+    // Without a title page, Word ignores the first-page parts.
+    auto plain = wordDocument(section(false), rels);
+    for (auto name : {"word/header1.xml", "word/header2.xml", "word/footer1.xml"})
+        plain[name] = parts[name];
+    const auto ignored = parseDocx(opc::write(plain));
+    EXPECT_TRUE(ignored.warnings.empty());
+    EXPECT_FALSE(ignored.document.page.differentFirstPage);
+    EXPECT_TRUE(ignored.document.page.firstHeader.empty());
+    EXPECT_TRUE(ignored.document.page.firstFooter.empty());
+}
 TEST(EvenPages, WordEvenPageHeadersAndTheSwitchRoundTrip) {
     const std::string rels =
         "<Relationship Id='rH' Type='http://schemas.openxmlformats.org/officeDocument/2006/"

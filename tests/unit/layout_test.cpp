@@ -689,6 +689,30 @@ TEST(Layout, HeadersAndFootersRepeatInTheMarginsWithPageNumbers) {
     editor.setPage(page);
     EXPECT_TRUE(engine.compose(editor.document).furniture.empty());
 }
+TEST(Layout, FirstPageShowsItsOwnHeaderAndFooter) {
+    auto editor = threePages();
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    auto page = editor.document.page;
+    page.header = {u"Running", u"", u""};
+    page.firstHeader = {u"", u"", u"Title"};
+    page.firstFooter = {u"", u"{PAGE}", u""};
+    editor.setPage(page);
+    // Without the switch the first-page bands are unused.
+    ASSERT_EQ(engine.compose(editor.document).furniture.size(), 3u);
+    page.differentFirstPage = true;
+    editor.setPage(page);
+    const auto layout = engine.compose(editor.document);
+    // Page 1: the first-page header and footer; pages 2 and 3: the header.
+    ASSERT_EQ(layout.furniture.size(), 4u);
+    EXPECT_EQ(layout.furniture[0].page, 0u);
+    EXPECT_NEAR(layout.furniture[0].x + layout.furniture[0].shaped.width,
+                page.width - page.margin, 0.01);
+    EXPECT_EQ(layout.furniture[1].page, 0u);
+    EXPECT_GT(layout.furniture[1].baseline, page.height - page.margin);
+    EXPECT_EQ(layout.furniture[2].page, 1u);
+    EXPECT_EQ(layout.furniture[3].page, 2u);
+}
 TEST(Layout, EvenPagesShowTheirOwnHeaderAndFooter) {
     auto editor = threePages();
     Shaper shaper(systemFontFiles());

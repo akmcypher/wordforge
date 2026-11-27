@@ -2703,10 +2703,9 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                     readBand(id, header);
                 continue;
             }
-            if (type == "first") {
-                if (document.page.differentFirstPage && !readBand(id, header).empty())
-                    warn(warnings, "A first-page header or footer is not preserved; the first "
-                                   "page shows none.");
+            if (type == "first") { // shown on the title page when titlePg is on
+                (header ? document.page.firstHeader : document.page.firstFooter) =
+                    readBand(id, header);
                 continue;
             }
             (header ? document.page.header : document.page.footer) = readBand(id, header);
@@ -3052,6 +3051,9 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
     // Word ignores even-page headers unless the settings ask for them.
     if (!document.page.differentOddEven)
         document.page.evenHeader = document.page.evenFooter = {};
+    // and first-page headers unless the section has a title page.
+    if (!document.page.differentFirstPage)
+        document.page.firstHeader = document.page.firstFooter = {};
     validateDocument(document);
     return result;
 }
@@ -3258,7 +3260,7 @@ std::string serializeDocx(const Document &document) {
             set(columns, "num", static_cast<double>(page.columns));
             set(columns, "space", page.columnGap * 20);
         }
-        // Wordforge leaves out the header and footer on the document's first page only,
+        // Wordforge's first-page header and footer apply to the document's first page only,
         // which in Word is the first section's title page.
         if (document.page.differentFirstPage && !wroteSection)
             element(section, "titlePg");
@@ -3645,8 +3647,8 @@ std::string serializeDocx(const Document &document) {
             reference(false, "even", document.page.evenFooter);
         }
         if (document.page.differentFirstPage) {
-            reference(true, "first", {});
-            reference(false, "first", {});
+            reference(true, "first", document.page.firstHeader);
+            reference(false, "first", document.page.firstFooter);
         }
     }
     writeSection(section, document.page, previousContinuous, false);

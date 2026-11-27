@@ -16,6 +16,13 @@ Both channels read WFG1–19. Previous release: 0.6.13 (0baebd5). Release notes:
 
 ## In 0.6.14 (since 0.6.13)
 
+## Since 0.6.14 (on main, not released)
+
+- **First-page headers and footers:** Word's "different first page" header and footer
+  text is shown on the first page, kept when saving as DOCX, and can be edited in the
+  Header and footer dialog. It used to be dropped with a warning. Native format WFG20 is
+  written only for documents with first-page header or footer text.
+
 Release notes: `docs/releases/v0.6.14.md`. Version 0.6.14 / `0.6.14-preview`.
 
 - **Bookmarks, even-page headers and cell borders:**
@@ -114,7 +121,7 @@ Release notes: `docs/releases/v0.6.13.md`. Version 0.6.13 / `0.6.13-preview`.
 
 - Background pagination, renderer and model copy costs per edit (rest of M2).
 - Numbering through styles, row splitting, theme fonts, language and OpenType controls.
-- Border styles other than single lines, diagonal cell borders and first-page header text.
+- Border styles other than single lines and diagonal cell borders.
 - Fuller DOCX fidelity (formatting revisions, unknown body content is omitted with
   a warning, notes and comments are plain text).
 - Balanced columns and per-section headers.

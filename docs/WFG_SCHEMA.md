@@ -1,5 +1,12 @@
 # Native WFG schema and migration
 
+**WFG20 (first-page headers; 0.6.15, not yet released)** adds `<firstHeader>` and
+`<firstFooter>` elements with the `left`/`center`/`right` attributes of `<header>`. With
+the root attribute `differentFirstPage` on, the document's first page shows them instead
+of the header and footer; without them it shows none, as before. WFG20 is written only
+for documents with first-page header or footer text; others keep their earlier version.
+It includes everything in WFG19. WFG1–19 reject the new elements.
+
 **WFG19 (even-page headers, bookmark ranges, cell borders; 0.6.14)** adds:
 - **Even-page headers and footers:** the root attribute `differentOddEven` (boolean) and
   `<evenHeader>`/`<evenFooter>` elements with the `left`/`center`/`right` attributes of
@@ -67,7 +74,7 @@ previous version-selection rules and their old defaults.
 
 WFG15 includes WFG14 tab stops and uses the combined paragraph mask 0x1ff.
 WFG14 permits bits 0–6 (0x7f); earlier style formats permit bits 0–5 (0x3f).
-The integrated reader accepts WFG1–19. Mixed tabs/pagination documents use WFG15;
+The integrated reader accepts WFG1–20. Mixed tabs/pagination documents use WFG15;
 tabs-only documents retain WFG14. Regression tests cover combined properties,
 explicit clears, older readers and version-specific mask rejection.
 

@@ -189,18 +189,20 @@ struct PageStyle {
     std::size_t columns = 1;
     double columnGap = 36;
     PageBand header, footer;
-    PageBand evenHeader, evenFooter; // used on even pages when differentOddEven
-    bool differentFirstPage = false; // no header or footer on the first page
+    PageBand evenHeader, evenFooter;   // used on even pages when differentOddEven
+    PageBand firstHeader, firstFooter; // used on the first page when differentFirstPage
+    bool differentFirstPage = false;   // Word's "Different first page"
     bool differentOddEven = false;   // Word's "Different odd and even pages"
     bool operator==(const PageStyle &) const = default;
     // Copies the header and footer settings (bands and switches) from `from`.
     void setBands(const PageStyle &from);
-    // The header (or footer) of page `number` (0-based); null on a first page without one.
+    // The header (or footer) of page `number` (0-based).
     const PageBand *band(bool header, std::size_t number) const;
     // Whether any page shows a header or footer.
     bool anyBand() const {
         return !header.empty() || !footer.empty() ||
-               (differentOddEven && (!evenHeader.empty() || !evenFooter.empty()));
+               (differentOddEven && (!evenHeader.empty() || !evenFooter.empty())) ||
+               (differentFirstPage && (!firstHeader.empty() || !firstFooter.empty()));
     }
 };
 // The band's text on page `number` (1-based) of `count`, fields substituted.

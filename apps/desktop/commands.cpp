@@ -322,7 +322,8 @@ void headerFooterDialog(PageView *view, QWidget *parent) {
     for (int column = 0; column < 3; ++column)
         layout->addWidget(new QLabel(columns[column]), 0, column + 1);
     std::vector<QLineEdit *> edits;
-    std::vector<QWidget *> evenRows; // enabled with different odd and even pages
+    std::vector<QWidget *> evenRows;  // enabled with different odd and even pages
+    std::vector<QWidget *> firstRows; // enabled with a different first page
     QLineEdit *focused = nullptr;
     int row = 1;
     struct BandRow {
@@ -332,18 +333,23 @@ void headerFooterDialog(PageView *view, QWidget *parent) {
     for (auto [name, id, band] : {BandRow{"Header", "header", &page.header},
                                   BandRow{"Footer", "footer", &page.footer},
                                   BandRow{"Even-page header", "evenHeader", &page.evenHeader},
-                                  BandRow{"Even-page footer", "evenFooter", &page.evenFooter}}) {
+                                  BandRow{"Even-page footer", "evenFooter", &page.evenFooter},
+                                  BandRow{"First-page header", "firstHeader", &page.firstHeader},
+                                  BandRow{"First-page footer", "firstFooter", &page.firstFooter}}) {
         auto *label = new QLabel(name);
         layout->addWidget(label, row, 0);
-        if (band == &page.evenHeader || band == &page.evenFooter)
-            evenRows.push_back(label);
+        auto &group = band == &page.firstHeader || band == &page.firstFooter ? firstRows
+                                                                             : evenRows;
+        const bool optional = band != &page.header && band != &page.footer;
+        if (optional)
+            group.push_back(label);
         const std::u16string *texts[] = {&band->left, &band->center, &band->right};
         for (int column = 0; column < 3; ++column) {
             auto *edit = new QLineEdit(QString::fromStdU16String(*texts[column]));
             edit->setObjectName(QString(id) + columns[column]);
             edit->setAccessibleName(QString(name) + " " + QString(columns[column]).toLower());
-            if (band == &page.evenHeader || band == &page.evenFooter)
-                evenRows.push_back(edit);
+            if (optional)
+                group.push_back(edit);
             edit->setMaxLength(500);
             edit->setMinimumWidth(150);
             layout->addWidget(edit, row, column + 1);
@@ -374,7 +380,7 @@ void headerFooterDialog(PageView *view, QWidget *parent) {
                             "for example \"Page {PAGE} of {NUMPAGES}\".");
     hint->setWordWrap(true);
     layout->addWidget(hint, row++, 1, 1, 3);
-    auto *first = new QCheckBox("No header or footer on the first page");
+    auto *first = new QCheckBox("Different header and footer on the first page");
     first->setObjectName("differentFirstPage");
     first->setChecked(page.differentFirstPage);
     layout->addWidget(first, row++, 1, 1, 3);
@@ -382,12 +388,16 @@ void headerFooterDialog(PageView *view, QWidget *parent) {
     oddEven->setObjectName("differentOddEven");
     oddEven->setChecked(page.differentOddEven);
     layout->addWidget(oddEven, row++, 1, 1, 3);
-    auto showEven = [evenRows](bool on) {
-        for (auto *widget : evenRows)
-            widget->setEnabled(on);
+    auto enabler = [](std::vector<QWidget *> rows) {
+        return [rows](bool on) {
+            for (auto *widget : rows)
+                widget->setEnabled(on);
+        };
     };
-    showEven(page.differentOddEven);
-    QObject::connect(oddEven, &QCheckBox::toggled, &dialog, showEven);
+    enabler(evenRows)(page.differentOddEven);
+    enabler(firstRows)(page.differentFirstPage);
+    QObject::connect(oddEven, &QCheckBox::toggled, &dialog, enabler(evenRows));
+    QObject::connect(first, &QCheckBox::toggled, &dialog, enabler(firstRows));
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -399,8 +409,11 @@ void headerFooterDialog(PageView *view, QWidget *parent) {
                                  &page.footer.center,   &page.footer.right,
                                  &page.evenHeader.left, &page.evenHeader.center,
                                  &page.evenHeader.right, &page.evenFooter.left,
-                                 &page.evenFooter.center, &page.evenFooter.right};
-    for (std::size_t i = 0; i < 12; ++i) {
+                                 &page.evenFooter.center, &page.evenFooter.right,
+                                 &page.firstHeader.left, &page.firstHeader.center,
+                                 &page.firstHeader.right, &page.firstFooter.left,
+                                 &page.firstFooter.center, &page.firstFooter.right};
+    for (std::size_t i = 0; i < std::size(targets); ++i) {
         auto text = edits[i]->text().toStdU16String();
         for (auto &character : text)
             if (character < 0x20 || character == 0x7f || character == 0xfffc)
