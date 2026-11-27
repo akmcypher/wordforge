@@ -894,8 +894,11 @@ TEST(Layout, CellsCarryTheirFillAndTableBorder) {
     EXPECT_EQ(layout.cells[0].fill, 0xffffeeccu);
     EXPECT_EQ(layout.cells[1].fill, 0u);
     for (const auto &cell : layout.cells)
-        for (const auto &border : cell.borders)
-            EXPECT_EQ(border, (TableBorder{2, 0xff336699}));
+        for (int side = 0; side < 6; ++side)
+            if (side < 4)
+                EXPECT_EQ(cell.borders[side], (TableBorder{2, 0xff336699}));
+            else // no diagonals unless the cell sets them
+                EXPECT_EQ(cell.borders[side].width, 0);
 }
 TEST(Layout, FirstLineHangingAndRightIndentsAndJustifiedLines) {
     Shaper shaper(systemFontFiles());

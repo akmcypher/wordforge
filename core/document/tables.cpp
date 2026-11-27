@@ -72,6 +72,11 @@ TableBorder Table::borderAt(std::size_t row, std::size_t column, CellSide side) 
         rows = merge->rows, columns = merge->columns;
     }
     const auto *own = ownBorder(row, column, side);
+    if (side == CellSide::DiagonalDown || side == CellSide::DiagonalUp) {
+        TableBorder none;
+        none.width = 0;
+        return own ? *own : none;
+    }
     auto result = own ? *own : border;
     // The neighbouring cell across this side, if there is one.
     std::optional<std::pair<std::size_t, std::size_t>> next;
@@ -112,12 +117,12 @@ void validateTables(const Document &document) {
             table.border.width > 6 || (table.border.color >> 24) != 0xff ||
             static_cast<unsigned>(table.border.style) > 3)
             throw std::invalid_argument("Invalid table border");
-        if (table.cellBorders.size() > 4 * table.rows * table.columns)
+        if (table.cellBorders.size() > 6 * table.rows * table.columns)
             throw std::invalid_argument("Too many table cell borders");
         for (std::size_t i = 0; i < table.cellBorders.size(); ++i) {
             const auto &item = table.cellBorders[i];
             if (item.row >= table.rows || item.column >= table.columns ||
-                static_cast<unsigned>(item.side) > 3 || !std::isfinite(item.border.width) ||
+                static_cast<unsigned>(item.side) > 5 || !std::isfinite(item.border.width) ||
                 item.border.width < 0 || item.border.width > 6 ||
                 (item.border.color >> 24) != 0xff || static_cast<unsigned>(item.border.style) > 3 ||
                 (i && !(borderOrder(table.cellBorders[i - 1]) < borderOrder(item))))

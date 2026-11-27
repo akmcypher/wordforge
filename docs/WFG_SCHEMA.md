@@ -1,6 +1,6 @@
 # Native WFG schema and migration
 
-**WFG20 (first-page headers, border styles; 0.6.15, not yet released)** adds:
+**WFG20 (first-page headers, border styles, diagonal borders; 0.6.15, not yet released)** adds:
 - **First-page headers and footers:** `<firstHeader>` and `<firstFooter>` elements with
   the `left`/`center`/`right` attributes of `<header>`. With the root attribute
   `differentFirstPage` on, the document's first page shows them instead of the header and
@@ -8,6 +8,9 @@
 - **Border styles:** `borderStyle` on `table` and `style` on `cellBorder`, one of
   `dashed`, `dotted` or `double`; absent means a single line. A double line's `width`
   covers both lines and the gap between them.
+- **Diagonal cell borders:** `cellBorder` `side` may also be `diagonalDown` (top left to
+  bottom right) or `diagonalUp` (bottom left to top right). Only the cell draws them; the
+  table's border never does.
 
 WFG20 is written only for documents that use one of these; others keep their earlier
 version. It includes everything in WFG19. WFG1–19 reject the new elements and attributes.

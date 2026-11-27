@@ -2460,7 +2460,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                 }
             return border;
         };
-        using Sides = std::array<std::optional<TableBorder>, 4>;
+        using Sides = std::array<std::optional<TableBorder>, 6>; // sides, then diagonals
         std::vector<Sides> sides(rows.size() * columns);
         // Applies a w:tblBorders or w:tcBorders to the cell box (r, c, height, width) as part
         // of a region: its outer sides take the region's, inner ones the inside lines.
@@ -2490,8 +2490,11 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                     anyBorder = true;
                 }
             }
-            if (child(borders, "tl2br") || child(borders, "tr2bl"))
-                warn(warnings, "Diagonal cell borders are not shown.");
+            // Diagonals belong to the cell (or the region's every cell), never shared.
+            for (auto [side, name] : {std::pair{CellSide::DiagonalDown, "tl2br"},
+                                      std::pair{CellSide::DiagonalUp, "tr2bl"}})
+                if (auto node = child(borders, name))
+                    cell[static_cast<int>(side)] = readSide(node);
         };
         auto regionOf = [](pugi::xml_node part) {
             const auto type = attr(part, "type");
@@ -2531,7 +2534,8 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
             none.width = 0;
             std::vector<std::pair<TableBorder, std::size_t>> counts;
             for (std::size_t i = 0; i < sides.size(); ++i)
-                for (const auto &side : sides[i]) {
+                for (int s = 0; s < 4; ++s) {
+                    const auto &side = sides[i][s];
                     if (const auto *merge = created.mergeAt(i / columns, i % columns);
                         merge && (merge->row != i / columns || merge->column != i % columns))
                         continue; // covered by a merged cell
@@ -2552,9 +2556,9 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                     if (const auto *merge = created.mergeAt(r, c);
                         merge && (merge->row != r || merge->column != c))
                         continue;
-                    for (int side = 0; side < 4; ++side) {
+                    for (int side = 0; side < 6; ++side) {
                         const auto value = sides[r * columns + c][side].value_or(none);
-                        if (value != created.border)
+                        if (side < 4 ? value != created.border : value.width > 0)
                             created.cellBorders.push_back(
                                 {r, c, static_cast<CellSide>(side), value});
                     }
@@ -3341,8 +3345,10 @@ std::string serializeDocx(const Document &document) {
                     const auto ownRow = merge ? merge->row : cell.row,
                                ownColumn = merge ? merge->column : cell.column;
                     pugi::xml_node cellBorders;
-                    static constexpr const char *sideNames[] = {"top", "right", "bottom", "left"};
-                    for (int side : {0, 3, 2, 1}) { // the schema's order: top, left, bottom, right
+                    static constexpr const char *sideNames[] = {"top",    "right", "bottom",
+                                                                "left",   "tl2br", "tr2bl"};
+                    // the schema's order: top, left, bottom, right, then the diagonals
+                    for (int side : {0, 3, 2, 1, 4, 5}) {
                         const auto *own =
                             table.ownBorder(ownRow, ownColumn, static_cast<CellSide>(side));
                         if (!own)

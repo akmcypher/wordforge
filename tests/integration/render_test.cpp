@@ -205,6 +205,31 @@ TEST(Rendering, DashedAndDoubleBordersLeaveGaps) {
     EXPECT_EQ(runs(ink({6, 0xff000000, BorderStyle::Double}, true)), 2);
     EXPECT_EQ(runs(ink({6, 0xff000000}, true)), 1);
 }
+TEST(Rendering, DiagonalCellBordersCrossTheCell) {
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    Editor e;
+    e.insertTable(1, 1);
+    e.setTableBorder({0, 0xff000000});
+    auto document = e.document;
+    document.tables[0].cellBorders = {{0, 0, CellSide::DiagonalDown, {2, 0xff000000}}};
+    const auto layout = engine.compose(document);
+    PageRenderer renderer;
+    renderer.synchronize(layout);
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(600, 850));
+    renderer.drawPage(*surface->getCanvas(), 0);
+    SkPixmap pixels;
+    ASSERT_TRUE(surface->peekPixels(&pixels));
+    const auto &cell = layout.cells.front();
+    auto inked = [&](double fx, double fy) {
+        return (pixels.getColor(static_cast<int>(cell.x + fx * cell.width),
+                                static_cast<int>(cell.y + fy * cell.height)) &
+                0xffffff) < 0x808080;
+    };
+    EXPECT_TRUE(inked(0.5, 0.5));    // through the middle
+    EXPECT_FALSE(inked(0.25, 0.75)); // not the other diagonal
+    EXPECT_FALSE(inked(0.75, 0.25));
+}
 TEST(Rendering, IncrementalEditsRerecordOnlyChangedPagesAndMatchAFreshRenderer) {
     std::u16string text;
     for (int n = 0; n < 300; ++n)

@@ -1414,6 +1414,31 @@ TEST(Docx, TableBordersAndShadingBothWays) {
     EXPECT_FALSE(warned("single cells"));
     EXPECT_FALSE(warned("shading"));
 }
+TEST(CellBorders, WordDiagonalCellBordersRoundTrip) {
+    const auto word = wordDocument(
+        "<w:tbl><w:tblPr><w:tblBorders><w:top w:val='single' w:sz='4'/></w:tblBorders></w:tblPr>"
+        "<w:tr><w:tc><w:tcPr><w:tcBorders><w:tl2br w:val='single' w:sz='8' w:color='FF0000'/>"
+        "</w:tcBorders></w:tcPr><w:p/></w:tc>"
+        "<w:tc><w:tcPr><w:tcBorders><w:tr2bl w:val='dashed' w:sz='4'/><w:tl2br w:val='nil'/>"
+        "</w:tcBorders></w:tcPr><w:p/></w:tc></w:tr></w:tbl><w:p/>");
+    const auto imported = parseDocx(opc::write(word));
+    EXPECT_TRUE(imported.warnings.empty());
+    const auto &table = imported.document.tables.at(0);
+    EXPECT_EQ(table.borderAt(0, 0, CellSide::DiagonalDown), (TableBorder{1, 0xffff0000}));
+    EXPECT_EQ(table.borderAt(0, 0, CellSide::DiagonalUp).width, 0);
+    EXPECT_EQ(table.borderAt(0, 1, CellSide::DiagonalUp),
+              (TableBorder{0.5, 0xff000000, BorderStyle::Dashed}));
+    EXPECT_EQ(table.borderAt(0, 1, CellSide::DiagonalDown).width, 0);
+    // Diagonals don't change the sides.
+    EXPECT_EQ(table.borderAt(0, 0, CellSide::Top), (TableBorder{0.5, 0xff000000}));
+    EXPECT_EQ(table.borderAt(0, 0, CellSide::Left).width, 0);
+
+    const auto saved = opc::read(serializeDocx(imported.document));
+    EXPECT_NE(saved.at("word/document.xml").find("w:tl2br"), std::string::npos);
+    EXPECT_NE(saved.at("word/document.xml").find("w:tr2bl"), std::string::npos);
+    const auto again = parseDocx(opc::write(saved)).document.tables.at(0);
+    EXPECT_EQ(again.cellBorders, table.cellBorders);
+}
 TEST(CellBorders, WordDashedDottedAndDoubleLinesRoundTrip) {
     const auto word = wordDocument(
         "<w:tbl><w:tblPr><w:tblBorders><w:top w:val='double' w:sz='4' w:color='FF0000'/>"

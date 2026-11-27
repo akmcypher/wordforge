@@ -18,8 +18,9 @@ struct CellRectangle {
     double x, y, width, height;
     std::size_t page, firstParagraph, lastParagraph;
     std::uint32_t fill = 0; // background, 0 for none
-    // The lines on each side, indexed by CellSide (top, right, bottom, left).
-    std::array<TableBorder, 4> borders;
+    // The lines on each side and diagonal, indexed by CellSide (top, right, bottom, left,
+    // down, up).
+    std::array<TableBorder, 6> borders;
 };
 struct Layout {
     std::vector<Line> lines;

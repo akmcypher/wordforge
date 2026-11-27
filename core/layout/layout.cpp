@@ -910,7 +910,9 @@ Layout LayoutEngine::paginate(const Document &document, Layout *previous) {
                                         {table.borderAt(box.row, box.column, CellSide::Top),
                                          table.borderAt(box.row, box.column, CellSide::Right),
                                          table.borderAt(box.row, box.column, CellSide::Bottom),
-                                         table.borderAt(box.row, box.column, CellSide::Left)}});
+                                         table.borderAt(box.row, box.column, CellSide::Left),
+                                         table.borderAt(box.row, box.column, CellSide::DiagonalDown),
+                                         table.borderAt(box.row, box.column, CellSide::DiagonalUp)}});
                 for (auto &line : box.lines) {
                     line.page = pageIndex;
                     line.box = result.cells.size() - 1;

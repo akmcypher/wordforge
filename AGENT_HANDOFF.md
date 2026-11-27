@@ -18,7 +18,7 @@ Condensed on 2026-11-23. The full earlier notes are kept verbatim in
 
   Native format WFG20; the reader supports WFG1–20. WFG19 (bookmark ranges, even-page
   headers and footers, cell borders) shipped in 0.6.14. WFG20 (first-page headers and
-  footers, dashed/dotted/double borders) isn't in a release yet; add further format
+  footers, dashed/dotted/double borders, diagonal cell borders) isn't in a release yet; add further format
   changes to it until it ships.
 - Last published release: **v0.6.14** (tag at 38b5d00, 2026-11-27).
   - Windows installers and ZIPs are checksum-verified.

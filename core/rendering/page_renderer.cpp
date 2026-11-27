@@ -202,7 +202,7 @@ std::size_t PageRenderer::synchronize(const Layout &layout) {
         // the corners by half their width so that sides meet like a rectangle's.
         for (const auto &cell : layout.cells)
             if (cell.page == page)
-                for (int side = 0; side < 4; ++side) {
+                for (int side = 0; side < 6; ++side) {
                     const auto &line = cell.borders[side];
                     if (line.width <= 0)
                         continue;
@@ -212,7 +212,8 @@ std::size_t PageRenderer::synchronize(const Layout &layout) {
                     border.setColor(line.color);
                     border.setStyle(SkPaint::kStroke_Style);
                     border.setStrokeWidth(width);
-                    border.setStrokeCap(SkPaint::kSquare_Cap);
+                    // Diagonals end at the corners; sides reach past them to meet.
+                    border.setStrokeCap(side < 4 ? SkPaint::kSquare_Cap : SkPaint::kButt_Cap);
                     // Dashes and dots as Word draws them: dashes three widths long (at
                     // least 3 points), dots one width apart. Their ends are cut square.
                     if (line.style == BorderStyle::Dashed ||
@@ -238,6 +239,8 @@ std::size_t PageRenderer::synchronize(const Layout &layout) {
                         case 0: canvas->drawLine(left, top + offset, right, top + offset, border); break;
                         case 1: canvas->drawLine(right + offset, top, right + offset, bottom, border); break;
                         case 2: canvas->drawLine(left, bottom + offset, right, bottom + offset, border); break;
+                        case 4: canvas->drawLine(left, top + offset, right, bottom + offset, border); break;
+                        case 5: canvas->drawLine(left, bottom + offset, right, top + offset, border); break;
                         default: canvas->drawLine(left + offset, top, left + offset, bottom, border); break;
                         }
                         if (!twin)

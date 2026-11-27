@@ -411,15 +411,18 @@ std::string serializeNative(const Document &document) {
                     [](const Bookmark &b) { return b.end.has_value(); }) ||
         std::any_of(document.tables.begin(), document.tables.end(),
                     [](const Table &t) { return !t.cellBorders.empty(); });
-    // WFG20 only for first-page headers and footers or dashed, dotted and double borders,
+    // WFG20 only for first-page headers and footers, dashed, dotted and double borders or
+    // diagonal cell borders,
     // so other files stay readable by 0.6.14.
     auto styledBorder = [](const TableBorder &b) { return b.style != BorderStyle::Single; };
     const bool titled =
         !document.page.firstHeader.empty() || !document.page.firstFooter.empty() ||
         std::any_of(document.tables.begin(), document.tables.end(), [&](const Table &t) {
             return styledBorder(t.border) ||
-                   std::any_of(t.cellBorders.begin(), t.cellBorders.end(),
-                               [&](const CellBorder &c) { return styledBorder(c.border); });
+                   std::any_of(t.cellBorders.begin(), t.cellBorders.end(), [&](const CellBorder &c) {
+                       return styledBorder(c.border) ||
+                              static_cast<int>(c.side) > static_cast<int>(CellSide::Left);
+                   });
         });
     const bool semantic = styled || banded || preserving || noted || reviewed || decorated ||
                           themed || sectioned || tabbed || kept || widowed || baseline || spaced ||
@@ -583,7 +586,8 @@ std::string serializeNative(const Document &document) {
             item.append_attribute("rows") = static_cast<unsigned long long>(merge.rows);
             item.append_attribute("columns") = static_cast<unsigned long long>(merge.columns);
         }
-        static constexpr const char *sides[] = {"top", "right", "bottom", "left"};
+        static constexpr const char *sides[] = {"top",  "right",        "bottom",
+                                                "left", "diagonalDown", "diagonalUp"};
         for (const auto &border : table.cellBorders) {
             auto item = node.append_child("cellBorder");
             item.append_attribute("row") = static_cast<unsigned long long>(border.row);
@@ -990,8 +994,10 @@ Document parseNative(const std::string &input) {
                     const auto which = side == "top"      ? CellSide::Top
                                        : side == "right"  ? CellSide::Right
                                        : side == "bottom" ? CellSide::Bottom
-                                       : side == "left"
-                                           ? CellSide::Left
+                                       : side == "left"     ? CellSide::Left
+                                       : v20 && side == "diagonalDown" ? CellSide::DiagonalDown
+                                       : v20 && side == "diagonalUp"
+                                           ? CellSide::DiagonalUp
                                            : throw std::runtime_error("Invalid cell border side");
                     table.cellBorders.push_back(
                         {index(nested, "row", true), index(nested, "column", true), which,

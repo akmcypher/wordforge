@@ -135,7 +135,9 @@ struct TableBorder {
     BorderStyle style = BorderStyle::Single;
     bool operator==(const TableBorder &) const = default;
 };
-enum class CellSide : std::uint8_t { Top, Right, Bottom, Left };
+// A cell's four sides, then its two diagonals (top-left to bottom-right, and top-right to
+// bottom-left), which only the cell itself sets.
+enum class CellSide : std::uint8_t { Top, Right, Bottom, Left, DiagonalDown, DiagonalUp };
 // One side of a cell drawn its own way instead of with the table's border (width 0: no
 // line), as Word's cell borders are. For a merged cell, set on its top-left cell.
 struct CellBorder {
