@@ -92,6 +92,10 @@ tables/images, broader desktop testing and recovery across upgrades remain open.
 
 ## Publication record
 
+* 2026-11-27 IST: stable updated to 0.6.15-preview, amd64 revision 99 / ARM64 98,
+  source a452901d4a400f03c96b678aeb88e82321c6b968 (tag v0.6.15). Edge run 46005561410
+  passed strict-confinement checks. Promotion run 46021933095 verified both archives
+  before release and the public stable pointers afterward.
 * 2026-11-27 IST: stable updated to 0.6.14-preview, amd64 revision 91 / ARM64 90,
   source 38b5d00719102e93d5474cadc96ee4e3fa978cb2 (tag v0.6.14). Edge run 45880396217
   passed strict-confinement checks. Promotion run 45882208032 verified both archives

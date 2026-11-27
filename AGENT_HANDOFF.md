@@ -6,34 +6,35 @@ Condensed on 2026-11-23. The full earlier notes are kept verbatim in
 
 ## Current state
 
-- `main` holds everything through PR #67 (release 0.6.14):
+- `main` holds everything through PR #72 (release 0.6.15):
   - features: sections/columns, tab stops and TOC dot leaders, keep-with-next and
     keep-lines, widow/orphan control, superscript/subscript, and in 0.6.13 Word table
     styles (PR #59), Word's style defaults kept (PR #61), contextual and character
     spacing (PR #62), and list levels with Word numbering definitions (PR #63), and in
-    0.6.14 Word bookmarks, even-page headers and footers, and cell borders (PR #66)
+    0.6.14 Word bookmarks, even-page headers and footers, and cell borders (PR #66),
+    and in 0.6.15 first-page headers and footers, dashed, dotted and double borders,
+    and diagonal cell borders (PRs #69–#71)
   - the long-document performance work of PRs #50–#54: incremental pagination, page
     stamps, copy-on-write paragraphs, incremental word count, O(1) page positions,
     and PR #57's per-paragraph pagination keys and in-place checkpoints
 
-  Native format WFG20; the reader supports WFG1–20. WFG19 (bookmark ranges, even-page
-  headers and footers, cell borders) shipped in 0.6.14. WFG20 (first-page headers and
-  footers, dashed/dotted/double borders, diagonal cell borders) isn't in a release yet; add further format
-  changes to it until it ships.
-- Last published release: **v0.6.14** (tag at 38b5d00, 2026-11-27).
+  Native format WFG20; the reader supports WFG1–20. WFG20 (first-page headers and
+  footers, dashed/dotted/double borders, diagonal cell borders) shipped in 0.6.15, so
+  further format changes need WFG21.
+- Last published release: **v0.6.15** (tag at a452901, 2026-11-27).
   - Windows installers and ZIPs are checksum-verified.
-  - Snap stable is `0.6.14-preview`, amd64 rev 91 / arm64 rev 90, promoted by verified
-    run 45882208032.
-  - Both channels read WFG1–19.
+  - Snap stable is `0.6.15-preview`, amd64 rev 99 / arm64 rev 98, promoted by verified
+    run 46021933095.
+  - Both channels read WFG1–20.
 - The Snap promotion's Store download can fail with TLS errors while the Store is
   throttling (HTTP 429). Rerun the failed job once the Store's info endpoint answers 200
   again; nothing is promoted until both archives verify.
 - PR #43 (0.6.9 publication evidence) is open on `codex/release-0.6.9-handoff`.
   Preserve it, and don't delete other branches or worktrees without asking.
 - Latest verification (2026-11-27):
-  - Main 38b5d00 (0.6.14) passed CI on PR #67, including both Windows installer builds and
+  - Main a452901 (0.6.15) passed CI on PR #72, including both Windows installer builds and
     both strict-confinement Snap builds, and all six CTest suites locally on Windows ARM64.
-  - Ubuntu ran in CI only for 0.6.14.
+  - Ubuntu ran in CI only for 0.6.15.
   - Keystroke benchmark remeasured 2026-11-27, three alternating runs each on a ~50% busy
     machine: 0.6.14 median 2.74–3.16 ms (p95 3.5–4.2) against 0.6.13 3.13–3.74 ms
     (p95 4.4–12.9). No regression.
