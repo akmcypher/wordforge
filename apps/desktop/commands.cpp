@@ -549,8 +549,26 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
     // Text.
     auto *bold = create("bold", "Bold", "Format", toggle(&CharacterStyle::bold), "Ctrl+B");
     auto *italic = create("italic", "Italic", "Format", toggle(&CharacterStyle::italic), "Ctrl+I");
-    auto *underline =
-        create("underline", "Underline", "Format", toggle(&CharacterStyle::underline), "Ctrl+U");
+    auto *underline = create("underline", "Underline", "Format", [view] {
+        const bool value = !view->typingStyle().underline;
+        view->format([value](auto &s) {
+            s.underline = value;
+            s.underlineStyle = UnderlineStyle::Single;
+        });
+    }, "Ctrl+U");
+    // Word's underline styles; each turns the underline on.
+    for (auto [id, text, value] :
+         {std::tuple{"underlineDouble", "Double", UnderlineStyle::Double},
+          std::tuple{"underlineThick", "Thick", UnderlineStyle::Thick},
+          std::tuple{"underlineDotted", "Dotted", UnderlineStyle::Dotted},
+          std::tuple{"underlineDashed", "Dashed", UnderlineStyle::Dashed},
+          std::tuple{"underlineWavy", "Wavy", UnderlineStyle::Wavy}})
+        create(id, QString("Underline: ") + text, "Format", [view, value] {
+            view->format([value](auto &s) {
+                s.underline = true;
+                s.underlineStyle = value;
+            });
+        })->setCheckable(true);
     auto *strike = create("strike", "Strikethrough", "Format", toggle(&CharacterStyle::strike));
     auto baseline = [view](TextBaseline target) {
         return [view, target] {
@@ -859,6 +877,12 @@ void Commands::sync() {
     get("bold")->setChecked(s.bold);
     get("italic")->setChecked(s.italic);
     get("underline")->setChecked(s.underline);
+    for (auto [id, value] : {std::pair{"underlineDouble", UnderlineStyle::Double},
+                             std::pair{"underlineThick", UnderlineStyle::Thick},
+                             std::pair{"underlineDotted", UnderlineStyle::Dotted},
+                             std::pair{"underlineDashed", UnderlineStyle::Dashed},
+                             std::pair{"underlineWavy", UnderlineStyle::Wavy}})
+        get(id)->setChecked(s.underline && s.underlineStyle == value);
     get("strike")->setChecked(s.strike);
     get("superscript")->setChecked(s.baseline == TextBaseline::Superscript);
     get("subscript")->setChecked(s.baseline == TextBaseline::Subscript);

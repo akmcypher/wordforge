@@ -919,7 +919,10 @@ void PageView::keyPressEvent(QKeyEvent *event) {
     }
     if (event->matches(QKeySequence::Underline)) {
         const bool value = !editor_.typingStyle.underline;
-        format([value](auto &s) { s.underline = value; });
+        format([value](auto &s) {
+            s.underline = value;
+            s.underlineStyle = UnderlineStyle::Single;
+        });
         return;
     }
     if (event->modifiers().testFlag(Qt::ControlModifier) &&

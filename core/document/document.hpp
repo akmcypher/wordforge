@@ -20,6 +20,7 @@ struct CharacterStyle {
     std::string family = "Arial";
     double size = 12;
     bool bold = false, italic = false, underline = false;
+    UnderlineStyle underlineStyle = UnderlineStyle::Single;
     bool strike = false;
     // Points added after each character (Word's character spacing); negative condenses.
     double spacing = 0;

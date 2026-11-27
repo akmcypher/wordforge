@@ -220,6 +220,35 @@ std::optional<TextBaseline> readBaseline(pugi::xml_node properties, std::vector<
     warn(warnings, "An unsupported text baseline was omitted.");
     return std::nullopt;
 }
+// Word's name for an underline, "none" when off.
+std::string underlineName(bool underline, UnderlineStyle style) {
+    if (!underline)
+        return "none";
+    static constexpr const char *names[] = {"single", "double", "thick", "dotted", "dash", "wave"};
+    return names[static_cast<int>(style)];
+}
+// Word's underline values: those Wordforge draws, then near ones (heavier dots and dashes,
+// long dashes, double waves); `words` and dot-dash patterns are approximated with a warning.
+std::optional<UnderlineStyle> underlineStyle(const std::string &name, bool &approximated) {
+    approximated = false;
+    if (name.empty() || name == "single")
+        return UnderlineStyle::Single;
+    if (name == "none")
+        return std::nullopt;
+    if (name == "double")
+        return UnderlineStyle::Double;
+    if (name == "thick")
+        return UnderlineStyle::Thick;
+    if (name == "dotted" || name == "dottedHeavy")
+        return UnderlineStyle::Dotted;
+    if (name == "dash" || name == "dashedHeavy" || name == "dashLong" || name == "dashLongHeavy")
+        return UnderlineStyle::Dashed;
+    if (name == "wave" || name == "wavyHeavy" || name == "wavyDouble")
+        return UnderlineStyle::Wavy;
+    approximated = true;
+    return name.starts_with("dot") || name.starts_with("dash") ? UnderlineStyle::Dashed
+                                                                : UnderlineStyle::Single;
+}
 std::string baselineName(TextBaseline value) {
     return value == TextBaseline::Superscript ? "superscript" :
            value == TextBaseline::Subscript ? "subscript" : "baseline";
@@ -348,9 +377,12 @@ void runProperties(pugi::xml_node properties, CharacterStyle &style,
         else if (is(node, "sz"))
             style.size = halfPoints(val(node)) / 2;
         else if (is(node, "u")) {
-            style.underline = val(node) != "none";
-            if (val(node) != "single" && val(node) != "none" && !val(node).empty())
-                warn(warnings, "Underline patterns are shown as a single line.");
+            bool approximated = false;
+            const auto drawn = underlineStyle(val(node), approximated);
+            style.underline = drawn.has_value();
+            style.underlineStyle = drawn.value_or(UnderlineStyle::Single);
+            if (approximated)
+                warn(warnings, "Some underline patterns are approximated.");
         } else if (is(node, "color")) {
             // "auto" (Word's automatic colour) is Wordforge's default ink.
             style.color = val(node) == "auto" ? CharacterStyle{}.color : color(val(node));
@@ -1000,8 +1032,8 @@ void writeCharacter(pugi::xml_node rpr, const CharacterStyle &value, const Chara
     const bool highlight = base ? value.highlight != base->highlight : value.highlight != 0;
     if (highlight && !value.highlight)
         property(rpr, "highlight", std::string("none"));
-    if (differs(&CharacterStyle::underline))
-        property(rpr, "u", std::string(value.underline ? "single" : "none"));
+    if (differs(&CharacterStyle::underline) || differs(&CharacterStyle::underlineStyle))
+        property(rpr, "u", underlineName(value.underline, value.underlineStyle));
     if (highlight && value.highlight) {
         opaque(value.highlight);
         auto shading = element(rpr, "shd");
@@ -3574,7 +3606,7 @@ std::string serializeDocx(const Document &document) {
             property(rpr, "szCs", run.style.size * 2);
             if (!run.style.highlight) // override a highlight the paragraph style may set
                 property(rpr, "highlight", std::string("none"));
-            property(rpr, "u", std::string(run.style.underline ? "single" : "none"));
+            property(rpr, "u", underlineName(run.style.underline, run.style.underlineStyle));
             if (run.style.highlight) {
                 auto shading = element(rpr, "shd");
                 set(shading, "val", std::string("clear"));
@@ -3759,7 +3791,8 @@ std::string serializeDocx(const Document &document) {
         if (c.highlight && !*c.highlight)
             property(rpr, "highlight", std::string("none"));
         if (c.underline)
-            property(rpr, "u", std::string(*c.underline ? "single" : "none"));
+            property(rpr, "u", underlineName(*c.underline,
+                                             c.underlineStyle.value_or(UnderlineStyle::Single)));
         if (c.highlight && *c.highlight) {
             if ((*c.highlight >> 24) != 255)
                 throw std::runtime_error(

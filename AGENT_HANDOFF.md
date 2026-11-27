@@ -19,7 +19,7 @@ Condensed on 2026-11-23. The full earlier notes are kept verbatim in
     and PR #57's per-paragraph pagination keys and in-place checkpoints
 
   Native format WFG21; the reader supports WFG1–21. WFG20 shipped in 0.6.15. WFG21
-  (unequal page margins, PR for 0.6.16) isn't in a release yet; add further format
+  (unequal page margins and underline styles, for 0.6.16) isn't in a release yet; add further format
   changes to it until it ships.
 - Since 0.6.15: `PageStyle` has `marginTop/Bottom/Left/Right` (no single `margin`); use
   `contentWidth()`/`contentHeight()`, `setMargins()` and `PageStyle::uniform()`, never

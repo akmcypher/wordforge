@@ -1,4 +1,5 @@
 #include "core/rendering/page_renderer.hpp"
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -272,4 +273,53 @@ TEST(Rendering, IncrementalEditsRerecordOnlyChangedPagesAndMatchAFreshRenderer) 
     check(layout.pageCount);
     editor.undo();
     check(layout.pageCount);
+}
+
+TEST(Rendering, UnderlineStylesDrawTheirPatterns) {
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    Editor e;
+    e.replace(u"MMMMMMMMMMMMMMMMMMMM");
+    e.selection = {{0, 0}, {0, 20}};
+    // Inked runs along the underline (across it when `across`), below the text.
+    auto ink = [&](UnderlineStyle style, bool across) {
+        e.format([style](CharacterStyle &s) {
+            s.size = 24;
+            s.underline = true;
+            s.underlineStyle = style;
+        });
+        const auto layout = engine.compose(e.document);
+        PageRenderer renderer;
+        renderer.synchronize(layout);
+        auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(600, 850));
+        renderer.drawPage(*surface->getCanvas(), 0);
+        SkPixmap pixels;
+        surface->peekPixels(&pixels);
+        const auto &line = layout.lines.front();
+        const int x = static_cast<int>(line.x + line.shaped.width / 2);
+        const int y = static_cast<int>(line.baseline + 2);
+        std::vector<bool> inked;
+        if (across)
+            for (int i = -2; i < 10; ++i) // from just below the glyphs' baseline down
+                inked.push_back((pixels.getColor(x, y + i) & 0xffffff) < 0xa0a0a0);
+        else
+            for (int i = -100; i < 100; ++i)
+                inked.push_back((pixels.getColor(x + i, y) & 0xffffff) < 0xa0a0a0);
+        return inked;
+    };
+    auto runs = [](const std::vector<bool> &inked) {
+        int count = 0;
+        for (std::size_t i = 0; i < inked.size(); ++i)
+            count += inked[i] && (i == 0 || !inked[i - 1]);
+        return count;
+    };
+    auto count = [](const std::vector<bool> &inked) {
+        return static_cast<int>(std::count(inked.begin(), inked.end(), true));
+    };
+    EXPECT_EQ(runs(ink(UnderlineStyle::Single, false)), 1);
+    EXPECT_GE(runs(ink(UnderlineStyle::Dashed, false)), 6);
+    EXPECT_GE(runs(ink(UnderlineStyle::Dotted, false)), 20);
+    EXPECT_GE(runs(ink(UnderlineStyle::Wavy, false)), 4); // crosses the line now and then
+    EXPECT_EQ(runs(ink(UnderlineStyle::Double, true)), 2);
+    EXPECT_GT(count(ink(UnderlineStyle::Thick, true)), count(ink(UnderlineStyle::Single, true)));
 }

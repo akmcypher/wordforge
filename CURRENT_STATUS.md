@@ -22,7 +22,13 @@ Both channels read WFG1–20. Previous release: 0.6.14 (38b5d00). Release notes:
   them, and DOCX export writes each side. Set them in Page setup → Margins: custom…
   (centimetres); the presets still set all four. Headers and footers stay halfway into
   the top and bottom margins, so Word's own header distance isn't kept.
-- Native format WFG21 is written only for documents with unequal margins.
+- **Underline styles:** Word's double, thick, dotted, dashed and wavy underlines are drawn
+  as such, kept in DOCX and native files, and chosen in Format → Underline style. Heavy
+  and long variants map to the nearest; dot-dash and words-only underlines are
+  approximated with a warning. They used to be single lines with a warning. Copy and paste
+  carry dotted, dashed and wavy underlines.
+- Native format WFG21 is written only for documents with unequal margins or underline
+  styles.
 
 ## In 0.6.15 (since 0.6.14)
 

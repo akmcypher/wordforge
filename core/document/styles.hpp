@@ -32,11 +32,14 @@ ThemeColor parseThemeColorText(const std::string &, std::uint32_t color); // thr
 
 // Properties a style sets; unset ones come from the style it is based on, then defaults.
 enum class TextBaseline { Normal, Superscript, Subscript };
+// How an underline is drawn; used only while `underline` is on, and Single otherwise.
+enum class UnderlineStyle : std::uint8_t { Single, Double, Thick, Dotted, Dashed, Wavy };
 struct CharacterProperties {
     std::optional<TextBaseline> baseline;
     std::optional<std::string> family;
     std::optional<double> size;
     std::optional<bool> bold, italic, underline, strike;
+    std::optional<UnderlineStyle> underlineStyle; // only with `underline` on, never Single
     std::optional<std::uint32_t> color, highlight;
     std::optional<double> spacing;
     std::optional<ThemeColor> theme; // only with `color`, and only while it matches

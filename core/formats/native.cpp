@@ -67,6 +67,18 @@ BorderStyle borderStyle(pugi::xml_node node, const char *key) {
             return static_cast<BorderStyle>(i);
     throw std::runtime_error("Invalid native border style");
 }
+constexpr const char *underlineStyleNames[] = {"single", "double", "thick",
+                                               "dotted", "dashed", "wavy"};
+// An underline style attribute (WFG21); single when absent, which is never written.
+std::optional<UnderlineStyle> underlineStyleAttribute(pugi::xml_node node) {
+    const auto attribute = node.attribute("underlineStyle");
+    if (!attribute)
+        return std::nullopt;
+    for (int i = 1; i < 6; ++i)
+        if (std::string_view(attribute.value()) == underlineStyleNames[i])
+            return static_cast<UnderlineStyle>(i);
+    throw std::runtime_error("Invalid native underline style");
+}
 bool boolean(pugi::xml_node node, const char *key) {
     auto attr = node.attribute(key);
     if (!attr)
@@ -156,6 +168,10 @@ void writeCharacterProperties(pugi::xml_node node, const CharacterProperties &c)
         node.append_attribute("italic") = *c.italic;
     if (c.underline)
         node.append_attribute("underline") = *c.underline;
+    if (c.underline && *c.underline && c.underlineStyle &&
+        *c.underlineStyle != UnderlineStyle::Single)
+        node.append_attribute("underlineStyle") =
+            underlineStyleNames[static_cast<int>(*c.underlineStyle)];
     if (c.strike)
         node.append_attribute("strike") = *c.strike;
     if (c.color)
@@ -195,6 +211,9 @@ CharacterProperties readCharacterProperties(pugi::xml_node node) {
     character.bold = flag(node, "bold");
     character.italic = flag(node, "italic");
     character.underline = flag(node, "underline");
+    character.underlineStyle = underlineStyleAttribute(node);
+    if (character.underlineStyle && !character.underline.value_or(false))
+        throw std::runtime_error("An underline style needs an underline");
     character.strike = flag(node, "strike");
     character.color = whole<std::uint32_t>(node, "color", 4294967295.0);
     character.highlight = whole<std::uint32_t>(node, "highlight", 4294967295.0);
@@ -211,8 +230,9 @@ CharacterProperties readCharacterProperties(pugi::xml_node node) {
 // `indented`: WFG11, which adds first-line and right indents and justified alignment.
 // `themed`: WFG12, which adds Word theme colours.
 // `spaced`: WFG18, which adds contextual spacing, character spacing and list levels.
+// `styledLines`: WFG21, which adds underline styles.
 ParagraphStyle readStyle(pugi::xml_node node, bool indented, bool themed, bool tabbed, bool kept,
-                         bool widowed, bool baseline, bool spaced) {
+                         bool widowed, bool baseline, bool spaced, bool styledLines) {
     if (indented)
         attributes(node, {"id",
                           "name",
@@ -237,7 +257,8 @@ ParagraphStyle readStyle(pugi::xml_node node, bool indented, bool themed, bool t
                           themed ? "theme" : "id",
                           tabbed ? "tabs" : "id", kept ? "keepNext" : "id",
                           kept ? "keepLines" : "id", widowed ? "widow" : "id", baseline ? "baseline" : "id",
-                          spaced ? "contextual" : "id", spaced ? "spacing" : "id"});
+                          spaced ? "contextual" : "id", spaced ? "spacing" : "id",
+                          styledLines ? "underlineStyle" : "id"});
     else
         attributes(node, {"id", "name", "basedOn", "next", "align", "list", "indent", "before",
                           "after", "line", "family", "size", "bold", "italic", "underline",
@@ -267,10 +288,11 @@ ParagraphStyle readStyle(pugi::xml_node node, bool indented, bool themed, bool t
     style.character = readCharacterProperties(node);
     return style;
 }
-NamedCharacterStyle readCharacterStyle(pugi::xml_node node, bool themed, bool baseline, bool spaced) {
+NamedCharacterStyle readCharacterStyle(pugi::xml_node node, bool themed, bool baseline, bool spaced,
+                                       bool styledLines) {
     attributes(node, {"id", "name", "basedOn", "family", "size", "bold", "italic", "underline",
                       "strike", "color", "highlight", themed ? "theme" : "id", baseline ? "baseline" : "id",
-                      spaced ? "spacing" : "id"});
+                      spaced ? "spacing" : "id", styledLines ? "underlineStyle" : "id"});
     for (auto child : node.children())
         if (!indentation(child))
             throw std::runtime_error("Unexpected style content");
@@ -424,12 +446,21 @@ std::string serializeNative(const Document &document) {
                               static_cast<int>(c.side) > static_cast<int>(CellSide::Left);
                    });
         });
-    // WFG21 only for unequal page margins, so other files stay readable by 0.6.15.
+    // WFG21 only for unequal page margins or underline styles, so other files stay readable
+    // by 0.6.15.
+    auto styledLine = [](const CharacterProperties &c) { return c.underlineStyle.has_value(); };
     const bool margined =
         !document.page.uniformMargins() ||
         std::any_of(document.paragraphs.begin(), document.paragraphs.end(), [](const Paragraph &p) {
-            return p.sectionBreak && !p.sectionBreak->page.uniformMargins();
-        });
+            return (p.sectionBreak && !p.sectionBreak->page.uniformMargins()) ||
+                   std::any_of(p.runs.begin(), p.runs.end(), [](const Run &r) {
+                       return r.style.underline && r.style.underlineStyle != UnderlineStyle::Single;
+                   });
+        }) ||
+        std::any_of(document.styles.paragraphStyles.begin(), document.styles.paragraphStyles.end(),
+                    [&](const ParagraphStyle &s) { return styledLine(s.character); }) ||
+        std::any_of(document.styles.characterStyles.begin(), document.styles.characterStyles.end(),
+                    [&](const NamedCharacterStyle &s) { return styledLine(s.character); });
     const bool semantic = styled || banded || preserving || noted || reviewed || decorated ||
                           themed || sectioned || tabbed || kept || widowed || baseline || spaced ||
                           paired || titled || margined;
@@ -691,6 +722,9 @@ std::string serializeNative(const Document &document) {
             run.append_attribute("bold") = r.style.bold;
             run.append_attribute("italic") = r.style.italic;
             run.append_attribute("underline") = r.style.underline;
+            if (r.style.underline && r.style.underlineStyle != UnderlineStyle::Single)
+                run.append_attribute("underlineStyle") =
+                    underlineStyleNames[static_cast<int>(r.style.underlineStyle)];
             run.append_attribute("color") = static_cast<unsigned long long>(r.style.color);
             if (activeTheme(r.style.theme, r.style.color))
                 run.append_attribute("theme") = themeColorText(r.style.theme).c_str();
@@ -956,7 +990,7 @@ Document parseNative(const std::string &input) {
             continue;
         }
         if (v6 && std::string_view(p.name()) == "style") {
-            document.styles.paragraphStyles.push_back(readStyle(p, v11, v12, v14, v15, v16, v17, v18));
+            document.styles.paragraphStyles.push_back(readStyle(p, v11, v12, v14, v15, v16, v17, v18, v21));
             continue;
         }
         if (v18 && std::string_view(p.name()) == "list") {
@@ -990,7 +1024,7 @@ Document parseNative(const std::string &input) {
             continue;
         }
         if (v7 && std::string_view(p.name()) == "charStyle") {
-            document.styles.characterStyles.push_back(readCharacterStyle(p, v12, v17, v18));
+            document.styles.characterStyles.push_back(readCharacterStyle(p, v12, v17, v18, v21));
             continue;
         }
         if ((version == "5" || v6) && std::string_view(p.name()) == "table") {
@@ -1231,20 +1265,20 @@ Document parseNative(const std::string &input) {
                 attributes(r, {"id", "family", "size", "bold", "italic", "underline", "color",
                                "strike", "highlight", "direct", "cstyle", v10 ? "ins" : "id",
                                v10 ? "del" : "id", v12 ? "theme" : "id", v12 ? "endnote" : "id", v17 ? "baseline" : "id",
-                               v18 ? "spacing" : "id"});
+                               v18 ? "spacing" : "id", v21 ? "underlineStyle" : "id"});
             else if (image)
                 attributes(r, {"resource", "width", "height", "description", "family", "size",
                                "bold", "italic", "underline", "color", "strike", "highlight",
                                v6 ? "direct" : "resource", v7 ? "cstyle" : "resource",
                                v10 ? "ins" : "resource", v10 ? "del" : "resource",
                                v12 ? "theme" : "resource", v12 ? "link" : "resource", v17 ? "baseline" : "resource",
-                               v18 ? "spacing" : "resource"});
+                               v18 ? "spacing" : "resource", v21 ? "underlineStyle" : "resource"});
             else
                 attributes(r, {"family", "size", "bold", "italic", "underline", "color", "strike",
                                "highlight", v6 ? "direct" : "family", v7 ? "cstyle" : "family",
                                v10 ? "ins" : "family", v10 ? "del" : "family",
                                v12 ? "theme" : "family", v12 ? "link" : "family", v17 ? "baseline" : "family",
-                               v18 ? "spacing" : "family"});
+                               v18 ? "spacing" : "family", v21 ? "underlineStyle" : "family"});
             for (auto child : r.children())
                 if (image || note
                         ? !indentation(child)
@@ -1267,6 +1301,11 @@ Document parseNative(const std::string &input) {
             run.style.bold = boolean(r, "bold");
             run.style.italic = boolean(r, "italic");
             run.style.underline = boolean(r, "underline");
+            if (const auto drawn = underlineStyleAttribute(r)) {
+                if (!run.style.underline)
+                    throw std::runtime_error("An underline style needs an underline");
+                run.style.underlineStyle = *drawn;
+            }
             run.style.strike = boolean(r, "strike");
             run.style.highlight =
                 static_cast<std::uint32_t>(number(r, "highlight", 0, 0, 4294967295.0));

@@ -1278,6 +1278,27 @@ class DesktopTest : public QObject {
         QVERIFY(page.differentOddEven);
         QCOMPARE(QString::fromStdU16String(page.evenHeader.right), QString("Chapter"));
     }
+    void underlineStyleCommandsSetAndClearTheStyle() {
+        wf::MainWindow window;
+        auto *view = window.pageView();
+        view->setDocument({});
+        view->insertText("word");
+        view->selectAll();
+        auto *wavy = window.findChild<QAction *>("underlineWavyAction");
+        auto *underline = window.findChild<QAction *>("underlineAction");
+        QVERIFY(wavy && underline);
+        wavy->trigger();
+        const auto &style = view->document().paragraphs[0].runs[0].style;
+        QVERIFY(style.underline);
+        QCOMPARE(style.underlineStyle, wf::UnderlineStyle::Wavy);
+        QVERIFY(wavy->isChecked());
+        QVERIFY(underline->isChecked());
+        underline->trigger(); // off: back to a plain underline next time
+        const auto &plain = view->document().paragraphs[0].runs[0].style;
+        QVERIFY(!plain.underline);
+        QCOMPARE(plain.underlineStyle, wf::UnderlineStyle::Single);
+        QVERIFY(!wavy->isChecked());
+    }
     void marginsDialogSetsEachSide() {
         wf::MainWindow window;
         window.show();

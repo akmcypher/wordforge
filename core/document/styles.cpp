@@ -20,8 +20,12 @@ void apply(CharacterStyle &target, const CharacterProperties &properties) {
         target.bold = *properties.bold;
     if (properties.italic)
         target.italic = *properties.italic;
-    if (properties.underline)
+    if (properties.underline) {
         target.underline = *properties.underline;
+        target.underlineStyle = target.underline
+                                    ? properties.underlineStyle.value_or(UnderlineStyle::Single)
+                                    : UnderlineStyle::Single;
+    }
     if (properties.strike)
         target.strike = *properties.strike;
     if (properties.color) {
@@ -196,7 +200,10 @@ void fillUnset(CharacterProperties &target, const CharacterProperties &fallback)
     fill(target.size, fallback.size);
     fill(target.bold, fallback.bold);
     fill(target.italic, fallback.italic);
-    fill(target.underline, fallback.underline);
+    if (!target.underline) {
+        target.underline = fallback.underline;
+        target.underlineStyle = fallback.underlineStyle;
+    }
     fill(target.strike, fallback.strike);
     if (!target.color) {
         target.color = fallback.color;
@@ -333,7 +340,7 @@ CharacterMask differingFields(const CharacterStyle &a, const CharacterStyle &b) 
         mask |= BoldField;
     if (a.italic != b.italic)
         mask |= ItalicField;
-    if (a.underline != b.underline)
+    if (a.underline != b.underline || a.underlineStyle != b.underlineStyle)
         mask |= UnderlineField;
     if (a.strike != b.strike)
         mask |= StrikeField;
@@ -385,8 +392,10 @@ void inheritFields(CharacterStyle &target, const CharacterStyle &source, Charact
         target.bold = source.bold;
     if (!(keep & ItalicField))
         target.italic = source.italic;
-    if (!(keep & UnderlineField))
+    if (!(keep & UnderlineField)) {
         target.underline = source.underline;
+        target.underlineStyle = source.underlineStyle;
+    }
     if (!(keep & StrikeField))
         target.strike = source.strike;
     if (!(keep & ColorField)) {
@@ -439,8 +448,11 @@ CharacterProperties propertiesFor(const CharacterStyle &base, const CharacterSty
         result.bold = value.bold;
     if (base.italic != value.italic)
         result.italic = value.italic;
-    if (base.underline != value.underline)
+    if (base.underline != value.underline || base.underlineStyle != value.underlineStyle) {
         result.underline = value.underline;
+        if (value.underline && value.underlineStyle != UnderlineStyle::Single)
+            result.underlineStyle = value.underlineStyle;
+    }
     if (base.strike != value.strike)
         result.strike = value.strike;
     if (base.color != value.color ||

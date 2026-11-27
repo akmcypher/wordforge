@@ -1,13 +1,17 @@
 # Native WFG schema and migration
 
-**WFG21 (unequal page margins; not yet released)** adds:
+**WFG21 (unequal page margins, underline styles; not yet released)** adds:
 - **Page margins:** the root attributes `marginBottom`, `marginLeft` and `marginRight`
   (points, 0–1400) beside `margin`, which is now the top margin. Each section break
   likewise gains `sectionMarginBottom`, `sectionMarginLeft` and `sectionMarginRight`
   beside `sectionMargin`. A missing side takes the top margin's value, so equal margins
   are written as `margin` alone.
+- **Underline styles:** `underlineStyle` on runs (`r`, `note`, `image`), paragraph styles
+  and character styles: `double`, `thick`, `dotted`, `dashed` or `wavy`. Absent means a
+  single line; it is allowed only with `underline="true"`.
 
-WFG21 is written only for documents with unequal margins on the page or a section; others
+WFG21 is written only for documents with unequal margins on the page or a section, or with
+an underline style other than single; others
 keep their earlier version and still open in 0.6.15. It includes everything in WFG20.
 WFG1–20 reject the new attributes.
 

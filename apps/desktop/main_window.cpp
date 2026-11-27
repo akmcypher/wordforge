@@ -442,6 +442,9 @@ void MainWindow::buildUi() {
                   "clearFormatting", "", "bullets", "numbering", "decreaseIndent",
                   "increaseIndent", "", "alignLeft", "alignCenter", "alignRight",
                   "alignJustify"});
+    fill(format->addMenu("Underline style"), {"underline", "underlineDouble", "underlineThick",
+                                              "underlineDotted", "underlineDashed",
+                                              "underlineWavy"});
     fill(format->addMenu("Line spacing"),
          {"lineSpacing1", "lineSpacing115", "lineSpacing15", "lineSpacing2"});
     fill(format->addMenu("Styles"),

@@ -796,3 +796,42 @@ TEST(NativeFormat, UnequalMarginsNeedWfg21Only) {
                   e.document.paragraphs[i].sectionBreak.has_value());
     EXPECT_EQ(read.page, e.document.page);
 }
+
+TEST(NativeFormat, UnderlineStylesNeedWfg21Only) {
+    Editor e;
+    e.replace(u"plain");
+    e.selection = {{0, 0}, {0, 5}};
+    e.format([](CharacterStyle &s) { s.underline = true; });
+    EXPECT_EQ(serializeNative(e.document).find("version=\"21\""), std::string::npos);
+    e.format([](CharacterStyle &s) { s.underlineStyle = UnderlineStyle::Wavy; });
+    const auto bytes = serializeNative(e.document);
+    EXPECT_NE(bytes.find("version=\"21\""), std::string::npos);
+    EXPECT_NE(bytes.find("underlineStyle=\"wavy\""), std::string::npos);
+    const auto read = parseNative(bytes);
+    EXPECT_EQ(read.paragraphs[0].runs[0].style, e.document.paragraphs[0].runs[0].style);
+    // WFG20 doesn't know underline styles, and a style needs the underline on.
+    auto older = bytes;
+    older.replace(older.find("version=\"21\""), 12, "version=\"20\"");
+    EXPECT_THROW(parseNative(older), std::runtime_error);
+    auto off = bytes;
+    off.replace(off.find("underline=\"true\""), 16, "underline=\"false\"");
+    EXPECT_THROW(parseNative(off), std::runtime_error);
+}
+
+TEST(NativeFormat, CharacterStylesKeepTheirUnderlineStyle) {
+    Document document;
+    NamedCharacterStyle emphasis;
+    emphasis.id = emphasis.name = "Emphasis";
+    emphasis.character.underline = true;
+    emphasis.character.underlineStyle = UnderlineStyle::Double;
+    document.styles.characterStyles.push_back(emphasis);
+    const auto bytes = serializeNative(document);
+    EXPECT_NE(bytes.find("version=\"21\""), std::string::npos);
+    const auto read = parseNative(bytes);
+    ASSERT_EQ(read.styles.characterStyles.size(), 1u);
+    EXPECT_EQ(read.styles.characterStyles[0].character, emphasis.character);
+    // A run in that style is drawn with a double underline.
+    const auto shown = inheritedCharacter(read.styles, CharacterStyle{}, "Emphasis");
+    EXPECT_TRUE(shown.underline);
+    EXPECT_EQ(shown.underlineStyle, UnderlineStyle::Double);
+}

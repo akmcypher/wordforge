@@ -8,6 +8,7 @@
 #include <include/core/SkFontMgr.h>
 #include <include/core/SkImage.h>
 #include <include/core/SkPaint.h>
+#include <include/core/SkPathBuilder.h>
 #include <include/core/SkPictureRecorder.h>
 #include <include/core/SkTypeface.h>
 #include <include/effects/SkDashPathEffect.h>
@@ -33,6 +34,52 @@ std::span<const Line> pageLines(const std::vector<Line> &lines, std::size_t page
 }
 template <class T> void keyValue(std::string &key, const T &value) {
     key.append(reinterpret_cast<const char *>(&value), sizeof(value));
+}
+// An underline from `left` to `right` at `y`, in the run's underline style. `paint` carries
+// the text colour; the dash effect and stroke settings are reset afterwards.
+void drawUnderline(SkCanvas &canvas, SkPaint &paint, const CharacterStyle &style, float left,
+                   float right, float y) {
+    const float width = std::max(0.6f, static_cast<float>(style.size / 16));
+    paint.setStrokeWidth(width);
+    switch (style.underlineStyle) {
+    case UnderlineStyle::Single:
+        canvas.drawLine(left, y, right, y, paint);
+        break;
+    case UnderlineStyle::Thick:
+        paint.setStrokeWidth(width * 2);
+        canvas.drawLine(left, y + width / 2, right, y + width / 2, paint);
+        break;
+    case UnderlineStyle::Double:
+        paint.setStrokeWidth(width * 0.75f);
+        canvas.drawLine(left, y - width * 0.25f, right, y - width * 0.25f, paint);
+        canvas.drawLine(left, y + width * 1.5f, right, y + width * 1.5f, paint);
+        break;
+    case UnderlineStyle::Dotted:
+    case UnderlineStyle::Dashed: {
+        const bool dots = style.underlineStyle == UnderlineStyle::Dotted;
+        const SkScalar intervals[] = {dots ? width : std::max(3.0f, width * 4),
+                                      dots ? width : std::max(2.0f, width * 2)};
+        paint.setPathEffect(SkDashPathEffect::Make(intervals, 0));
+        canvas.drawLine(left, y, right, y, paint);
+        paint.setPathEffect(nullptr);
+        break;
+    }
+    case UnderlineStyle::Wavy: {
+        // Half-waves of four widths, one width and a half above and below the line.
+        const float half = std::max(2.0f, width * 2), height = std::max(1.0f, width * 1.5f);
+        SkPathBuilder wave;
+        wave.moveTo(left, y);
+        int n = 0;
+        for (float x = left; x < right; x += half, ++n) {
+            const float end = std::min(right, x + half);
+            wave.quadTo((x + end) / 2, n % 2 ? y + height * 2 : y - height * 2, end, y);
+        }
+        paint.setStyle(SkPaint::kStroke_Style);
+        canvas.drawPath(wave.detach(), paint);
+        paint.setStyle(SkPaint::kFill_Style);
+        break;
+    }
+    }
 }
 template <class Callback> void paintRuns(const Line &line, Callback callback) {
     for (const auto &run : line.marker.runs)
@@ -80,6 +127,7 @@ std::string pageKey(const Layout &layout, std::size_t page) {
             keyValue(key, run.baselineOffset);
             keyValue(key, run.style.color);
             keyValue(key, run.style.underline);
+            keyValue(key, static_cast<int>(run.style.underlineStyle));
             keyValue(key, run.style.strike);
             keyValue(key, run.style.highlight);
             if (run.image) {
@@ -300,12 +348,10 @@ std::size_t PageRenderer::synchronize(const Layout &layout) {
                     {glyphs.data(), glyphs.size()}, {positions.data(), positions.size()},
                     SkPoint::Make(static_cast<float>(x), static_cast<float>(line.baseline)), font,
                     paint);
-                if (run.style.underline) {
-                    paint.setStrokeWidth(std::max(0.6f, static_cast<float>(run.style.size / 16)));
-                    canvas->drawLine(static_cast<float>(x), static_cast<float>(line.baseline + run.baselineOffset + 2),
-                                     static_cast<float>(x + run.width),
-                                     static_cast<float>(line.baseline + run.baselineOffset + 2), paint);
-                }
+                if (run.style.underline)
+                    drawUnderline(*canvas, paint, run.style, static_cast<float>(x),
+                                  static_cast<float>(x + run.width),
+                                  static_cast<float>(line.baseline + run.baselineOffset + 2));
                 if (run.style.strike) {
                     paint.setStrokeWidth(std::max(0.6f, static_cast<float>(run.style.size / 16)));
                     const auto y = static_cast<float>(line.baseline + run.baselineOffset - run.style.size * 0.32);

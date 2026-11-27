@@ -16,6 +16,8 @@ void validateCharacterStyle(const CharacterStyle &style) {
     const auto family = utf16(style.family);
     if (style.family.size() > 256 || !std::isfinite(style.size) || style.size < 1 ||
         style.size > 200 || static_cast<unsigned>(style.baseline) > 2 ||
+        static_cast<unsigned>(style.underlineStyle) > 5 ||
+        (!style.underline && style.underlineStyle != UnderlineStyle::Single) ||
         !std::isfinite(style.spacing) || std::abs(style.spacing) > 1584 ||
         std::any_of(family.begin(), family.end(), [](auto ch) { return ch < 32; }) ||
         style.theme.index > 16 || style.theme.shade < -1 || style.theme.shade > 255 ||
@@ -764,6 +766,7 @@ void Editor::replaceRange(const std::u16string &input, Selection range, const Ru
         typing.color = plain.color;
         typing.theme = plain.theme;
         typing.underline = plain.underline;
+        typing.underlineStyle = plain.underlineStyle;
     }
     // Typed text continues the character style of the run it is typed into.
     const auto typedCharacterStyle =
@@ -1382,7 +1385,7 @@ const Revision *Document::findRevision(std::uint64_t id) const {
 }
 CharacterStyle shownStyle(const Run &run) {
     auto style = run.style;
-    if (run.inserted)
+    if (run.inserted && !style.underline)
         style.underline = true;
     if (run.deleted)
         style.strike = true;
@@ -1724,11 +1727,13 @@ void Editor::setLink(const std::string &target, const std::u16string &text) {
                 run.style.color = linkColor;
                 run.style.theme = {};
                 run.style.underline = true;
+                run.style.underlineStyle = UnderlineStyle::Single;
             } else if (target.empty() && !run.link.empty() && run.style.color == linkColor &&
                        run.style.underline) {
                 run.style.color = plain.color;
                 run.style.theme = plain.theme;
                 run.style.underline = plain.underline;
+                run.style.underlineStyle = plain.underlineStyle;
             }
             run.direct = (run.direct | differingFields(before, run.style)) &
                          differingFields(run.style, plain);

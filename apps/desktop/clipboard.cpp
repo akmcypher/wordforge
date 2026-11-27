@@ -26,6 +26,14 @@ QString runCss(const CharacterStyle &s) {
         css += QString("text-decoration:%1%2;")
                    .arg(s.underline ? "underline " : "")
                    .arg(s.strike ? "line-through" : "");
+    if (s.underline && s.underlineStyle != UnderlineStyle::Single)
+        css += s.underlineStyle == UnderlineStyle::Thick
+                   ? QString("text-decoration-thickness:2px;")
+                   : QString("text-decoration-style:%1;")
+                         .arg(s.underlineStyle == UnderlineStyle::Double   ? "double"
+                              : s.underlineStyle == UnderlineStyle::Dotted ? "dotted"
+                              : s.underlineStyle == UnderlineStyle::Dashed ? "dashed"
+                                                                           : "wavy");
     if (s.highlight)
         css += "background-color:" + cssColor(s.highlight) + ";";
     return css;
@@ -148,6 +156,12 @@ std::vector<Paragraph> fragmentFromHtml(const QString &html, const CharacterStyl
             style.bold = f.fontWeight() >= QFont::DemiBold;
             style.italic = f.fontItalic();
             style.underline = f.fontUnderline();
+            if (style.underline)
+                style.underlineStyle =
+                    f.underlineStyle() == QTextCharFormat::DashUnderline ? UnderlineStyle::Dashed
+                    : f.underlineStyle() == QTextCharFormat::DotLine     ? UnderlineStyle::Dotted
+                    : f.underlineStyle() == QTextCharFormat::WaveUnderline ? UnderlineStyle::Wavy
+                                                                           : UnderlineStyle::Single;
             style.strike = f.fontStrikeOut();
             style.baseline = f.verticalAlignment() == QTextCharFormat::AlignSuperScript ? TextBaseline::Superscript :
                              f.verticalAlignment() == QTextCharFormat::AlignSubScript ? TextBaseline::Subscript : TextBaseline::Normal;

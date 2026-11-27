@@ -2413,3 +2413,42 @@ TEST(PageMargins, WordUnequalMarginsRoundTrip) {
     const auto again = parseDocx(opc::write(saved)).document.page;
     EXPECT_EQ(again, page);
 }
+
+TEST(Underlines, WordUnderlineStylesRoundTrip) {
+    auto run = [](const char *value, const char *text) {
+        return std::string("<w:r><w:rPr><w:u w:val='") + value + "'/></w:rPr><w:t>" + text +
+               "</w:t></w:r>";
+    };
+    const auto imported = parseDocx(opc::write(wordDocument(
+        "<w:p>" + run("double", "a") + run("thick", "b") + run("dotted", "c") +
+        run("dashLongHeavy", "d") + run("wave", "e") + run("single", "f") + run("none", "g") +
+        "</w:p>")));
+    EXPECT_TRUE(imported.warnings.empty());
+    const auto &runs = imported.document.paragraphs[0].runs;
+    ASSERT_EQ(runs.size(), 7u);
+    const UnderlineStyle expected[] = {UnderlineStyle::Double, UnderlineStyle::Thick,
+                                       UnderlineStyle::Dotted, UnderlineStyle::Dashed,
+                                       UnderlineStyle::Wavy,   UnderlineStyle::Single};
+    for (std::size_t i = 0; i < 6; ++i) {
+        EXPECT_TRUE(runs[i].style.underline) << i;
+        EXPECT_EQ(runs[i].style.underlineStyle, expected[i]) << i;
+    }
+    EXPECT_FALSE(runs[6].style.underline);
+    EXPECT_EQ(runs[6].style.underlineStyle, UnderlineStyle::Single);
+
+    const auto saved = opc::read(serializeDocx(imported.document));
+    const auto &xml = saved.at("word/document.xml");
+    for (const char *name : {"double", "thick", "dotted", "dash", "wave"})
+        EXPECT_NE(xml.find(std::string("w:val=\"") + name + "\""), std::string::npos) << name;
+    const auto again = parseDocx(opc::write(saved)).document.paragraphs[0].runs;
+    ASSERT_EQ(again.size(), runs.size());
+    for (std::size_t i = 0; i < runs.size(); ++i)
+        EXPECT_EQ(again[i].style, runs[i].style) << i;
+
+    // Patterns Wordforge doesn't draw are approximated, with a warning.
+    const auto dotDash = parseDocx(opc::write(wordDocument("<w:p>" + run("dotDash", "x") +
+                                                           run("words", "y") + "</w:p>")));
+    EXPECT_FALSE(dotDash.warnings.empty());
+    EXPECT_EQ(dotDash.document.paragraphs[0].runs[0].style.underlineStyle, UnderlineStyle::Dashed);
+    EXPECT_EQ(dotDash.document.paragraphs[0].runs[1].style.underlineStyle, UnderlineStyle::Single);
+}
