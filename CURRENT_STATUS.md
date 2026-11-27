@@ -22,6 +22,10 @@ Both channels read WFG1–19. Previous release: 0.6.13 (0baebd5). Release notes:
   text is shown on the first page, kept when saving as DOCX, and can be edited in the
   Header and footer dialog. It used to be dropped with a warning. Native format WFG20 is
   written only for documents with first-page header or footer text.
+- **Dashed, dotted and double table borders:** drawn as such (they used to be single
+  lines with a warning), kept in DOCX and native files (WFG20), and chosen in Table
+  borders. Other Word styles (wavy, triple, 3-D...) still warn and are drawn as single
+  lines.
 
 Release notes: `docs/releases/v0.6.14.md`. Version 0.6.14 / `0.6.14-preview`.
 
@@ -121,7 +125,8 @@ Release notes: `docs/releases/v0.6.13.md`. Version 0.6.13 / `0.6.13-preview`.
 
 - Background pagination, renderer and model copy costs per edit (rest of M2).
 - Numbering through styles, row splitting, theme fonts, language and OpenType controls.
-- Border styles other than single lines and diagonal cell borders.
+- Border styles other than single, dashed, dotted and double lines, and diagonal cell
+  borders.
 - Fuller DOCX fidelity (formatting revisions, unknown body content is omitted with
   a warning, notes and comments are plain text).
 - Balanced columns and per-section headers.

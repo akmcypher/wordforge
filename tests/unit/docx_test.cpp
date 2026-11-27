@@ -1395,7 +1395,7 @@ TEST(Docx, TableBordersAndShadingBothWays) {
     // Each side as Word draws it: the table's top line and inside lines, and the second
     // cell's own top line. No sides are set elsewhere, so the table's default is none.
     EXPECT_EQ(table.border.width, 0);
-    const TableBorder dashed{1, 0xff000000}, single{0.5, 0xff000000};
+    const TableBorder dashed{1, 0xff000000, BorderStyle::Dashed}, single{0.5, 0xff000000};
     EXPECT_EQ(table.borderAt(0, 0, CellSide::Top), dashed);
     EXPECT_EQ(table.borderAt(1, 0, CellSide::Top), dashed); // the merged cell's
     EXPECT_EQ(table.borderAt(0, 1, CellSide::Top), single);
@@ -1410,9 +1410,42 @@ TEST(Docx, TableBordersAndShadingBothWays) {
             fromWord.warnings.begin(), fromWord.warnings.end(),
                            [&](const auto &warning) { return warning.find(text) != std::string::npos; });
     };
-    EXPECT_TRUE(warned("single lines"));
+    EXPECT_FALSE(warned("single lines")); // dashed lines are drawn as such
     EXPECT_FALSE(warned("single cells"));
     EXPECT_FALSE(warned("shading"));
+}
+TEST(CellBorders, WordDashedDottedAndDoubleLinesRoundTrip) {
+    const auto word = wordDocument(
+        "<w:tbl><w:tblPr><w:tblBorders><w:top w:val='double' w:sz='4' w:color='FF0000'/>"
+        "<w:left w:val='dotted' w:sz='8'/><w:bottom w:val='dashSmallGap' w:sz='8'/>"
+        "<w:right w:val='single' w:sz='8'/></w:tblBorders></w:tblPr>"
+        "<w:tr><w:tc><w:p/></w:tc></w:tr></w:tbl><w:p/>");
+    const auto imported = parseDocx(opc::write(word));
+    EXPECT_TRUE(imported.warnings.empty());
+    const auto &table = imported.document.tables.at(0);
+    // A double line covers both lines and the gap: three times Word's size.
+    EXPECT_EQ(table.borderAt(0, 0, CellSide::Top),
+              (TableBorder{1.5, 0xffff0000, BorderStyle::Double}));
+    EXPECT_EQ(table.borderAt(0, 0, CellSide::Left).style, BorderStyle::Dotted);
+    EXPECT_EQ(table.borderAt(0, 0, CellSide::Bottom).style, BorderStyle::Dashed);
+    EXPECT_EQ(table.borderAt(0, 0, CellSide::Right).style, BorderStyle::Single);
+
+    const auto saved = opc::read(serializeDocx(imported.document));
+    pugi::xml_document body;
+    ASSERT_TRUE(body.load_string(saved.at("word/document.xml").c_str()));
+    const auto top = body.select_node("//w:tcBorders/w:top|//w:tblBorders/w:top").node();
+    EXPECT_STREQ(top.attribute("w:val").value(), "double");
+    EXPECT_STREQ(top.attribute("w:sz").value(), "4");
+    const auto again = parseDocx(opc::write(saved)).document.tables.at(0);
+    for (const auto side : {CellSide::Top, CellSide::Right, CellSide::Bottom, CellSide::Left})
+        EXPECT_EQ(again.borderAt(0, 0, side), table.borderAt(0, 0, side));
+
+    // Styles Wordforge doesn't draw still warn.
+    const auto wavy = parseDocx(opc::write(wordDocument(
+        "<w:tbl><w:tblPr><w:tblBorders><w:top w:val='wave' w:sz='8'/></w:tblBorders></w:tblPr>"
+        "<w:tr><w:tc><w:p/></w:tc></w:tr></w:tbl><w:p/>")));
+    ASSERT_EQ(wavy.warnings.size(), 1u);
+    EXPECT_NE(wavy.warnings[0].find("single lines"), std::string::npos);
 }
 
 TEST(Docx, WordPageAndSectionBreaksStartNewPages) {

@@ -109,7 +109,8 @@ void validateTables(const Document &document) {
                          [](double w) { return !std::isfinite(w) || w <= 0 || w > 2880; })))
             throw std::invalid_argument("Invalid table column widths");
         if (!std::isfinite(table.border.width) || table.border.width < 0 ||
-            table.border.width > 6 || (table.border.color >> 24) != 0xff)
+            table.border.width > 6 || (table.border.color >> 24) != 0xff ||
+            static_cast<unsigned>(table.border.style) > 3)
             throw std::invalid_argument("Invalid table border");
         if (table.cellBorders.size() > 4 * table.rows * table.columns)
             throw std::invalid_argument("Too many table cell borders");
@@ -118,7 +119,7 @@ void validateTables(const Document &document) {
             if (item.row >= table.rows || item.column >= table.columns ||
                 static_cast<unsigned>(item.side) > 3 || !std::isfinite(item.border.width) ||
                 item.border.width < 0 || item.border.width > 6 ||
-                (item.border.color >> 24) != 0xff ||
+                (item.border.color >> 24) != 0xff || static_cast<unsigned>(item.border.style) > 3 ||
                 (i && !(borderOrder(table.cellBorders[i - 1]) < borderOrder(item))))
                 throw std::invalid_argument("Invalid, repeated or unordered table cell border");
         }

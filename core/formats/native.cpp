@@ -56,6 +56,17 @@ void pageGeometry(const PageStyle &page) {
         throw std::runtime_error(error.what());
     }
 }
+constexpr const char *borderStyleNames[] = {"single", "dashed", "dotted", "double"};
+// A border style attribute; single when absent.
+BorderStyle borderStyle(pugi::xml_node node, const char *key) {
+    const auto attribute = node.attribute(key);
+    if (!attribute)
+        return BorderStyle::Single;
+    for (int i = 1; i < 4; ++i)
+        if (std::string_view(attribute.value()) == borderStyleNames[i])
+            return static_cast<BorderStyle>(i);
+    throw std::runtime_error("Invalid native border style");
+}
 bool boolean(pugi::xml_node node, const char *key) {
     auto attr = node.attribute(key);
     if (!attr)
@@ -400,8 +411,16 @@ std::string serializeNative(const Document &document) {
                     [](const Bookmark &b) { return b.end.has_value(); }) ||
         std::any_of(document.tables.begin(), document.tables.end(),
                     [](const Table &t) { return !t.cellBorders.empty(); });
-    // WFG20 only for first-page headers and footers, so other files stay readable by 0.6.14.
-    const bool titled = !document.page.firstHeader.empty() || !document.page.firstFooter.empty();
+    // WFG20 only for first-page headers and footers or dashed, dotted and double borders,
+    // so other files stay readable by 0.6.14.
+    auto styledBorder = [](const TableBorder &b) { return b.style != BorderStyle::Single; };
+    const bool titled =
+        !document.page.firstHeader.empty() || !document.page.firstFooter.empty() ||
+        std::any_of(document.tables.begin(), document.tables.end(), [&](const Table &t) {
+            return styledBorder(t.border) ||
+                   std::any_of(t.cellBorders.begin(), t.cellBorders.end(),
+                               [&](const CellBorder &c) { return styledBorder(c.border); });
+        });
     const bool semantic = styled || banded || preserving || noted || reviewed || decorated ||
                           themed || sectioned || tabbed || kept || widowed || baseline || spaced ||
                           paired || titled;
@@ -545,6 +564,9 @@ std::string serializeNative(const Document &document) {
             node.append_attribute("borderWidth") = table.border.width;
             node.append_attribute("borderColor") =
                 static_cast<unsigned long long>(table.border.color);
+            if (table.border.style != BorderStyle::Single)
+                node.append_attribute("borderStyle") =
+                    borderStyleNames[static_cast<int>(table.border.style)];
         }
         for (const auto width : table.widths)
             node.append_child("column").append_attribute("width") = width;
@@ -569,6 +591,9 @@ std::string serializeNative(const Document &document) {
             item.append_attribute("side") = sides[static_cast<int>(border.side)];
             item.append_attribute("width") = border.border.width;
             item.append_attribute("color") = static_cast<unsigned long long>(border.border.color);
+            if (border.border.style != BorderStyle::Single)
+                item.append_attribute("style") =
+                    borderStyleNames[static_cast<int>(border.border.style)];
         }
     }
     for (const auto &p : document.paragraphs) {
@@ -936,7 +961,9 @@ Document parseNative(const std::string &input) {
             continue;
         }
         if ((version == "5" || v6) && std::string_view(p.name()) == "table") {
-            if (v11)
+            if (v20)
+                attributes(p, {"id", "rows", "columns", "borderWidth", "borderColor", "borderStyle"});
+            else if (v11)
                 attributes(p, {"id", "rows", "columns", "borderWidth", "borderColor"});
             else
                 attributes(p, {"id", "rows", "columns"});
@@ -945,13 +972,17 @@ Document parseNative(const std::string &input) {
                 table.border.width = number(p, "borderWidth", 0.5, 0, 6);
                 table.border.color = static_cast<std::uint32_t>(
                     number(p, "borderColor", 0xff805a3b, 0, 4294967295.0));
+                table.border.style = borderStyle(p, "borderStyle");
             }
             for (auto nested : p.children()) {
                 if (indentation(nested))
                     continue;
                 const std::string_view name = nested.name();
                 if (v19 && name == "cellBorder") {
-                    attributes(nested, {"row", "column", "side", "width", "color"});
+                    if (v20)
+                        attributes(nested, {"row", "column", "side", "width", "color", "style"});
+                    else
+                        attributes(nested, {"row", "column", "side", "width", "color"});
                     if (nested.first_child() || table.cellBorders.size() >= 40000 ||
                         !nested.attribute("width") || !nested.attribute("color"))
                         throw std::runtime_error("Invalid native table cell border");
@@ -965,7 +996,8 @@ Document parseNative(const std::string &input) {
                     table.cellBorders.push_back(
                         {index(nested, "row", true), index(nested, "column", true), which,
                          {number(nested, "width", 0, 0, 6),
-                          static_cast<std::uint32_t>(number(nested, "color", 0, 0, 4294967295.0))}});
+                          static_cast<std::uint32_t>(number(nested, "color", 0, 0, 4294967295.0)),
+                          borderStyle(nested, "style")}});
                 } else if (v11 && name == "shade") {
                     attributes(nested, {"row", "column", "color"});
                     if (nested.first_child() || table.shading.size() >= 10000)

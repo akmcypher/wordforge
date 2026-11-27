@@ -329,6 +329,22 @@ TEST(NativeFormat, FirstPageHeadersNeedWfg20Only) {
     EXPECT_THROW(parseNative(twice), std::runtime_error);
 }
 
+TEST(NativeFormat, BorderStylesNeedWfg20Only) {
+    Editor e;
+    e.insertTable(1, 2);
+    auto document = e.document;
+    validateDocument(document);
+    EXPECT_EQ(serializeNative(document).find("version=\"20\""), std::string::npos);
+    document.tables[0].border = {1, 0xff000000, BorderStyle::Dotted};
+    document.tables[0].cellBorders = {{0, 1, CellSide::Top, {3, 0xff112233, BorderStyle::Double}}};
+    const auto bytes = serializeNative(document);
+    const auto xml = opc::read(bytes).at("document.xml");
+    EXPECT_NE(xml.find("version=\"20\""), std::string::npos);
+    EXPECT_NE(xml.find("borderStyle=\"dotted\""), std::string::npos);
+    EXPECT_NE(xml.find("style=\"double\""), std::string::npos);
+    EXPECT_EQ(parseNative(bytes).tables, document.tables);
+}
+
 TEST(NativeFormat, HeadersAndFootersRoundTripInV8Only) {
     Document document;
     EXPECT_EQ(serializeNative(document).find("version=\"8\""), std::string::npos);

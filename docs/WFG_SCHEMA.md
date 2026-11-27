@@ -1,11 +1,16 @@
 # Native WFG schema and migration
 
-**WFG20 (first-page headers; 0.6.15, not yet released)** adds `<firstHeader>` and
-`<firstFooter>` elements with the `left`/`center`/`right` attributes of `<header>`. With
-the root attribute `differentFirstPage` on, the document's first page shows them instead
-of the header and footer; without them it shows none, as before. WFG20 is written only
-for documents with first-page header or footer text; others keep their earlier version.
-It includes everything in WFG19. WFG1–19 reject the new elements.
+**WFG20 (first-page headers, border styles; 0.6.15, not yet released)** adds:
+- **First-page headers and footers:** `<firstHeader>` and `<firstFooter>` elements with
+  the `left`/`center`/`right` attributes of `<header>`. With the root attribute
+  `differentFirstPage` on, the document's first page shows them instead of the header and
+  footer; without them it shows none, as before.
+- **Border styles:** `borderStyle` on `table` and `style` on `cellBorder`, one of
+  `dashed`, `dotted` or `double`; absent means a single line. A double line's `width`
+  covers both lines and the gap between them.
+
+WFG20 is written only for documents that use one of these; others keep their earlier
+version. It includes everything in WFG19. WFG1–19 reject the new elements and attributes.
 
 **WFG19 (even-page headers, bookmark ranges, cell borders; 0.6.14)** adds:
 - **Even-page headers and footers:** the root attribute `differentOddEven` (boolean) and

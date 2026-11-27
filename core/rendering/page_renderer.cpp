@@ -10,6 +10,7 @@
 #include <include/core/SkPaint.h>
 #include <include/core/SkPictureRecorder.h>
 #include <include/core/SkTypeface.h>
+#include <include/effects/SkDashPathEffect.h>
 #include <map>
 #include <span>
 #include <stdexcept>
@@ -58,6 +59,7 @@ std::string pageKey(const Layout &layout, std::size_t page) {
         for (const auto &border : cell.borders) {
             keyValue(key, border.width);
             keyValue(key, border.color);
+            keyValue(key, static_cast<std::uint8_t>(border.style));
         }
     }
     for (const auto *source : {&layout.lines, &layout.furniture})
@@ -204,21 +206,42 @@ std::size_t PageRenderer::synchronize(const Layout &layout) {
                     const auto &line = cell.borders[side];
                     if (line.width <= 0)
                         continue;
+                    const auto width = static_cast<float>(line.width);
                     SkPaint border;
                     border.setAntiAlias(true);
                     border.setColor(line.color);
                     border.setStyle(SkPaint::kStroke_Style);
-                    border.setStrokeWidth(static_cast<float>(line.width));
+                    border.setStrokeWidth(width);
                     border.setStrokeCap(SkPaint::kSquare_Cap);
-                    const auto left = static_cast<float>(cell.x),
-                               top = static_cast<float>(cell.y),
-                               right = static_cast<float>(cell.x + cell.width),
-                               bottom = static_cast<float>(cell.y + cell.height);
-                    switch (side) {
-                    case 0: canvas->drawLine(left, top, right, top, border); break;
-                    case 1: canvas->drawLine(right, top, right, bottom, border); break;
-                    case 2: canvas->drawLine(left, bottom, right, bottom, border); break;
-                    default: canvas->drawLine(left, top, left, bottom, border); break;
+                    // Dashes and dots as Word draws them: dashes three widths long (at
+                    // least 3 points), dots one width apart. Their ends are cut square.
+                    if (line.style == BorderStyle::Dashed ||
+                        line.style == BorderStyle::Dotted) {
+                        const bool dashed = line.style == BorderStyle::Dashed;
+                        const float intervals[] = {
+                            dashed ? std::max(3.0f, 3 * width) : width,
+                            dashed ? std::max(2.0f, 2 * width) : width};
+                        border.setStrokeCap(SkPaint::kButt_Cap);
+                        border.setPathEffect(SkDashPathEffect::Make(intervals, 0));
+                    }
+                    // A double line: two lines a third of the width each, a third apart.
+                    const bool twin = line.style == BorderStyle::Double;
+                    if (twin)
+                        border.setStrokeWidth(width / 3);
+                    for (const float offset :
+                         {twin ? -width / 3 : 0.0f, twin ? width / 3 : 0.0f}) {
+                        const auto left = static_cast<float>(cell.x),
+                                   top = static_cast<float>(cell.y),
+                                   right = static_cast<float>(cell.x + cell.width),
+                                   bottom = static_cast<float>(cell.y + cell.height);
+                        switch (side) {
+                        case 0: canvas->drawLine(left, top + offset, right, top + offset, border); break;
+                        case 1: canvas->drawLine(right + offset, top, right + offset, bottom, border); break;
+                        case 2: canvas->drawLine(left, bottom + offset, right, bottom + offset, border); break;
+                        default: canvas->drawLine(left + offset, top, left + offset, bottom, border); break;
+                        }
+                        if (!twin)
+                            break;
                     }
                 }
         for (const auto &[notePage, noteY] : layout.noteSeparators)

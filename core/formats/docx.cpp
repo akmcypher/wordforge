@@ -2437,9 +2437,20 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                 border.width = 0;
                 return border;
             }
-            plain = plain && kind == "single";
+            // Word's styles Wordforge draws; others are drawn as single lines.
+            if (kind == "dashed" || kind == "dashSmallGap")
+                border.style = BorderStyle::Dashed;
+            else if (kind == "dotted")
+                border.style = BorderStyle::Dotted;
+            else if (kind == "double")
+                border.style = BorderStyle::Double;
+            else
+                plain = plain && (kind == "single" || kind == "thick");
             const auto size = attr(side, "sz");
-            border.width = size.empty() ? 0.5 : std::clamp(number(size) / 8, 0.25, 6.0);
+            // A double border's size is each of its lines; Wordforge's covers both and the gap.
+            const double lines = border.style == BorderStyle::Double ? 3 : 1;
+            border.width =
+                size.empty() ? 0.5 * lines : std::clamp(number(size) / 8 * lines, 0.25, 6.0);
             const auto shade = attr(side, "color");
             border.color = 0xff000000;
             if (!shade.empty() && shade != "auto")
@@ -2550,7 +2561,7 @@ DocxImport parseDocx(const std::string &bytes, const PictureConverter &convertPi
                 }
         }
         if (!plain)
-            warn(warnings, "Table border styles are shown as single lines.");
+            warn(warnings, "Some table border styles are shown as single lines.");
         // Column widths from the grid, when it matches.
         std::vector<double> widths;
         for (auto column : child(table, "tblGrid").children())
@@ -3133,15 +3144,17 @@ std::string serializeDocx(const Document &document) {
         bool bookmark = false; // id: the bookmark's index in document.bookmarks
     };
     const auto bookmarkNames = wordBookmarkNames(document.bookmarks);
-    // A table or cell border side: a single line, or nil for none.
+    // A table or cell border side: a line in its style, or nil for none.
     auto writeBorder = [](pugi::xml_node border, const TableBorder &line) {
         if (line.width <= 0) {
             set(border, "val", std::string("nil"));
             return;
         }
-        set(border, "val", std::string("single"));
-        // Eighths of a point; Word accepts 2 to 96.
-        set(border, "sz", std::clamp(std::round(line.width * 8), 2.0, 96.0));
+        static constexpr const char *styles[] = {"single", "dashed", "dotted", "double"};
+        set(border, "val", std::string(styles[static_cast<int>(line.style)]));
+        // Eighths of a point (each line's, for a double border); Word accepts 2 to 96.
+        const double lines = line.style == BorderStyle::Double ? 3 : 1;
+        set(border, "sz", std::clamp(std::round(line.width / lines * 8), 2.0, 96.0));
         set(border, "color", hex(line.color));
     };
     std::vector<const Field *> exportedFields; // in nesting order: outer before inner

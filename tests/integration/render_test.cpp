@@ -168,6 +168,43 @@ TEST(Rendering, TableBordersProducePixelsAndInvalidateAfterStructuralEdit) {
     e.tableColumn(true);
     EXPECT_EQ(renderer.synchronize(engine.compose(e.document)), 1);
 }
+TEST(Rendering, DashedAndDoubleBordersLeaveGaps) {
+    Shaper shaper(systemFontFiles());
+    LayoutEngine engine(shaper);
+    Editor e;
+    e.insertTable(1, 1);
+    // Pixels along the cell's top line (across it when `across`), inked or not.
+    auto ink = [&](TableBorder border, bool across) {
+        e.setTableBorder(border);
+        const auto layout = engine.compose(e.document);
+        PageRenderer renderer;
+        renderer.synchronize(layout);
+        auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(600, 850));
+        renderer.drawPage(*surface->getCanvas(), 0);
+        SkPixmap pixels;
+        surface->peekPixels(&pixels);
+        const auto &cell = layout.cells.front();
+        std::vector<bool> inked;
+        const int x = static_cast<int>(cell.x + cell.width / 2), y = static_cast<int>(cell.y);
+        for (int i = -40; i < 40; ++i) {
+            const auto color = across ? pixels.getColor(x, y + i / 8) : pixels.getColor(x + i, y);
+            inked.push_back((color & 0xffffff) < 0x808080);
+        }
+        return inked;
+    };
+    auto runs = [](const std::vector<bool> &inked) { // inked runs
+        int count = 0;
+        for (std::size_t i = 0; i < inked.size(); ++i)
+            count += inked[i] && (i == 0 || !inked[i - 1]);
+        return count;
+    };
+    EXPECT_EQ(runs(ink({1, 0xff000000}, false)), 1);
+    EXPECT_GE(runs(ink({1, 0xff000000, BorderStyle::Dashed}, false)), 10);
+    EXPECT_GE(runs(ink({1, 0xff000000, BorderStyle::Dotted}, false)), 30);
+    // Across a 6-point double line: two lines with a gap between.
+    EXPECT_EQ(runs(ink({6, 0xff000000, BorderStyle::Double}, true)), 2);
+    EXPECT_EQ(runs(ink({6, 0xff000000}, true)), 1);
+}
 TEST(Rendering, IncrementalEditsRerecordOnlyChangedPagesAndMatchAFreshRenderer) {
     std::u16string text;
     for (int n = 0; n < 300; ++n)

@@ -5,6 +5,7 @@
 #include <QAction>
 #include <QCheckBox>
 #include <QColorDialog>
+#include <QComboBox>
 #include <QGridLayout>
 #include <QLabel>
 #include <QDate>
@@ -247,7 +248,7 @@ const Table *caretTable(PageView *view) {
             return &table;
     return nullptr;
 }
-// Table borders: one width (0 for none) and colour for every line of the table.
+// Table borders: one width (0 for none), style and colour for every line of the table.
 void tableBorderDialog(PageView *view, QWidget *parent) {
     const auto *table = caretTable(view);
     if (!table)
@@ -267,6 +268,12 @@ void tableBorderDialog(PageView *view, QWidget *parent) {
     width->setSpecialValueText("No borders");
     width->setValue(border.width);
     form->addRow("Width", width);
+    auto *style = new QComboBox;
+    style->setObjectName("borderStyle");
+    style->setAccessibleName("Border style");
+    style->addItems({"Single", "Dashed", "Dotted", "Double"});
+    style->setCurrentIndex(static_cast<int>(border.style));
+    form->addRow("Style", style);
     auto *colour = new QPushButton;
     colour->setObjectName("borderColor");
     colour->setAccessibleName("Border colour");
@@ -292,6 +299,7 @@ void tableBorderDialog(PageView *view, QWidget *parent) {
     if (dialog.exec() != QDialog::Accepted)
         return;
     border.width = width->value();
+    border.style = static_cast<BorderStyle>(style->currentIndex());
     view->setTableBorder(border);
 }
 // Cell shading: a colour for the selected cells.

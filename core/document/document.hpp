@@ -125,11 +125,14 @@ struct CellMerge {
     }
     bool operator==(const CellMerge &) const = default;
 };
+// How a border line is drawn. A double line's width covers both lines and the gap.
+enum class BorderStyle : std::uint8_t { Single, Dashed, Dotted, Double };
 // The lines around and between a table's cells, unless a cell sets its own. Width 0: no
 // borders.
 struct TableBorder {
     double width = 0.5; // points, at most 6
     std::uint32_t color = 0xff805a3b; // opaque ARGB
+    BorderStyle style = BorderStyle::Single;
     bool operator==(const TableBorder &) const = default;
 };
 enum class CellSide : std::uint8_t { Top, Right, Bottom, Left };

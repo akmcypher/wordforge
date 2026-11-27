@@ -1054,6 +1054,19 @@ class DesktopTest : public QObject {
             auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
             if (!dialog)
                 return;
+            auto *style = dialog->findChild<QComboBox *>("borderStyle");
+            if (style && style->count() == 4) {
+                style->setCurrentIndex(3);
+                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+            } else
+                dialog->reject();
+        });
+        borders->trigger();
+        QVERIFY(view->document().tables[0].border.style == wf::BorderStyle::Double);
+        QTimer::singleShot(0, &window, [] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            if (!dialog)
+                return;
             if (auto *width = dialog->findChild<QDoubleSpinBox *>("borderWidth")) {
                 width->setValue(0);
                 dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
