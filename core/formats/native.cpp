@@ -174,6 +174,10 @@ void writeCharacterProperties(pugi::xml_node node, const CharacterProperties &c)
             underlineStyleNames[static_cast<int>(*c.underlineStyle)];
     if (c.strike)
         node.append_attribute("strike") = *c.strike;
+    if (c.caps)
+        node.append_attribute("caps") = *c.caps;
+    if (c.smallCaps)
+        node.append_attribute("smallCaps") = *c.smallCaps;
     if (c.color)
         node.append_attribute("color") = static_cast<unsigned long long>(*c.color);
     if (c.color && c.theme && activeTheme(*c.theme, *c.color))
@@ -215,6 +219,8 @@ CharacterProperties readCharacterProperties(pugi::xml_node node) {
     if (character.underlineStyle && !character.underline.value_or(false))
         throw std::runtime_error("An underline style needs an underline");
     character.strike = flag(node, "strike");
+    character.caps = flag(node, "caps");
+    character.smallCaps = flag(node, "smallCaps");
     character.color = whole<std::uint32_t>(node, "color", 4294967295.0);
     character.highlight = whole<std::uint32_t>(node, "highlight", 4294967295.0);
     if (auto baseline = whole<unsigned>(node, "baseline", 2))
@@ -230,7 +236,7 @@ CharacterProperties readCharacterProperties(pugi::xml_node node) {
 // `indented`: WFG11, which adds first-line and right indents and justified alignment.
 // `themed`: WFG12, which adds Word theme colours.
 // `spaced`: WFG18, which adds contextual spacing, character spacing and list levels.
-// `styledLines`: WFG21, which adds underline styles.
+// `styledLines`: WFG21, which adds underline styles, all caps and small caps.
 ParagraphStyle readStyle(pugi::xml_node node, bool indented, bool themed, bool tabbed, bool kept,
                          bool widowed, bool baseline, bool spaced, bool styledLines) {
     if (indented)
@@ -258,7 +264,8 @@ ParagraphStyle readStyle(pugi::xml_node node, bool indented, bool themed, bool t
                           tabbed ? "tabs" : "id", kept ? "keepNext" : "id",
                           kept ? "keepLines" : "id", widowed ? "widow" : "id", baseline ? "baseline" : "id",
                           spaced ? "contextual" : "id", spaced ? "spacing" : "id",
-                          styledLines ? "underlineStyle" : "id"});
+                          styledLines ? "underlineStyle" : "id",
+                          styledLines ? "caps" : "id", styledLines ? "smallCaps" : "id"});
     else
         attributes(node, {"id", "name", "basedOn", "next", "align", "list", "indent", "before",
                           "after", "line", "family", "size", "bold", "italic", "underline",
@@ -292,7 +299,8 @@ NamedCharacterStyle readCharacterStyle(pugi::xml_node node, bool themed, bool ba
                                        bool styledLines) {
     attributes(node, {"id", "name", "basedOn", "family", "size", "bold", "italic", "underline",
                       "strike", "color", "highlight", themed ? "theme" : "id", baseline ? "baseline" : "id",
-                      spaced ? "spacing" : "id", styledLines ? "underlineStyle" : "id"});
+                      spaced ? "spacing" : "id", styledLines ? "underlineStyle" : "id",
+                          styledLines ? "caps" : "id", styledLines ? "smallCaps" : "id"});
     for (auto child : node.children())
         if (!indentation(child))
             throw std::runtime_error("Unexpected style content");
@@ -446,15 +454,19 @@ std::string serializeNative(const Document &document) {
                               static_cast<int>(c.side) > static_cast<int>(CellSide::Left);
                    });
         });
-    // WFG21 only for unequal page margins or underline styles, so other files stay readable
-    // by 0.6.15.
-    auto styledLine = [](const CharacterProperties &c) { return c.underlineStyle.has_value(); };
+    // WFG21 only for unequal page margins, underline styles or capitals, so other files stay
+    // readable by 0.6.15.
+    auto styledLine = [](const CharacterProperties &c) {
+        return c.underlineStyle.has_value() || c.caps.has_value() || c.smallCaps.has_value();
+    };
     const bool margined =
         !document.page.uniformMargins() ||
         std::any_of(document.paragraphs.begin(), document.paragraphs.end(), [](const Paragraph &p) {
             return (p.sectionBreak && !p.sectionBreak->page.uniformMargins()) ||
                    std::any_of(p.runs.begin(), p.runs.end(), [](const Run &r) {
-                       return r.style.underline && r.style.underlineStyle != UnderlineStyle::Single;
+                       return (r.style.underline &&
+                               r.style.underlineStyle != UnderlineStyle::Single) ||
+                              r.style.caps || r.style.smallCaps || (r.direct & CapsField);
                    });
         }) ||
         std::any_of(document.styles.paragraphStyles.begin(), document.styles.paragraphStyles.end(),
@@ -730,6 +742,10 @@ std::string serializeNative(const Document &document) {
                 run.append_attribute("theme") = themeColorText(r.style.theme).c_str();
             if (r.style.strike)
                 run.append_attribute("strike") = true;
+            if (r.style.caps)
+                run.append_attribute("caps") = true;
+            if (r.style.smallCaps)
+                run.append_attribute("smallCaps") = true;
             if (r.style.baseline != TextBaseline::Normal)
                 run.append_attribute("baseline") = static_cast<unsigned>(r.style.baseline);
             if (r.style.spacing)
@@ -1265,20 +1281,23 @@ Document parseNative(const std::string &input) {
                 attributes(r, {"id", "family", "size", "bold", "italic", "underline", "color",
                                "strike", "highlight", "direct", "cstyle", v10 ? "ins" : "id",
                                v10 ? "del" : "id", v12 ? "theme" : "id", v12 ? "endnote" : "id", v17 ? "baseline" : "id",
-                               v18 ? "spacing" : "id", v21 ? "underlineStyle" : "id"});
+                               v18 ? "spacing" : "id", v21 ? "underlineStyle" : "id",
+                               v21 ? "caps" : "id", v21 ? "smallCaps" : "id"});
             else if (image)
                 attributes(r, {"resource", "width", "height", "description", "family", "size",
                                "bold", "italic", "underline", "color", "strike", "highlight",
                                v6 ? "direct" : "resource", v7 ? "cstyle" : "resource",
                                v10 ? "ins" : "resource", v10 ? "del" : "resource",
                                v12 ? "theme" : "resource", v12 ? "link" : "resource", v17 ? "baseline" : "resource",
-                               v18 ? "spacing" : "resource", v21 ? "underlineStyle" : "resource"});
+                               v18 ? "spacing" : "resource", v21 ? "underlineStyle" : "resource",
+                               v21 ? "caps" : "resource", v21 ? "smallCaps" : "resource"});
             else
                 attributes(r, {"family", "size", "bold", "italic", "underline", "color", "strike",
                                "highlight", v6 ? "direct" : "family", v7 ? "cstyle" : "family",
                                v10 ? "ins" : "family", v10 ? "del" : "family",
                                v12 ? "theme" : "family", v12 ? "link" : "family", v17 ? "baseline" : "family",
-                               v18 ? "spacing" : "family", v21 ? "underlineStyle" : "family"});
+                               v18 ? "spacing" : "family", v21 ? "underlineStyle" : "family",
+                               v21 ? "caps" : "family", v21 ? "smallCaps" : "family"});
             for (auto child : r.children())
                 if (image || note
                         ? !indentation(child)
@@ -1307,6 +1326,8 @@ Document parseNative(const std::string &input) {
                 run.style.underlineStyle = *drawn;
             }
             run.style.strike = boolean(r, "strike");
+            run.style.caps = boolean(r, "caps");
+            run.style.smallCaps = boolean(r, "smallCaps");
             run.style.highlight =
                 static_cast<std::uint32_t>(number(r, "highlight", 0, 0, 4294967295.0));
             run.style.color =
@@ -1322,7 +1343,7 @@ Document parseNative(const std::string &input) {
                                       r.attribute("description").value()},
                                      run.style);
             if (v6 && r.attribute("direct"))
-                run.direct = mask(r, v18 ? AllCharacterFields : v17 ? 0x1ff : 0xff);
+                run.direct = mask(r, v21 ? AllCharacterFields : v18 ? 0x3ff : v17 ? 0x1ff : 0xff);
             if (r.attribute("link")) {
                 run.link = r.attribute("link").value();
                 validateLink(run.link);

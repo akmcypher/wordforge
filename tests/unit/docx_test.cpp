@@ -1991,13 +1991,13 @@ TEST(Docx, WarnsAboutKeptStyleOptionsThatAreNotShown) {
     auto &styles = parts["word/styles.xml"];
     styles.insert(styles.rfind("</w:styles>"),
                   "<w:style w:type='paragraph' w:styleId='ListParagraph'><w:name w:val='List "
-                  "Paragraph'/><w:pPr><w:mirrorIndents/></w:pPr><w:rPr><w:caps/>"
+                  "Paragraph'/><w:pPr><w:mirrorIndents/></w:pPr><w:rPr><w:emboss/>"
                   "</w:rPr></w:style>");
     const auto imported = parseDocx(opc::write(parts));
     EXPECT_EQ(imported.warnings,
               (std::vector<std::string>{
                   "Some paragraph options are kept but not shown: mirrorIndents",
-                  "Some character options are kept but not shown: caps"}));
+                  "Some character options are kept but not shown: emboss"}));
     const auto saved = opc::read(serializeDocx(imported.document));
     EXPECT_NE(saved.at("word/styles.xml").find("<w:mirrorIndents"), std::string::npos);
     // A direct (not style) option is still dropped with the old warning.
@@ -2414,6 +2414,48 @@ TEST(PageMargins, WordUnequalMarginsRoundTrip) {
     EXPECT_EQ(again, page);
 }
 
+TEST(Capitals, WordCapsAndSmallCapsRoundTrip) {
+    const auto imported = parseDocx(opc::write(wordDocument(
+        "<w:p><w:r><w:rPr><w:caps/></w:rPr><w:t>a</w:t></w:r>"
+        "<w:r><w:rPr><w:smallCaps/></w:rPr><w:t>b</w:t></w:r>"
+        "<w:r><w:rPr><w:caps w:val='0'/></w:rPr><w:t>c</w:t></w:r></w:p>")));
+    EXPECT_TRUE(imported.warnings.empty());
+    const auto &runs = imported.document.paragraphs[0].runs;
+    ASSERT_EQ(runs.size(), 3u);
+    EXPECT_TRUE(runs[0].style.caps);
+    EXPECT_FALSE(runs[0].style.smallCaps);
+    EXPECT_TRUE(runs[1].style.smallCaps);
+    EXPECT_FALSE(runs[2].style.caps);
+
+    const auto saved = opc::read(serializeDocx(imported.document));
+    const auto &xml = saved.at("word/document.xml");
+    EXPECT_NE(xml.find("<w:caps w:val=\"1\""), std::string::npos);
+    EXPECT_NE(xml.find("<w:smallCaps w:val=\"1\""), std::string::npos);
+    // Written in schema order: after italic, before strikethrough.
+    EXPECT_LT(xml.find("<w:iCs"), xml.find("<w:caps"));
+    EXPECT_LT(xml.find("<w:caps"), xml.find("<w:strike"));
+    const auto again = parseDocx(opc::write(saved)).document.paragraphs[0].runs;
+    ASSERT_EQ(again.size(), runs.size());
+    for (std::size_t i = 0; i < runs.size(); ++i)
+        EXPECT_EQ(again[i].style, runs[i].style) << i;
+}
+TEST(Capitals, StylesWithCapsAreReadNotKept) {
+    auto parts = wordDocument(
+        "<w:p><w:pPr><w:pStyle w:val='Shout'/></w:pPr><w:r><w:t>loud</w:t></w:r></w:p>");
+    parts["word/styles.xml"] =
+        "<w:styles xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'>"
+        "<w:style w:type='paragraph' w:styleId='Shout'><w:name w:val='Shout'/>"
+        "<w:rPr><w:caps/></w:rPr></w:style></w:styles>";
+    const auto imported = parseDocx(opc::write(parts));
+    EXPECT_TRUE(imported.warnings.empty());
+    EXPECT_TRUE(imported.document.paragraphs[0].runs[0].style.caps);
+    const auto saved = opc::read(serializeDocx(imported.document));
+    const auto &styles = saved.at("word/styles.xml");
+    const auto shout = styles.find("w:styleId=\"Shout\"");
+    ASSERT_NE(shout, std::string::npos);
+    EXPECT_NE(styles.find("<w:caps", shout), std::string::npos);
+    EXPECT_TRUE(parseDocx(opc::write(saved)).document.paragraphs[0].runs[0].style.caps);
+}
 TEST(Underlines, WordUnderlineStylesRoundTrip) {
     auto run = [](const char *value, const char *text) {
         return std::string("<w:r><w:rPr><w:u w:val='") + value + "'/></w:rPr><w:t>" + text +

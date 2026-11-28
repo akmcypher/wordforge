@@ -34,6 +34,10 @@ QString runCss(const CharacterStyle &s) {
                               : s.underlineStyle == UnderlineStyle::Dotted ? "dotted"
                               : s.underlineStyle == UnderlineStyle::Dashed ? "dashed"
                                                                            : "wavy");
+    if (s.caps)
+        css += "text-transform:uppercase;";
+    else if (s.smallCaps)
+        css += "font-variant:small-caps;";
     if (s.highlight)
         css += "background-color:" + cssColor(s.highlight) + ";";
     return css;
@@ -163,6 +167,8 @@ std::vector<Paragraph> fragmentFromHtml(const QString &html, const CharacterStyl
                     : f.underlineStyle() == QTextCharFormat::WaveUnderline ? UnderlineStyle::Wavy
                                                                            : UnderlineStyle::Single;
             style.strike = f.fontStrikeOut();
+            style.caps = f.fontCapitalization() == QFont::AllUppercase;
+            style.smallCaps = f.fontCapitalization() == QFont::SmallCaps;
             style.baseline = f.verticalAlignment() == QTextCharFormat::AlignSuperScript ? TextBaseline::Superscript :
                              f.verticalAlignment() == QTextCharFormat::AlignSubScript ? TextBaseline::Subscript : TextBaseline::Normal;
             if (f.foreground().style() != Qt::NoBrush) {

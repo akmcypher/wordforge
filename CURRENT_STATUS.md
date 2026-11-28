@@ -27,6 +27,13 @@ Both channels read WFG1–20. Previous release: 0.6.14 (38b5d00). Release notes:
   and long variants map to the nearest; dot-dash and words-only underlines are
   approximated with a warning. They used to be single lines with a warning. Copy and paste
   carry dotted, dashed and wavy underlines.
+- **All caps and small caps:** Word's `caps` and `smallCaps` are shown as capitals (small
+  caps as capitals at 80% of the size, synthesised, as no small-caps font feature is
+  used), kept in DOCX and native files, and set in Format → All caps (Ctrl+Shift+A, as in Word) and
+  Small caps (no shortcut: Word's Ctrl+Shift+K is Insert link here) or the Text panel. The text stays as typed, so search and
+  copy see the original letters; a letter whose capital is two letters (ß) stays as
+  typed. They used to be dropped with a warning (or kept unshown in styles). Copy and
+  paste carry them as CSS text-transform/font-variant.
 - Native format WFG21 is written only for documents with unequal margins or underline
   styles.
 

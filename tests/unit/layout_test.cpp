@@ -22,6 +22,42 @@ Editor widowFixture(Shaper &shaper, std::size_t leading, std::size_t words, doub
     return e;
 }
 }
+TEST(CapitalText, AllCapsAndSmallCapsShowCapitalsWithoutChangingTheText) {
+    Shaper shaper(systemFontFiles());
+    auto glyphs = [&](const Paragraph &p) {
+        std::vector<std::uint16_t> ids;
+        for (const auto &run : shaper.shape(p, 0, p.text().size()).runs)
+            for (const auto &glyph : run.glyphs)
+                ids.push_back(glyph.id);
+        return ids;
+    };
+    Paragraph capitals, caps;
+    capitals.runs = {{u"ABC", {}}};
+    caps.runs = {{u"abc", {}}};
+    caps.runs[0].style.caps = true;
+    EXPECT_EQ(glyphs(caps), glyphs(capitals));
+    EXPECT_EQ(caps.text(), u"abc"); // only shown in capitals
+    // A capital that is two letters (sharp s) is left as typed, so indices stay aligned.
+    caps.runs[0] = {u"aßb", caps.runs[0].style};
+    const auto sharp = shaper.shape(caps, 0, 3);
+    EXPECT_EQ(sharp.runs.back().end, 3u);
+
+    // Small caps: lower-case letters become capitals at 80% of the size.
+    Paragraph small;
+    small.runs = {{u"Ab", {}}};
+    small.runs[0].style.smallCaps = true;
+    const auto line = shaper.shape(small, 0, 2);
+    ASSERT_EQ(line.runs.size(), 2u);
+    EXPECT_DOUBLE_EQ(line.runs[0].style.size, 12);
+    EXPECT_DOUBLE_EQ(line.runs[1].style.size, 12 * 0.8);
+    capitals.runs = {{u"AB", {}}};
+    EXPECT_EQ(glyphs(small), glyphs(capitals));
+    // All caps wins over small caps: everything at full size.
+    small.runs[0].style.caps = true;
+    const auto both = shaper.shape(small, 0, 2);
+    ASSERT_EQ(both.runs.size(), 1u);
+    EXPECT_DOUBLE_EQ(both.runs[0].style.size, 12);
+}
 TEST(BaselineText, ShapingMovesAndScalesTextWithoutChangingModelSize) {
     Shaper shaper(systemFontFiles());
     Paragraph p;

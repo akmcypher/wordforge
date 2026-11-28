@@ -129,6 +129,8 @@ std::string pageKey(const Layout &layout, std::size_t page) {
             keyValue(key, run.style.underline);
             keyValue(key, static_cast<int>(run.style.underlineStyle));
             keyValue(key, run.style.strike);
+            keyValue(key, run.style.caps);
+            keyValue(key, run.style.smallCaps);
             keyValue(key, run.style.highlight);
             if (run.image) {
                 keyValue(key, run.image->resourceId);

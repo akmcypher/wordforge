@@ -22,6 +22,9 @@ struct CharacterStyle {
     bool bold = false, italic = false, underline = false;
     UnderlineStyle underlineStyle = UnderlineStyle::Single;
     bool strike = false;
+    // Word's all caps and small caps; all caps wins when both are on. The text is kept as
+    // typed and only shown in capitals.
+    bool caps = false, smallCaps = false;
     // Points added after each character (Word's character spacing); negative condenses.
     double spacing = 0;
     std::uint32_t color = 0xff202631;

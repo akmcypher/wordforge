@@ -438,7 +438,7 @@ void MainWindow::buildUi() {
             [this] { showBookmarksDialog(view_, this); });
 
     auto *format = new QMenu("F&ormat", this);
-    fill(format, {"bold", "italic", "underline", "strike", "superscript", "subscript", "highlight", "fontColor",
+    fill(format, {"bold", "italic", "underline", "strike", "caps", "smallCaps", "superscript", "subscript", "highlight", "fontColor",
                   "clearFormatting", "", "bullets", "numbering", "decreaseIndent",
                   "increaseIndent", "", "alignLeft", "alignCenter", "alignRight",
                   "alignJustify"});

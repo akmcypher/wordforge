@@ -818,6 +818,31 @@ TEST(NativeFormat, UnderlineStylesNeedWfg21Only) {
     EXPECT_THROW(parseNative(off), std::runtime_error);
 }
 
+TEST(NativeFormat, CapitalsNeedWfg21Only) {
+    Editor e;
+    e.replace(u"plain");
+    EXPECT_EQ(serializeNative(e.document).find("version=\"21\""), std::string::npos);
+    e.selection = {{0, 0}, {0, 5}};
+    e.format([](CharacterStyle &s) { s.smallCaps = true; });
+    const auto bytes = serializeNative(e.document);
+    EXPECT_NE(bytes.find("version=\"21\""), std::string::npos);
+    EXPECT_NE(bytes.find("smallCaps=\"true\""), std::string::npos);
+    EXPECT_EQ(parseNative(bytes).paragraphs[0].runs[0].style, e.document.paragraphs[0].runs[0].style);
+    auto older = bytes;
+    older.replace(older.find("version=\"21\""), 12, "version=\"20\"");
+    EXPECT_THROW(parseNative(older), std::runtime_error);
+
+    Document document;
+    NamedCharacterStyle shout;
+    shout.id = shout.name = "Shout";
+    shout.character.caps = true;
+    document.styles.characterStyles.push_back(shout);
+    const auto read = parseNative(serializeNative(document));
+    ASSERT_EQ(read.styles.characterStyles.size(), 1u);
+    EXPECT_EQ(read.styles.characterStyles[0].character, shout.character);
+    EXPECT_TRUE(inheritedCharacter(read.styles, CharacterStyle{}, "Shout").caps);
+}
+
 TEST(NativeFormat, CharacterStylesKeepTheirUnderlineStyle) {
     Document document;
     NamedCharacterStyle emphasis;

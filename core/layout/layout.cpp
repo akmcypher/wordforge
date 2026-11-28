@@ -112,7 +112,7 @@ struct Key {
     Key &add(const CharacterStyle &s) {
         return add(static_cast<std::uint64_t>(s.baseline)).add(s.family).add(s.size).add(s.bold)
             .add(s.italic).add(s.underline)
-            .add(static_cast<std::uint64_t>(s.underlineStyle)).add(s.strike)
+            .add(static_cast<std::uint64_t>(s.underlineStyle)).add(s.strike).add(s.caps).add(s.smallCaps)
             .add(static_cast<std::uint64_t>(s.color)).add(static_cast<std::uint64_t>(s.highlight))
             .add(s.spacing);
     }

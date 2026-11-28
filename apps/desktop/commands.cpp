@@ -570,6 +570,11 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
             });
         })->setCheckable(true);
     auto *strike = create("strike", "Strikethrough", "Format", toggle(&CharacterStyle::strike));
+    // Shown in capitals; the text itself is kept as typed. All caps has Word's shortcut;
+    // Word's small caps one (Ctrl+Shift+K) is the link command's here.
+    create("caps", "All caps", "Format", toggle(&CharacterStyle::caps), "Ctrl+Shift+A")
+        ->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_A));
+    create("smallCaps", "Small caps", "Format", toggle(&CharacterStyle::smallCaps));
     auto baseline = [view](TextBaseline target) {
         return [view, target] {
             const auto value = view->typingStyle().baseline == target ? TextBaseline::Normal : target;
@@ -602,6 +607,8 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
     get("highlight")->setIconText("ab");
     get("superscript")->setIconText(QString::fromUtf8("x²"));
     get("subscript")->setIconText(QString::fromUtf8("x₂"));
+    get("caps")->setIconText("AA");
+    get("smallCaps")->setIconText(QString::fromUtf8("Aᴀ"));
     get("fontColor")->setIconText("A");
     get("clearFormatting")->setIconText("A×");
 
@@ -849,7 +856,7 @@ Commands::Commands(PageView *view, QWidget *window) : QObject(window), view_(vie
         view->setZoom((view->viewport()->width() - 64) / (view->sectionPage().width * 96 / 72));
     });
 
-    for (const auto &id : {"bold", "italic", "underline", "strike", "superscript", "subscript", "highlight", "bullets",
+    for (const auto &id : {"bold", "italic", "underline", "strike", "caps", "smallCaps", "superscript", "subscript", "highlight", "bullets",
                            "numbering", "alignLeft", "alignCenter", "alignRight",
                            "alignJustify", "styleNormal",
                            "styleTitle", "styleHeading1", "styleHeading2", "lineSpacing1",
@@ -884,6 +891,8 @@ void Commands::sync() {
                              std::pair{"underlineWavy", UnderlineStyle::Wavy}})
         get(id)->setChecked(s.underline && s.underlineStyle == value);
     get("strike")->setChecked(s.strike);
+    get("caps")->setChecked(s.caps);
+    get("smallCaps")->setChecked(s.smallCaps);
     get("superscript")->setChecked(s.baseline == TextBaseline::Superscript);
     get("subscript")->setChecked(s.baseline == TextBaseline::Subscript);
     get("highlight")->setChecked(s.highlight != 0);

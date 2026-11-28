@@ -28,6 +28,10 @@ void apply(CharacterStyle &target, const CharacterProperties &properties) {
     }
     if (properties.strike)
         target.strike = *properties.strike;
+    if (properties.caps)
+        target.caps = *properties.caps;
+    if (properties.smallCaps)
+        target.smallCaps = *properties.smallCaps;
     if (properties.color) {
         target.color = *properties.color;
         target.theme = properties.theme.value_or(ThemeColor{});
@@ -205,6 +209,8 @@ void fillUnset(CharacterProperties &target, const CharacterProperties &fallback)
         target.underlineStyle = fallback.underlineStyle;
     }
     fill(target.strike, fallback.strike);
+    fill(target.caps, fallback.caps);
+    fill(target.smallCaps, fallback.smallCaps);
     if (!target.color) {
         target.color = fallback.color;
         target.theme = fallback.theme;
@@ -344,6 +350,8 @@ CharacterMask differingFields(const CharacterStyle &a, const CharacterStyle &b) 
         mask |= UnderlineField;
     if (a.strike != b.strike)
         mask |= StrikeField;
+    if (a.caps != b.caps || a.smallCaps != b.smallCaps)
+        mask |= CapsField;
     if (a.color != b.color || activeTheme(a.theme, a.color) != activeTheme(b.theme, b.color))
         mask |= ColorField;
     if (a.highlight != b.highlight)
@@ -398,6 +406,10 @@ void inheritFields(CharacterStyle &target, const CharacterStyle &source, Charact
     }
     if (!(keep & StrikeField))
         target.strike = source.strike;
+    if (!(keep & CapsField)) {
+        target.caps = source.caps;
+        target.smallCaps = source.smallCaps;
+    }
     if (!(keep & ColorField)) {
         target.color = source.color;
         target.theme = source.theme;
@@ -455,6 +467,10 @@ CharacterProperties propertiesFor(const CharacterStyle &base, const CharacterSty
     }
     if (base.strike != value.strike)
         result.strike = value.strike;
+    if (base.caps != value.caps)
+        result.caps = value.caps;
+    if (base.smallCaps != value.smallCaps)
+        result.smallCaps = value.smallCaps;
     if (base.color != value.color ||
         activeTheme(base.theme, base.color) != activeTheme(value.theme, value.color)) {
         result.color = value.color;

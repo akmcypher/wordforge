@@ -219,7 +219,7 @@ FormatPanel::FormatPanel(PageView *view, Commands &commands, QWidget *parent)
 
     auto *text = section("Text");
     auto *textRow = new QHBoxLayout;
-    for (const auto &id : {"strike", "superscript", "subscript", "clearFormatting"})
+    for (const auto &id : {"strike", "caps", "smallCaps", "superscript", "subscript", "clearFormatting"})
         textRow->addWidget(actionButton(id));
     textRow->addStretch();
     text->addRow(textRow);

@@ -258,7 +258,7 @@ std::string baselineName(TextBaseline value) {
 // as in Word, so they need no warning: Wordforge always kerns and uses standard
 // ligatures, and outline levels only affect Word's navigation.
 const std::set<std::string_view> keptRun{
-    "caps",      "smallCaps",       "dstrike",    "outline",   "shadow",  "emboss",
+    "dstrike",   "outline",         "shadow",     "emboss",
     "imprint",   "snapToGrid",      "vanish",     "webHidden", "w",
     "kern",      "position",        "effect",     "bdr",       "fitText", "rtl",
     "cs",        "em",              "eastAsianLayout", "specVanish", "ligatures",
@@ -367,6 +367,10 @@ void runProperties(pugi::xml_node properties, CharacterStyle &style,
             style.italic = toggle(style.italic, node);
         else if (is(node, "strike"))
             style.strike = toggle(style.strike, node);
+        else if (is(node, "caps"))
+            style.caps = toggle(style.caps, node);
+        else if (is(node, "smallCaps"))
+            style.smallCaps = toggle(style.smallCaps, node);
         else if (is(node, "spacing")) {
             const double points = twips(val(node)) / 20;
             style.spacing = std::clamp(points, -1584.0, 1584.0);
@@ -1014,6 +1018,8 @@ void writeCharacter(pugi::xml_node rpr, const CharacterStyle &value, const Chara
     };
     toggle(&CharacterStyle::bold, "b", "bCs");
     toggle(&CharacterStyle::italic, "i", "iCs");
+    toggle(&CharacterStyle::caps, "caps", nullptr);
+    toggle(&CharacterStyle::smallCaps, "smallCaps", nullptr);
     toggle(&CharacterStyle::strike, "strike", nullptr);
     const auto theme = activeTheme(value.theme, value.color);
     if (differs(&CharacterStyle::color) ||
@@ -3591,6 +3597,10 @@ std::string serializeDocx(const Document &document) {
             property(rpr, "bCs", std::string(run.style.bold ? "1" : "0"));
             property(rpr, "i", std::string(run.style.italic ? "1" : "0"));
             property(rpr, "iCs", std::string(run.style.italic ? "1" : "0"));
+            if (run.style.caps || (run.direct & CapsField))
+                property(rpr, "caps", std::string(run.style.caps ? "1" : "0"));
+            if (run.style.smallCaps || (run.direct & CapsField))
+                property(rpr, "smallCaps", std::string(run.style.smallCaps ? "1" : "0"));
             property(rpr, "strike", std::string(run.style.strike ? "1" : "0"));
             if ((run.style.color >> 24) != 255 ||
                 (run.style.highlight && (run.style.highlight >> 24) != 255))
@@ -3773,6 +3783,10 @@ std::string serializeDocx(const Document &document) {
             property(rpr, "b", std::string(*c.bold ? "1" : "0"));
         if (c.italic)
             property(rpr, "i", std::string(*c.italic ? "1" : "0"));
+        if (c.caps)
+            property(rpr, "caps", std::string(*c.caps ? "1" : "0"));
+        if (c.smallCaps)
+            property(rpr, "smallCaps", std::string(*c.smallCaps ? "1" : "0"));
         if (c.strike)
             property(rpr, "strike", std::string(*c.strike ? "1" : "0"));
         if (c.color) {

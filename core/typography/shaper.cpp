@@ -13,6 +13,7 @@
 #include FT_FREETYPE_H
 #include <hb-ft.h>
 #include <unicode/ubidi.h>
+#include <unicode/uchar.h>
 #include <unicode/uscript.h>
 #include <unicode/utf16.h>
 namespace wf {
@@ -25,6 +26,40 @@ std::string lower(std::string value) {
 using Bidi = std::unique_ptr<UBiDi, decltype(&ubidi_close)>;
 using Buffer = std::unique_ptr<hb_buffer_t, decltype(&hb_buffer_destroy)>;
 using HbFont = std::unique_ptr<hb_font_t, decltype(&hb_font_destroy)>;
+// The paragraph text as shown: runs in all caps or small caps have each letter in its
+// capital form. Only same-length mappings are applied, so every index still names the
+// same character (a letter such as German sharp s, whose capital is two letters, stays).
+std::u16string capitalised(const Paragraph &paragraph, std::u16string text) {
+    std::size_t runStart = 0;
+    for (const auto &run : paragraph.runs) {
+        const auto size = run.text().size();
+        if (!run.atom() && (run.style.caps || run.style.smallCaps))
+            for (auto i = static_cast<int32_t>(runStart);
+                 i < static_cast<int32_t>(runStart + size);) {
+                const auto at = i;
+                UChar32 cp;
+                U16_NEXT(text.data(), i, static_cast<int32_t>(runStart + size), cp);
+                const auto upper = u_toupper(cp);
+                if (upper != cp && U16_LENGTH(upper) == i - at) {
+                    int32_t out = at;
+                    UBool error = false;
+                    U16_APPEND(text.data(), out, i, upper, error);
+                }
+            }
+        runStart += size;
+    }
+    return text;
+}
+// Whether the character at `pos` is drawn as a reduced capital (small caps on, all caps
+// off, and the character has a capital form of its own).
+bool reducedCapital(const CharacterStyle &style, const std::u16string &text, std::size_t pos) {
+    if (!style.smallCaps || style.caps)
+        return false;
+    int32_t at = static_cast<int32_t>(pos);
+    UChar32 cp;
+    U16_NEXT(text.data(), at, static_cast<int32_t>(text.size()), cp);
+    return u_toupper(cp) != cp;
+}
 } // namespace
 // Fallback order when a requested family is not installed (e.g. Calibri in a DOCX).
 constexpr const char *preferredFallbacks[] = {"arial", "liberation sans", "dejavu sans",
@@ -156,6 +191,7 @@ std::string romanNumeral(std::size_t number) {
 ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::size_t end,
                          std::size_t firstNote, std::size_t firstEndnote, double lineOrigin) {
     const auto text = paragraph.text();
+    const auto shownText = capitalised(paragraph, text);
     if (start > end || end > text.size())
         throw std::out_of_range("Shaping range outside paragraph");
     ShapedLine result;
@@ -183,6 +219,7 @@ ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::siz
         const InlineImage *image;
         const NoteReference *note = nullptr;
         std::size_t number = 0;
+        bool reduced = false; // a small capital, drawn smaller
     };
     for (int32_t visual = 0; visual < count; ++visual) {
         int32_t logical = 0, length = 0;
@@ -210,7 +247,8 @@ ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::siz
             for (auto pos = begin; pos < finish;) {
                 const auto next =
                     std::min(*std::upper_bound(boundaries.begin(), boundaries.end(), pos), finish);
-                auto &face = impl_->select(text, pos, next, shown);
+                auto &face = impl_->select(shownText, pos, next, shown);
+                const bool reduced = reducedCapital(shown, text, pos);
                 int32_t cursor = static_cast<int32_t>(pos);
                 UChar32 cp;
                 U16_NEXT(text.data(), cursor, static_cast<int32_t>(next), cp);
@@ -222,10 +260,11 @@ ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::siz
                 const bool tab = text[pos] == u'\t';
                 if (!tab && !spans.empty() && !spans.back().tab && spans.back().end == pos &&
                     spans.back().face == &face && spans.back().style == shown &&
-                    spans.back().script == script)
+                    spans.back().script == script && spans.back().reduced == reduced)
                     spans.back().end = next;
                 else
-                    spans.push_back({pos, next, shown, &face, script, tab, nullptr});
+                    spans.push_back({pos, next, shown, &face, script, tab, nullptr, nullptr, 0,
+                                     reduced});
                 pos = next;
             }
             runStart += run.text().size();
@@ -283,6 +322,10 @@ ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::siz
             if (span.style.baseline != TextBaseline::Normal)
                 span.style.size = std::max(1.0, span.style.size * 0.65);
             span.style.baseline = TextBaseline::Normal; // already resolved into size/offset
+            // Small capitals are synthesised at 80% of the size, like Word without an
+            // OpenType small-caps face.
+            if (span.reduced)
+                span.style.size = std::max(1.0, span.style.size * 0.8);
             auto *face = span.face->face;
             double metricScale = 1;
             if (!FT_IS_SCALABLE(face) && face->num_fixed_sizes > 0) {
@@ -300,8 +343,8 @@ ShapedLine Shaper::shape(const Paragraph &paragraph, std::size_t start, std::siz
             HbFont font(hb_ft_font_create_referenced(span.face->face), hb_font_destroy);
             Buffer buffer(hb_buffer_create(), hb_buffer_destroy);
             hb_buffer_set_cluster_level(buffer.get(), HB_BUFFER_CLUSTER_LEVEL_MONOTONE_GRAPHEMES);
-            hb_buffer_add_utf16(buffer.get(), reinterpret_cast<const uint16_t *>(text.data()),
-                                static_cast<int>(text.size()), static_cast<unsigned>(span.begin),
+            hb_buffer_add_utf16(buffer.get(), reinterpret_cast<const uint16_t *>(shownText.data()),
+                                static_cast<int>(shownText.size()), static_cast<unsigned>(span.begin),
                                 static_cast<int>(span.end - span.begin));
             hb_buffer_set_direction(buffer.get(), rtl ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
             hb_buffer_set_script(buffer.get(),

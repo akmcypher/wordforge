@@ -38,7 +38,7 @@ struct CharacterProperties {
     std::optional<TextBaseline> baseline;
     std::optional<std::string> family;
     std::optional<double> size;
-    std::optional<bool> bold, italic, underline, strike;
+    std::optional<bool> bold, italic, underline, strike, caps, smallCaps;
     std::optional<UnderlineStyle> underlineStyle; // only with `underline` on, never Single
     std::optional<std::uint32_t> color, highlight;
     std::optional<double> spacing;
@@ -120,7 +120,8 @@ enum CharacterField : std::uint16_t {
     HighlightField = 1 << 7,
     BaselineField = 1 << 8,
     SpacingField = 1 << 9,
-    AllCharacterFields = 0x3ff,
+    CapsField = 1 << 10, // all caps and small caps together
+    AllCharacterFields = 0x7ff,
 };
 enum ParagraphField : std::uint16_t {
     AlignmentField = 1 << 0,

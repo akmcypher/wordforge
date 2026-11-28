@@ -1299,6 +1299,28 @@ class DesktopTest : public QObject {
         QCOMPARE(plain.underlineStyle, wf::UnderlineStyle::Single);
         QVERIFY(!wavy->isChecked());
     }
+    void capsCommandsToggleCapitals() {
+        wf::MainWindow window;
+        auto *view = window.pageView();
+        view->setDocument({});
+        view->insertText("word");
+        view->selectAll();
+        auto *caps = window.findChild<QAction *>("capsAction");
+        auto *small = window.findChild<QAction *>("smallCapsAction");
+        QVERIFY(caps && small);
+        QCOMPARE(caps->shortcut(), QKeySequence("Ctrl+Shift+A"));
+        QVERIFY(small->shortcut().isEmpty()); // Ctrl+Shift+K is the link command
+        caps->trigger();
+        QVERIFY(view->document().paragraphs[0].runs[0].style.caps);
+        QVERIFY(caps->isChecked());
+        QCOMPARE(view->document().paragraphs[0].text(), std::u16string(u"word"));
+        small->trigger();
+        QVERIFY(view->document().paragraphs[0].runs[0].style.smallCaps);
+        caps->trigger();
+        QVERIFY(!view->document().paragraphs[0].runs[0].style.caps);
+        QVERIFY(!caps->isChecked());
+        QVERIFY(small->isChecked());
+    }
     void marginsDialogSetsEachSide() {
         wf::MainWindow window;
         window.show();
